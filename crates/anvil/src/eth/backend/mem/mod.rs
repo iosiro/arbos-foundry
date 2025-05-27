@@ -48,10 +48,9 @@ use alloy_eips::{
     },
     eip7840::BlobParams,
 };
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, Evm};
+use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, EthEvm, Evm};
 use alloy_network::{
-    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, AnyTxType,
-    EthereumWallet, UnknownTxEnvelope, UnknownTypedTransaction,
+    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
 use alloy_primitives::{
     address, hex, keccak256, logs_bloom, map::HashMap, utils::Unit, Address, Bytes, TxHash, TxKind,
@@ -75,16 +74,15 @@ use alloy_rpc_types::{
     EIP1186AccountProofResponse as AccountProof, EIP1186StorageProof as StorageProof, Filter,
     Header as AlloyHeader, Index, Log, Transaction, TransactionReceipt,
 };
-use alloy_serde::{OtherFields, WithOtherFields};
+use alloy_serde::WithOtherFields;
 use alloy_signer::Signature;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_trie::{proof::ProofRetainer, HashBuilder, Nibbles};
 use anvil_core::eth::{
     block::{Block, BlockInfo},
     transaction::{
-        has_optimism_fields, transaction_request_to_typed, DepositReceipt,
-        MaybeImpersonatedTransaction, PendingTransaction, ReceiptResponse, TransactionInfo,
-        TypedReceipt, TypedTransaction,
+        transaction_request_to_typed, MaybeImpersonatedTransaction, PendingTransaction,
+        ReceiptResponse, TransactionInfo, TypedReceipt, TypedTransaction,
     },
     wallet::{Capabilities, DelegationCapability, WalletCapabilities},
 };
@@ -99,12 +97,7 @@ use foundry_evm::{
     inspectors::AccessListInspector,
     traces::TracingInspectorConfig,
 };
-use foundry_evm_core::either_evm::EitherEvm;
 use futures::channel::mpsc::{unbounded, UnboundedSender};
-use op_alloy_consensus::DEPOSIT_TX_TYPE_ID;
-use op_revm::{
-    transaction::deposit::DepositTransactionParts, OpContext, OpHaltReason, OpTransaction,
-};
 use parking_lot::{Mutex, RwLock};
 use revm::{
     context::{Block as RevmBlock, BlockEnv, TxEnv},
@@ -773,11 +766,6 @@ impl Backend {
         (self.spec_id() as u8) >= (SpecId::PRAGUE as u8)
     }
 
-    /// Returns true if op-stack deposits are active
-    pub fn is_optimism(&self) -> bool {
-        self.env.read().is_optimism
-    }
-
     /// Returns [`BlobParams`] corresponding to the current spec.
     pub fn blob_params(&self) -> BlobParams {
         let spec_id = self.env.read().evm_env.cfg_env.spec;
@@ -821,14 +809,6 @@ impl Backend {
             return Ok(());
         }
         Err(BlockchainError::EIP7702TransactionUnsupportedAtHardfork)
-    }
-
-    /// Returns an error if op-stack deposits are not active
-    pub fn ensure_op_deposits_active(&self) -> Result<(), BlockchainError> {
-        if self.is_optimism() {
-            return Ok(())
-        }
-        Err(BlockchainError::DepositTransactionUnsupported)
     }
 
     /// Returns the block gas limit
@@ -1101,14 +1081,13 @@ impl Backend {
         db: &'db dyn DatabaseRef<Error = DatabaseError>,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<
+    ) -> EthEvm<
         WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>,
         &'db mut I,
         PrecompilesMap,
     >
     where
-        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>>>
-            + Inspector<OpContext<WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>>>,
+        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>>>,
         WrapDatabaseRef<&'db dyn DatabaseRef<Error = DatabaseError>>:
             Database<Error = DatabaseError>,
     {
@@ -1136,11 +1115,6 @@ impl Backend {
         let mut env = self.next_env();
         env.tx = tx.pending_transaction.to_revm_tx_env();
 
-        if env.is_optimism {
-            env.tx.enveloped_tx =
-                Some(alloy_rlp::encode(&tx.pending_transaction.transaction.transaction).into());
-        }
-
         let db = self.db.read().await;
         let mut inspector = self.build_inspector();
         let mut evm = self.new_evm_with_inspector_ref(db.as_dyn(), &env, &mut inspector);
@@ -1152,10 +1126,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                let eth_reason = op_haltreason_to_instruction_result(reason);
-                (eth_reason, gas_used, None, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None, None),
         };
 
         drop(evm);
@@ -1207,7 +1178,6 @@ impl Backend {
             print_traces: self.print_traces,
             precompile_factory: self.precompile_factory.clone(),
             odyssey: self.odyssey,
-            optimism: self.is_optimism(),
             blob_params: self.blob_params(),
         };
 
@@ -1292,7 +1262,6 @@ impl Backend {
                     print_traces: self.print_traces,
                     odyssey: self.odyssey,
                     precompile_factory: self.precompile_factory.clone(),
-                    optimism: self.is_optimism(),
                     blob_params: self.blob_params(),
                 };
                 let executed_tx = executor.execute();
@@ -1467,7 +1436,7 @@ impl Backend {
                     max_priority_fee_per_gas,
                     .. // Rest of the gas fees related fields are taken from `fee_details`
                 },
-            other,
+            other: _,
         } = request;
 
         let tx_type = transaction_type.unwrap_or_else(|| {
@@ -1538,10 +1507,10 @@ impl Backend {
             ..Default::default()
         };
         base.set_signed_authorization(authorization_list.unwrap_or_default());
-        env.tx = OpTransaction { base, ..Default::default() };
+        env.tx = base;
 
         if let Some(nonce) = nonce {
-            env.tx.base.nonce = nonce;
+            env.tx.nonce = nonce;
         } else {
             // Disable nonce check in revm
             env.evm_env.cfg_env.disable_nonce_check = true;
@@ -1551,25 +1520,6 @@ impl Backend {
             // this is an edge case because the evm fails if `tx.effective_gas_price < base_fee`
             // 0 is only possible if it's manually set
             env.evm_env.cfg_env.disable_base_fee = true;
-        }
-
-        // Deposit transaction?
-        if transaction_type == Some(DEPOSIT_TX_TYPE_ID) && has_optimism_fields(&other) {
-            let deposit = DepositTransactionParts {
-                source_hash: other
-                    .get_deserialized::<B256>("sourceHash")
-                    .map(|sh| sh.unwrap_or_default())
-                    .unwrap_or_default(),
-                mint: other
-                    .get_deserialized::<u128>("mint")
-                    .map(|m| m.unwrap_or_default())
-                    .or(None),
-                is_system_transaction: other
-                    .get_deserialized::<bool>("isSystemTx")
-                    .map(|st| st.unwrap_or_default())
-                    .unwrap_or_default(),
-            };
-            env.tx.deposit = deposit;
         }
 
         env
@@ -1817,9 +1767,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (op_haltreason_to_instruction_result(reason), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         inspector.print_logs();
@@ -1912,9 +1860,7 @@ impl Backend {
                 ExecutionResult::Revert { gas_used, output } => {
                     (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
                 }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    (op_haltreason_to_instruction_result(reason), gas_used, None)
-                }
+                ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
             };
 
             drop(evm);
@@ -1953,9 +1899,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (op_haltreason_to_instruction_result(reason), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         let access_list = inspector.access_list();
@@ -2710,7 +2654,6 @@ impl Backend {
                 .base_fee_per_gas
                 .map_or(self.base_fee() as u128, |g| g as u128)
                 .saturating_add(t.tx().max_priority_fee_per_gas),
-            TypedTransaction::Deposit(_) => 0_u128,
         };
 
         let receipts = self.get_receipts(block.transactions.iter().map(|tx| tx.hash()));
@@ -2745,11 +2688,6 @@ impl Backend {
             TypedReceipt::EIP2930(_) => TypedReceipt::EIP2930(receipt_with_bloom),
             TypedReceipt::EIP4844(_) => TypedReceipt::EIP4844(receipt_with_bloom),
             TypedReceipt::EIP7702(_) => TypedReceipt::EIP7702(receipt_with_bloom),
-            TypedReceipt::Deposit(r) => TypedReceipt::Deposit(DepositReceipt {
-                inner: receipt_with_bloom,
-                deposit_nonce: r.deposit_nonce,
-                deposit_receipt_version: r.deposit_receipt_version,
-            }),
         };
 
         let inner = TransactionReceipt {
@@ -3111,16 +3049,14 @@ impl TransactionValidator for Backend {
         }
 
         // check nonce
-        let is_deposit_tx =
-            matches!(&pending.transaction.transaction, TypedTransaction::Deposit(_));
         let nonce = tx.nonce();
-        if nonce < account.nonce && !is_deposit_tx {
+        if nonce < account.nonce {
             warn!(target: "backend", "[{:?}] nonce too low", tx.hash());
             return Err(InvalidTransactionError::NonceTooLow);
         }
 
         if env.evm_env.cfg_env.spec >= SpecId::LONDON {
-            if tx.gas_price() < env.evm_env.block_env.basefee.into() && !is_deposit_tx {
+            if tx.gas_price() < env.evm_env.block_env.basefee.into() {
                 warn!(target: "backend", "max fee per gas={}, too low, block basefee={}",tx.gas_price(),  env.evm_env.block_env.basefee);
                 return Err(InvalidTransactionError::FeeCapTooLow);
             }
@@ -3177,29 +3113,14 @@ impl TransactionValidator for Backend {
         let max_cost = tx.max_cost();
         let value = tx.value();
 
-        match &tx.transaction {
-            TypedTransaction::Deposit(deposit_tx) => {
-                // Deposit transactions
-                // https://specs.optimism.io/protocol/deposits.html#execution
-                // 1. no gas cost check required since already have prepaid gas from L1
-                // 2. increment account balance by deposited amount before checking for sufficient
-                //    funds `tx.value <= existing account value + deposited value`
-                if value > account.balance + U256::from(deposit_tx.mint) {
-                    warn!(target: "backend", "[{:?}] insufficient balance={}, required={} account={:?}", tx.hash(), account.balance + U256::from(deposit_tx.mint), value, *pending.sender());
-                    return Err(InvalidTransactionError::InsufficientFunds);
-                }
-            }
-            _ => {
-                // check sufficient funds: `gas * price + value`
-                let req_funds = max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
-                    warn!(target: "backend", "[{:?}] cost too high", tx.hash());
-                    InvalidTransactionError::InsufficientFunds
-                })?;
-                if account.balance < U256::from(req_funds) {
-                    warn!(target: "backend", "[{:?}] insufficient allowance={}, required={} account={:?}", tx.hash(), account.balance, req_funds, *pending.sender());
-                    return Err(InvalidTransactionError::InsufficientFunds);
-                }
-            }
+        // check sufficient funds: `gas * price + value`
+        let req_funds = max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
+            warn!(target: "backend", "[{:?}] cost too high", tx.hash());
+            InvalidTransactionError::InsufficientFunds
+        })?;
+        if account.balance < U256::from(req_funds) {
+            warn!(target: "backend", "[{:?}] insufficient allowance={}, required={} account={:?}", tx.hash(), account.balance, req_funds, *pending.sender());
+            return Err(InvalidTransactionError::InsufficientFunds);
         }
 
         Ok(())
@@ -3227,50 +3148,6 @@ pub fn transaction_build(
     info: Option<TransactionInfo>,
     base_fee: Option<u64>,
 ) -> AnyRpcTransaction {
-    if let TypedTransaction::Deposit(ref deposit_tx) = eth_transaction.transaction {
-        let dep_tx = deposit_tx;
-
-        let ser = serde_json::to_value(dep_tx).expect("could not serialize TxDeposit");
-        let maybe_deposit_fields = OtherFields::try_from(ser);
-
-        match maybe_deposit_fields {
-            Ok(mut fields) => {
-                // Add zeroed signature fields for backwards compatibility
-                // https://specs.optimism.io/protocol/deposits.html#the-deposited-transaction-type
-                fields.insert("v".to_string(), serde_json::to_value("0x0").unwrap());
-                fields.insert("r".to_string(), serde_json::to_value(B256::ZERO).unwrap());
-                fields.insert(String::from("s"), serde_json::to_value(B256::ZERO).unwrap());
-                fields.insert(String::from("nonce"), serde_json::to_value("0x0").unwrap());
-
-                let inner = UnknownTypedTransaction {
-                    ty: AnyTxType(DEPOSIT_TX_TYPE_ID),
-                    fields,
-                    memo: Default::default(),
-                };
-
-                let envelope = AnyTxEnvelope::Unknown(UnknownTxEnvelope {
-                    hash: eth_transaction.hash(),
-                    inner,
-                });
-
-                let tx = Transaction {
-                    inner: Recovered::new_unchecked(envelope, deposit_tx.from),
-                    block_hash: block
-                        .as_ref()
-                        .map(|block| B256::from(keccak256(alloy_rlp::encode(&block.header)))),
-                    block_number: block.as_ref().map(|block| block.header.number),
-                    transaction_index: info.as_ref().map(|info| info.transaction_index),
-                    effective_gas_price: None,
-                };
-
-                return AnyRpcTransaction::from(WithOtherFields::new(tx));
-            }
-            Err(_) => {
-                error!(target: "backend", "failed to serialize deposit transaction");
-            }
-        }
-    }
-
     let mut transaction: Transaction = eth_transaction.clone().into();
 
     let effective_gas_price = if !eth_transaction.is_dynamic_fee() {
@@ -3377,11 +3254,4 @@ pub fn is_arbitrum(chain_id: u64) -> bool {
         return chain.is_arbitrum()
     }
     false
-}
-
-pub fn op_haltreason_to_instruction_result(op_reason: OpHaltReason) -> InstructionResult {
-    match op_reason {
-        OpHaltReason::Base(eth_h) => eth_h.into(),
-        OpHaltReason::FailedDeposit => InstructionResult::Stop,
-    }
 }

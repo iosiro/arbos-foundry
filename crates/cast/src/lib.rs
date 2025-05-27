@@ -14,7 +14,7 @@ use alloy_primitives::{
     Address, Keccak256, Selector, TxHash, TxKind, B256, I256, U256, U64,
 };
 use alloy_provider::{
-    network::eip2718::{Decodable2718, Encodable2718},
+    network::eip2718::Decodable2718,
     PendingTransactionBuilder, Provider,
 };
 use alloy_rlp::Decodable;
@@ -37,7 +37,6 @@ use foundry_compilers::flatten::Flattener;
 use foundry_config::Chain;
 use foundry_evm_core::ic::decode_instructions;
 use futures::{future::Either, FutureExt, StreamExt};
-use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use std::{
     borrow::Cow,
@@ -763,7 +762,7 @@ impl<P: Provider<AnyNetwork>> Cast<P> {
         from: Option<NameOrAddress>,
         nonce: Option<u64>,
         field: Option<String>,
-        raw: bool,
+        _raw: bool,
     ) -> Result<String> {
         let tx = if let Some(tx_hash) = tx_hash {
             let tx_hash = TxHash::from_str(&tx_hash).wrap_err("invalid tx hash")?;
@@ -789,12 +788,7 @@ impl<P: Provider<AnyNetwork>> Cast<P> {
             eyre::bail!("tx hash or from address is required")
         };
 
-        Ok(if raw {
-            // also consider opstack deposit transactions
-            let either_tx = tx.try_into_either::<OpTxEnvelope>()?;
-            let encoded = either_tx.encoded_2718();
-            format!("0x{}", hex::encode(encoded))
-        } else if let Some(field) = field {
+        Ok(if let Some(field) = field {
             get_pretty_tx_attr(&tx.inner, field.as_str())
                 .ok_or_else(|| eyre::eyre!("invalid tx field: {}", field.to_string()))?
         } else if shell::is_json() {

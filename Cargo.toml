@@ -236,7 +236,7 @@ alloy-transport-http = { version = "1.0.9", default-features = false }
 alloy-transport-ipc = { version = "1.0.9", default-features = false }
 alloy-transport-ws = { version = "1.0.9", default-features = false }
 alloy-hardforks = { version = "0.2.6", default-features = false }
-alloy-op-hardforks = { version = "0.2.6", default-features = false }
+# alloy-op-hardforks = { version = "0.2.6", default-features = false }
 
 ## alloy-core
 alloy-dyn-abi = "1.1"
@@ -256,18 +256,17 @@ alloy-rlp = "0.3"
 alloy-trie = "0.8.1"
 
 ## op-alloy
-op-alloy-consensus = "0.17.2"
-op-alloy-rpc-types = "0.17.2"
-op-alloy-flz = "0.13.1"
+# op-alloy-consensus = "0.17.1"
+# op-alloy-rpc-types = "0.17.1"
+# op-alloy-flz = "0.13.0"
 
 ## revm
 revm = { version = "24.0.1", default-features = false }
 revm-inspectors = { version = "0.23.0", features = ["serde"] }
-op-revm = { version = "5.0.1", default-features = false }
+# op-revm = { version = "5.0.0", default-features = false }
 
 ## alloy-evm
 alloy-evm = "0.10.0"
-alloy-op-evm = "0.10.0"
 
 ## cli
 anstream = "0.6"
@@ -397,12 +396,10 @@ zip-extract = "=0.2.1"
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "7fab7ee" }
 
 ## alloy-evm
-# alloy-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "dce752f" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "dce752f" }
+# alloy-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "8076e12" }
 
 ## revm
 # revm = { git = "https://github.com/bluealloy/revm.git", rev = "b5808253" }
-# op-revm = { git = "https://github.com/bluealloy/revm.git", rev = "b5808253" }
 # revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors.git", rev = "a625c04" }
 
 ## foundry
