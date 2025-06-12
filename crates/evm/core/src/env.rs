@@ -1,9 +1,18 @@
-pub use alloy_evm::EvmEnv;
 use revm::{
     context::{BlockEnv, CfgEnv, JournalInner, JournalTr, TxEnv},
     primitives::hardfork::SpecId,
     Context, Database, Journal, JournalEntry,
 };
+
+/// Container type that holds both the configuration and block environment for EVM execution.
+#[derive(Debug, Clone, Default)]
+pub struct EvmEnv<Spec = SpecId> {
+    /// The configuration environment with handler settings
+    pub cfg_env: CfgEnv<Spec>,
+    /// The block environment containing block-specific data
+    pub block_env: BlockEnv,
+}
+
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]

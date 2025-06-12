@@ -9,7 +9,6 @@ use crate::{
     AsEnvMut, Env, EnvMut, InspectorExt,
 };
 use alloy_consensus::Typed2718;
-use alloy_evm::Evm;
 use alloy_genesis::GenesisAccount;
 use alloy_network::{AnyRpcBlock, AnyTxEnvelope, TransactionResponse};
 use alloy_primitives::{keccak256, uint, Address, TxKind, B256, U256};

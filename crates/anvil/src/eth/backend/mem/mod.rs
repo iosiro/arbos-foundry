@@ -2,8 +2,7 @@
 
 use self::state::trie_storage;
 use crate::{
-    config::PruneStateHistoryConfig,
-    eth::{
+    config::PruneStateHistoryConfig, eth::{
         backend::{
             cheats::CheatsManager,
             db::{Db, MaybeFullDatabase, SerializableState},
@@ -25,13 +24,10 @@ use crate::{
         pool::transactions::PoolTransaction,
         sign::build_typed_transaction,
         util::get_precompiles_for,
-    },
-    inject_precompiles,
-    mem::{
+    }, inject_precompiles, mem::{
         inspector::AnvilInspector,
         storage::{BlockchainStorage, InMemoryBlockStates, MinedBlockOutcome},
-    },
-    ForkChoice, NodeConfig, PrecompileFactory,
+    }, ForkChoice, NodeConfig, PrecompileFactory
 };
 use alloy_chains::NamedChain;
 use alloy_consensus::{
@@ -48,7 +44,6 @@ use alloy_eips::{
     },
     eip7840::BlobParams,
 };
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, Database, EthEvm, Evm};
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
@@ -97,20 +92,14 @@ use foundry_evm::{
     inspectors::AccessListInspector,
     traces::TracingInspectorConfig,
 };
+use foundry_evm_core::{evm::{EthEvm, EthEvmContext}, precompiles::PrecompilesMap};
 use futures::channel::mpsc::{unbounded, UnboundedSender};
 use parking_lot::{Mutex, RwLock};
 use revm::{
-    context::{Block as RevmBlock, BlockEnv, TxEnv},
-    context_interface::{
+    context::{Block as RevmBlock, BlockEnv, TxEnv}, context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
-    },
-    database::{CacheDB, DatabaseRef, WrapDatabaseRef},
-    interpreter::InstructionResult,
-    precompile::secp256r1::P256VERIFY,
-    primitives::{hardfork::SpecId, KECCAK_EMPTY},
-    state::AccountInfo,
-    DatabaseCommit, Inspector,
+    }, database::{CacheDB, DatabaseRef, WrapDatabaseRef}, interpreter::InstructionResult, precompile::secp256r1::P256VERIFY, primitives::{hardfork::SpecId, KECCAK_EMPTY}, state::AccountInfo, Database, DatabaseCommit, ExecuteEvm, Inspector
 };
 use revm_inspectors::transfer::TransferInspector;
 use std::{
@@ -1607,7 +1596,7 @@ impl Backend {
                             &mut inspector,
                         );
 
-                        trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.spec_id(),"simulate evm env");
+                        trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.cfg_env.spec,"simulate evm env");
                         evm.transact(env.tx)?
                     } else {
                         let mut inspector = self.build_inspector();
@@ -1616,7 +1605,7 @@ impl Backend {
                             &env,
                             &mut inspector,
                         );
-                        trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.spec_id(),"simulate evm env");
+                        trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.cfg_env.spec,"simulate evm env");
                         evm.transact(env.tx)?
                     };
                     trace!(target: "backend", ?result, ?request, "simulate call");

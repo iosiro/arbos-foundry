@@ -1,11 +1,7 @@
 use std::fmt::Debug;
 
-use alloy_evm::{
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, PrecompilesMap},
-    Database, EthEvm, Evm,
-};
-use revm::{precompile::PrecompileWithAddress, Inspector};
+use foundry_evm_core::{evm::{EthEvm, EthEvmContext}, precompiles::{DynPrecompile, PrecompilesMap}};
+use revm::{precompile::PrecompileWithAddress, Database, Inspector};
 
 /// Object-safe trait that enables injecting extra precompiles when using
 /// `anvil` as a library.
@@ -23,32 +19,26 @@ pub fn inject_precompiles<DB, I>(
     I: Inspector<EthEvmContext<DB>>,
 {
     for p in precompiles {
-        evm.precompiles_mut()
+        evm.precompiles
             .apply_precompile(p.address(), |_| Some(DynPrecompile::from(*p.precompile())));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EthEvm, Evm, EvmEnv};
     use alloy_primitives::{address, Address, Bytes, TxKind};
+    use foundry_evm::EvmEnv;
+    use foundry_evm_core::precompiles::PrecompilesMap;
     use itertools::Itertools;
     use revm::{
-        context::{CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv},
-        database::{EmptyDB, EmptyDBTyped},
-        handler::{instructions::EthInstructions, EthPrecompiles},
-        inspector::NoOpInspector,
-        interpreter::interpreter::EthInterpreter,
-        precompile::{
+        context::{CfgEnv, JournalTr, LocalContext, TxEnv}, database::{EmptyDB, EmptyDBTyped}, handler::{instructions::EthInstructions, EthPrecompiles}, inspector::NoOpInspector, interpreter::interpreter::EthInterpreter, precompile::{
             PrecompileOutput, PrecompileResult, PrecompileSpecId, PrecompileWithAddress,
             Precompiles,
-        },
-        primitives::hardfork::SpecId,
-        Journal,
+        }, primitives::hardfork::SpecId, ExecuteEvm, Journal
     };
     use std::convert::Infallible;
 
-    use crate::{inject_precompiles, PrecompileFactory};
+    use crate::{evm::{EthEvm, EthEvmContext}, inject_precompiles, PrecompileFactory};
 
     // A precompile activated in the `Prague` spec.
     const ETH_PRAGUE_PRECOMPILE: Address = address!("0x0000000000000000000000000000000000000011");
@@ -103,15 +93,12 @@ mod tests {
             spec,
         }
         .precompiles;
-        let eth_evm = EthEvm::new(
-            RevmEvm::new_with_inspector(
+        let eth_evm = EthEvm::new_with_inspector(
                 eth_evm_context,
                 NoOpInspector,
                 EthInstructions::<EthInterpreter, EthEvmContext<EmptyDB>>::default(),
                 PrecompilesMap::from_static(eth_precompiles),
-            ),
-            true,
-        );
+            );
 
         (eth_env, eth_evm)
     }
@@ -121,13 +108,13 @@ mod tests {
         let (env, mut evm) = create_eth_evm(SpecId::default());
 
         // Check that the Prague precompile IS present when using the default spec.
-        assert!(evm.precompiles().addresses().contains(&ETH_PRAGUE_PRECOMPILE));
+        assert!(evm.precompiles.addresses().contains(&ETH_PRAGUE_PRECOMPILE));
 
-        assert!(!evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(!evm.precompiles.addresses().contains(&PRECOMPILE_ADDR));
 
         inject_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
 
-        assert!(evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(evm.precompiles.addresses().contains(&PRECOMPILE_ADDR));
 
         let result = evm.transact(env.tx).unwrap();
 
@@ -140,13 +127,13 @@ mod tests {
         let (env, mut evm) = create_eth_evm(SpecId::LONDON);
 
         // Check that the Prague precompile IS NOT present when using the London spec.
-        assert!(!evm.precompiles().addresses().contains(&ETH_PRAGUE_PRECOMPILE));
+        assert!(!evm.precompiles.addresses().contains(&ETH_PRAGUE_PRECOMPILE));
 
-        assert!(!evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(!evm.precompiles.addresses().contains(&PRECOMPILE_ADDR));
 
         inject_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
 
-        assert!(evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(evm.precompiles.addresses().contains(&PRECOMPILE_ADDR));
 
         let result = evm.transact(env.tx).unwrap();
 

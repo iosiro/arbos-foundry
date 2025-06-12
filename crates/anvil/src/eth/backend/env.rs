@@ -1,8 +1,15 @@
-use alloy_evm::EvmEnv;
 use foundry_evm::EnvMut;
 use foundry_evm_core::AsEnvMut;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::{context::{BlockEnv, CfgEnv, TxEnv}, primitives::hardfork::SpecId};
 
+/// Container type that holds both the configuration and block environment for EVM execution.
+#[derive(Debug, Clone, Default)]
+pub struct EvmEnv<Spec = SpecId> {
+    /// The configuration environment with handler settings
+    pub cfg_env: CfgEnv<Spec>,
+    /// The block environment containing block-specific data
+    pub block_env: BlockEnv,
+}
 /// Helper container type for [`EvmEnv`] and [`OpTransaction<TxEnd>`].
 #[derive(Clone, Debug, Default)]
 pub struct Env {

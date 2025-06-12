@@ -29,8 +29,6 @@ foundry-config.workspace = true
 foundry-evm.workspace = true
 foundry-evm-core.workspace = true
 
-# alloy
-alloy-evm.workspace = true
 # alloy-op-evm.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }

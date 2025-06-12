@@ -1,7 +1,6 @@
 //! Anvil specific [`revm::Inspector`] implementation
 
-use crate::eth::macros::node_info;
-use alloy_evm::eth::EthEvmContext;
+use crate::{eth::macros::node_info};
 use alloy_primitives::{Address, Log, U256};
 use foundry_evm::{
     backend::DatabaseError,
@@ -12,6 +11,7 @@ use foundry_evm::{
         render_trace_arena_inner, CallTraceDecoder, SparsedTraceArena, TracingInspectorConfig,
     },
 };
+use foundry_evm_core::evm::EthEvmContext;
 use revm::{
     context::ContextTr,
     inspector::JournalExt,

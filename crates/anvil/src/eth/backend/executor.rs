@@ -3,31 +3,21 @@ use crate::{
         backend::{db::Db, env::Env, validate::TransactionValidator},
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
-    },
-    inject_precompiles,
-    mem::inspector::AnvilInspector,
-    PrecompileFactory,
+    }, inject_precompiles, mem::inspector::AnvilInspector, PrecompileFactory
 };
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root, Receipt, ReceiptWithBloom,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
-use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EthEvm, Evm};
 use alloy_primitives::{Bloom, BloomInput, Log, B256};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
 use foundry_evm::{backend::DatabaseError, traces::CallTraceNode};
+use foundry_evm_core::{evm::{EthEvm, EthEvmContext}, precompiles::PrecompilesMap};
 use revm::{
-    context::{Block as RevmBlock, BlockEnv, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext},
-    context_interface::result::{EVMError, ExecutionResult, Output},
-    database::WrapDatabaseRef,
-    handler::{instructions::EthInstructions, EthPrecompiles},
-    interpreter::InstructionResult,
-    precompile::{secp256r1::P256VERIFY, PrecompileSpecId, Precompiles},
-    primitives::hardfork::SpecId,
-    Database, DatabaseRef, Inspector, Journal,
+    context::{Block as RevmBlock, BlockEnv, CfgEnv, JournalTr, LocalContext}, context_interface::result::{EVMError, ExecutionResult, Output}, database::WrapDatabaseRef, handler::{instructions::EthInstructions, EthPrecompiles}, interpreter::InstructionResult, precompile::{secp256r1::P256VERIFY, PrecompileSpecId, Precompiles}, primitives::hardfork::SpecId, Database, DatabaseRef, ExecuteCommitEvm, Inspector, Journal
 };
 use std::sync::Arc;
 
@@ -429,14 +419,12 @@ where
         spec,
     }
     .precompiles;
-    let eth_evm = RevmEvm::new_with_inspector(
+    EthEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
         PrecompilesMap::from_static(eth_precompiles),
-    );
-
-    EthEvm::new(eth_evm, true)
+    )
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
