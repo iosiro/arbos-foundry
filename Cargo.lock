@@ -4162,7 +4162,6 @@ dependencies = [
  "rayon",
  "regex",
  "reqwest",
- "revm",
  "semver 1.0.26",
  "serde",
  "serde_json",
