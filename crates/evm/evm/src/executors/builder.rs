@@ -1,6 +1,7 @@
 use crate::{executors::Executor, inspectors::InspectorStackBuilder};
 use foundry_evm_core::{backend::Backend, Env};
-use revm::primitives::hardfork::SpecId;
+
+use arbos_revm::ArbitrumSpecId as SpecId;
 
 /// The builder that allows to configure an evm [`Executor`] which a stack of optional
 /// [`revm::Inspector`]s, such as [`Cheatcodes`].

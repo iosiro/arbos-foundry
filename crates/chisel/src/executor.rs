@@ -8,6 +8,7 @@ use crate::prelude::{
 use alloy_dyn_abi::{DynSolType, DynSolValue};
 use alloy_json_abi::EventParam;
 use alloy_primitives::{hex, Address, B256, U256};
+use arbos_revm::ArbitrumSpecId;
 use core::fmt::Debug;
 use eyre::{Result, WrapErr};
 use foundry_compilers::Artifact;
@@ -340,7 +341,7 @@ impl SessionSource {
                 )
             })
             .gas_limit(self.config.evm_opts.gas_limit())
-            .spec_id(self.config.foundry_config.evm_spec_id())
+            .spec_id(ArbitrumSpecId::ArbosStylusChargingFixes) // TODO: Update to the correct spec ID
             .legacy_assertions(self.config.foundry_config.legacy_assertions)
             .build(env, backend);
 

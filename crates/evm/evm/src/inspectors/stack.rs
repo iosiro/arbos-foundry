@@ -15,10 +15,7 @@ use foundry_evm_core::{
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
-    context::{
-        result::{ExecutionResult, Output},
-        BlockEnv,
-    },
+    context::result::{ExecutionResult, Output},
     context_interface::CreateScheme,
     interpreter::{
         CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, EOFCreateInputs,
@@ -31,6 +28,8 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
+
+use arbos_revm::ArbitrumBlockEnv as BlockEnv;
 
 #[derive(Clone, Debug, Default)]
 #[must_use = "builders do nothing unless you call `build` on them"]

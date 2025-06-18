@@ -4,11 +4,12 @@ use crate::{
 };
 use alloy_primitives::Address;
 use foundry_compilers::artifacts::EvmVersion;
-use foundry_config::{utils::evm_spec_id, Chain, Config};
+use foundry_config::{Chain, Config};
 use foundry_evm_core::{backend::Backend, fork::CreateFork, opts::EvmOpts};
 use foundry_evm_traces::TraceMode;
-use revm::primitives::hardfork::SpecId;
 use std::ops::{Deref, DerefMut};
+
+use arbos_revm::ArbitrumSpecId as SpecId;
 
 /// A default executor with tracing enabled
 pub struct TracingExecutor {
@@ -19,7 +20,7 @@ impl TracingExecutor {
     pub fn new(
         env: Env,
         fork: Option<CreateFork>,
-        version: Option<EvmVersion>,
+        _version: Option<EvmVersion>,
         trace_mode: TraceMode,
         odyssey: bool,
         create2_deployer: Address,
@@ -32,7 +33,7 @@ impl TracingExecutor {
                 .inspectors(|stack| {
                     stack.trace_mode(trace_mode).odyssey(odyssey).create2_deployer(create2_deployer)
                 })
-                .spec_id(evm_spec_id(version.unwrap_or_default(), odyssey))
+                .spec_id(SpecId::ArbosStylusChargingFixes) // TODO
                 .build(env, db),
         })
     }

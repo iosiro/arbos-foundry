@@ -684,7 +684,7 @@ impl TestProject {
 
     /// Returns the path to the forge executable.
     pub fn forge_bin(&self) -> Command {
-        let forge = self.exe_root.join(format!("../forge{}", env::consts::EXE_SUFFIX));
+        let forge = self.exe_root.join(format!("../arbos-forge{}", env::consts::EXE_SUFFIX));
         let forge = forge.canonicalize().unwrap_or_else(|_| forge.clone());
         let mut cmd = Command::new(forge);
         cmd.current_dir(self.inner.root());
@@ -695,7 +695,7 @@ impl TestProject {
 
     /// Returns the path to the cast executable.
     pub fn cast_bin(&self) -> Command {
-        let cast = self.exe_root.join(format!("../cast{}", env::consts::EXE_SUFFIX));
+        let cast = self.exe_root.join(format!("../arbos-cast{}", env::consts::EXE_SUFFIX));
         let cast = cast.canonicalize().unwrap_or_else(|_| cast.clone());
         let mut cmd = Command::new(cast);
         // disable color output for comparisons

@@ -1,6 +1,10 @@
 use foundry_evm::EnvMut;
 use foundry_evm_core::AsEnvMut;
-use revm::{context::{BlockEnv, CfgEnv, TxEnv}, primitives::hardfork::SpecId};
+
+use arbos_revm::{
+    ArbitrumBlockEnv as BlockEnv, ArbitrumCfgEnv as CfgEnv, ArbitrumSpecId as SpecId,
+    ArbitrumTransaction as TxEnv,
+};
 
 /// Container type that holds both the configuration and block environment for EVM execution.
 #[derive(Debug, Clone, Default)]

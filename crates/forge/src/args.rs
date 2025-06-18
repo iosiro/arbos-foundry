@@ -92,14 +92,14 @@ pub fn run_command(args: Forge) -> Result<()> {
         ForgeSubcommand::Remappings(cmd) => cmd.run(),
         ForgeSubcommand::Init(cmd) => cmd.run(),
         ForgeSubcommand::Completions { shell } => {
-            generate(shell, &mut Forge::command(), "forge", &mut std::io::stdout());
+            generate(shell, &mut Forge::command(), "arbos-forge", &mut std::io::stdout());
             Ok(())
         }
         ForgeSubcommand::GenerateFigSpec => {
             clap_complete::generate(
                 clap_complete_fig::Fig,
                 &mut Forge::command(),
-                "forge",
+                "arbos-forge",
                 &mut std::io::stdout(),
             );
             Ok(())

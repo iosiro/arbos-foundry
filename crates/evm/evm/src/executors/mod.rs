@@ -33,18 +33,20 @@ use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
     bytecode::Bytecode,
-    context::{BlockEnv, TxEnv},
     context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,
     },
     database::{DatabaseCommit, DatabaseRef},
     interpreter::{return_ok, InstructionResult},
-    primitives::hardfork::SpecId,
 };
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
+};
+
+use arbos_revm::{
+    ArbitrumBlockEnv as BlockEnv, ArbitrumSpecId as SpecId, ArbitrumTransaction as TxEnv,
 };
 
 mod builder;
@@ -656,22 +658,26 @@ impl Executor {
                 // network conditions - the actual gas price is kept in `self.block` and is applied
                 // by the cheatcode handler if it is enabled
                 block_env: BlockEnv {
-                    basefee: 0,
-                    gas_limit: self.gas_limit,
-                    ..self.env().evm_env.block_env.clone()
+                    inner: revm::context::BlockEnv {
+                        basefee: 0,
+                        gas_limit: self.gas_limit,
+                        ..self.env().evm_env.block_env.clone().inner
+                    },
                 },
             },
             tx: TxEnv {
-                caller,
-                kind,
-                data,
-                value,
-                // As above, we set the gas price to 0.
-                gas_price: 0,
-                gas_priority_fee: None,
-                gas_limit: self.gas_limit,
-                chain_id: Some(self.env().evm_env.cfg_env.chain_id),
-                ..self.env().tx.clone()
+                base: revm::context::TxEnv {
+                    caller,
+                    kind,
+                    data,
+                    value,
+                    // As above, we set the gas price to 0.
+                    gas_price: 0,
+                    gas_priority_fee: None,
+                    gas_limit: self.gas_limit,
+                    chain_id: Some(self.env().evm_env.cfg_env.chain_id),
+                    ..self.env().tx.clone().base
+                },
             },
         }
     }
@@ -950,7 +956,7 @@ fn convert_executed_result(
         }
     };
     let gas = revm::interpreter::gas::calculate_initial_tx_gas(
-        env.evm_env.cfg_env.spec,
+        env.evm_env.cfg_env.spec.into_eth_spec(),
         &env.tx.data,
         env.tx.kind.is_create(),
         env.tx.access_list.len().try_into()?,

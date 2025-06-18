@@ -9,6 +9,7 @@ use crate::{
     MultiContractRunnerBuilder,
 };
 use alloy_primitives::{map::HashMap, Address, Bytes, U256};
+use arbos_revm::ArbitrumSpecId;
 use clap::{Parser, ValueEnum, ValueHint};
 use eyre::{Context, Result};
 use foundry_cli::utils::{LoadConfig, STATIC_FUZZ_SEED};
@@ -266,7 +267,7 @@ impl CoverageArgs {
         let env = evm_opts.evm_env().await?;
         let runner = MultiContractRunnerBuilder::new(config.clone())
             .initial_balance(evm_opts.initial_balance)
-            .evm_spec(config.evm_spec_id())
+            .evm_spec(ArbitrumSpecId::ArbosStylusChargingFixes) // TODO self.config.evm_spec_id()
             .sender(evm_opts.sender)
             .with_fork(evm_opts.get_fork(&config, env.clone()))
             .set_coverage(true)

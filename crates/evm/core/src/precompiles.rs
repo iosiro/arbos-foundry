@@ -2,8 +2,9 @@ use std::{borrow::Cow, sync::Arc};
 
 use alloy_consensus::transaction::Either;
 use alloy_primitives::{
+    address,
     map::{HashMap, HashSet},
-    address, Address, Bytes,
+    Address, Bytes,
 };
 use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
@@ -55,7 +56,6 @@ pub const PRECOMPILES: &[Address] = &[
     BLAKE_2F,
     POINT_EVALUATION,
 ];
-
 
 /// A mapping of precompile contracts that can be either static (builtin) or dynamic.
 ///
@@ -354,7 +354,7 @@ impl<A: Precompile, B: Precompile> Precompile for Either<A, B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, Bytes};
+    use alloy_primitives::address;
     use revm::precompile::PrecompileOutput;
 
     #[test]

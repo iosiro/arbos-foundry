@@ -18,9 +18,11 @@ use alloy_rpc_types::{
 use alloy_serde::{OtherFields, WithOtherFields};
 use bytes::BufMut;
 use foundry_evm::traces::CallTraceNode;
-use revm::{context::TxEnv, interpreter::InstructionResult};
+use revm::interpreter::InstructionResult;
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, Mul};
+
+use arbos_revm::ArbitrumTransaction as TxEnv;
 
 /// Converts a [TransactionRequest] into a [TypedTransactionRequest].
 /// Should be removed once the call builder abstraction for providers is in place.
@@ -389,18 +391,20 @@ impl PendingTransaction {
                 let chain_id = tx.tx().chain_id;
                 let TxLegacy { nonce, gas_price, gas_limit, value, to, input, .. } = tx.tx();
                 TxEnv {
-                    caller,
-                    kind: transact_to(to),
-                    data: input.clone(),
-                    chain_id,
-                    nonce: *nonce,
-                    value: (*value),
-                    gas_price: *gas_price,
-                    gas_priority_fee: None,
-                    gas_limit: *gas_limit,
-                    access_list: vec![].into(),
-                    tx_type: 0,
-                    ..Default::default()
+                    base: revm::context::TxEnv {
+                        caller,
+                        kind: transact_to(to),
+                        data: input.clone(),
+                        chain_id,
+                        nonce: *nonce,
+                        value: (*value),
+                        gas_price: *gas_price,
+                        gas_priority_fee: None,
+                        gas_limit: *gas_limit,
+                        access_list: vec![].into(),
+                        tx_type: 0,
+                        ..Default::default()
+                    },
                 }
             }
             TypedTransaction::EIP2930(tx) => {
@@ -416,18 +420,20 @@ impl PendingTransaction {
                     ..
                 } = tx.tx();
                 TxEnv {
-                    caller,
-                    kind: transact_to(to),
-                    data: input.clone(),
-                    chain_id: Some(*chain_id),
-                    nonce: *nonce,
-                    value: *value,
-                    gas_price: *gas_price,
-                    gas_priority_fee: None,
-                    gas_limit: *gas_limit,
-                    access_list: access_list.clone(),
-                    tx_type: 1,
-                    ..Default::default()
+                    base: revm::context::TxEnv {
+                        caller,
+                        kind: transact_to(to),
+                        data: input.clone(),
+                        chain_id: Some(*chain_id),
+                        nonce: *nonce,
+                        value: *value,
+                        gas_price: *gas_price,
+                        gas_priority_fee: None,
+                        gas_limit: *gas_limit,
+                        access_list: access_list.clone(),
+                        tx_type: 1,
+                        ..Default::default()
+                    },
                 }
             }
             TypedTransaction::EIP1559(tx) => {
@@ -444,18 +450,20 @@ impl PendingTransaction {
                     ..
                 } = tx.tx();
                 TxEnv {
-                    caller,
-                    kind: transact_to(to),
-                    data: input.clone(),
-                    chain_id: Some(*chain_id),
-                    nonce: *nonce,
-                    value: *value,
-                    gas_price: *max_fee_per_gas,
-                    gas_priority_fee: Some(*max_priority_fee_per_gas),
-                    gas_limit: *gas_limit,
-                    access_list: access_list.clone(),
-                    tx_type: 2,
-                    ..Default::default()
+                    base: revm::context::TxEnv {
+                        caller,
+                        kind: transact_to(to),
+                        data: input.clone(),
+                        chain_id: Some(*chain_id),
+                        nonce: *nonce,
+                        value: *value,
+                        gas_price: *max_fee_per_gas,
+                        gas_priority_fee: Some(*max_priority_fee_per_gas),
+                        gas_limit: *gas_limit,
+                        access_list: access_list.clone(),
+                        tx_type: 2,
+                        ..Default::default()
+                    },
                 }
             }
             TypedTransaction::EIP4844(tx) => {
@@ -474,20 +482,22 @@ impl PendingTransaction {
                     ..
                 } = tx.tx().tx();
                 TxEnv {
-                    caller,
-                    kind: TxKind::Call(*to),
-                    data: input.clone(),
-                    chain_id: Some(*chain_id),
-                    nonce: *nonce,
-                    value: *value,
-                    gas_price: *max_fee_per_gas,
-                    gas_priority_fee: Some(*max_priority_fee_per_gas),
-                    max_fee_per_blob_gas: *max_fee_per_blob_gas,
-                    blob_hashes: blob_versioned_hashes.clone(),
-                    gas_limit: *gas_limit,
-                    access_list: access_list.clone(),
-                    tx_type: 3,
-                    ..Default::default()
+                    base: revm::context::TxEnv {
+                        caller,
+                        kind: TxKind::Call(*to),
+                        data: input.clone(),
+                        chain_id: Some(*chain_id),
+                        nonce: *nonce,
+                        value: *value,
+                        gas_price: *max_fee_per_gas,
+                        gas_priority_fee: Some(*max_priority_fee_per_gas),
+                        max_fee_per_blob_gas: *max_fee_per_blob_gas,
+                        blob_hashes: blob_versioned_hashes.clone(),
+                        gas_limit: *gas_limit,
+                        access_list: access_list.clone(),
+                        tx_type: 3,
+                        ..Default::default()
+                    },
                 }
             }
             TypedTransaction::EIP7702(tx) => {
@@ -505,18 +515,20 @@ impl PendingTransaction {
                 } = tx.tx();
 
                 let mut tx = TxEnv {
-                    caller,
-                    kind: TxKind::Call(*to),
-                    data: input.clone(),
-                    chain_id: Some(*chain_id),
-                    nonce: *nonce,
-                    value: *value,
-                    gas_price: *max_fee_per_gas,
-                    gas_priority_fee: Some(*max_priority_fee_per_gas),
-                    gas_limit: *gas_limit,
-                    access_list: access_list.clone(),
-                    tx_type: 4,
-                    ..Default::default()
+                    base: revm::context::TxEnv {
+                        caller,
+                        kind: TxKind::Call(*to),
+                        data: input.clone(),
+                        chain_id: Some(*chain_id),
+                        nonce: *nonce,
+                        value: *value,
+                        gas_price: *max_fee_per_gas,
+                        gas_priority_fee: Some(*max_priority_fee_per_gas),
+                        gas_limit: *gas_limit,
+                        access_list: access_list.clone(),
+                        tx_type: 4,
+                        ..Default::default()
+                    },
                 };
                 tx.set_signed_authorization(authorization_list.clone());
 

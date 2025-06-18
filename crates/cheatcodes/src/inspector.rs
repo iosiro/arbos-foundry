@@ -39,7 +39,7 @@ use foundry_evm_core::{
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
     evm::{new_evm_with_existing_context, EthEvmContext, FoundryEvm},
-    InspectorExt
+    InspectorExt,
 };
 use foundry_evm_traces::{TracingInspector, TracingInspectorConfig};
 use foundry_wallets::multi_wallet::MultiWallet;
@@ -48,7 +48,7 @@ use proptest::test_runner::{RngAlgorithm, TestRng, TestRunner};
 use rand::Rng;
 use revm::{
     bytecode::opcode as op,
-    context::{result::EVMError, BlockEnv, JournalTr, LocalContext, TransactionType},
+    context::{result::EVMError, JournalTr, TransactionType},
     context_interface::{transaction::SignedAuthorization, CreateScheme},
     handler::FrameResult,
     interpreter::{
@@ -69,6 +69,8 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+
+use arbos_revm::{ArbitrumBlockEnv as BlockEnv, ArbitrumLocalContext as LocalContext};
 
 mod utils;
 

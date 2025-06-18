@@ -19,6 +19,7 @@ use alloy_primitives::{
     Address, Bytes, Log, TxKind, U256,
 };
 use alloy_signer::Signer;
+use arbos_revm::ArbitrumSpecId;
 use broadcast::next_nonce;
 use build::PreprocessedState;
 use clap::{Parser, ValueHint};
@@ -643,7 +644,7 @@ impl ScriptConfig {
                     .odyssey(self.evm_opts.odyssey)
                     .create2_deployer(self.evm_opts.create2_deployer)
             })
-            .spec_id(self.config.evm_spec_id())
+            .spec_id(ArbitrumSpecId::ArbosStylusFixes) // TODO
             .gas_limit(self.evm_opts.gas_limit())
             .legacy_assertions(self.config.legacy_assertions);
 

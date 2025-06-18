@@ -46,7 +46,7 @@ impl InspectArgs {
     pub fn run(self) -> Result<()> {
         let Self { contract, field, build, strip_yul_comments } = self;
 
-        trace!(target: "forge", ?field, ?contract, "running forge inspect");
+        trace!(target: "arbos-forge", ?field, ?contract, "running forge inspect");
 
         // Map field to ContractOutputSelection
         let mut cos = build.compiler.extra_output;

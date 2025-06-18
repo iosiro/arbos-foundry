@@ -11,12 +11,13 @@ use foundry_evm::{
     fork::database::ForkDbStateSnapshot,
 };
 use revm::{
-    context::BlockEnv,
     database::{Database, DatabaseRef, DbAccount},
     state::AccountInfo,
 };
 
 pub use foundry_evm::fork::database::ForkedDatabase;
+
+use arbos_revm::ArbitrumBlockEnv as BlockEnv;
 
 impl Db for ForkedDatabase {
     fn insert_account(&mut self, address: Address, account: AccountInfo) {

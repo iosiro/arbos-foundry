@@ -42,6 +42,7 @@ revm = { workspace = true, default-features = false, features = [
     "arbitrary",
     "c-kzg",
 ] }
+arbos-revm = { workspace = true, features = ["serde"] }
 revm-inspectors.workspace = true
 
 eyre.workspace = true

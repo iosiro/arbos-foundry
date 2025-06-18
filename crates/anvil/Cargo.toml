@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "anvil"
+name = "arbos-anvil"
 path = "bin/main.rs"
 required-features = ["cli"]
 
@@ -64,6 +64,7 @@ revm = { workspace = true, features = [
     "memory_limit",
     "c-kzg",
 ] }
+arbos-revm = { workspace = true, features = ["serde"] }
 revm-inspectors.workspace = true
 # op-revm.workspace = true
 

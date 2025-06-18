@@ -49,6 +49,8 @@ async fn test_get_transfer_parity_traces() {
     let traces = provider.trace_transaction(tx.transaction_hash).await.unwrap();
     assert!(!traces.is_empty());
 
+    println!("Traces: {:#?}", traces);
+
     match traces[0].trace.action {
         Action::Call(ref call) => {
             assert_eq!(call.from, from);

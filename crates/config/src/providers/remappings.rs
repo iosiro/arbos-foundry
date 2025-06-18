@@ -227,7 +227,7 @@ impl RemappingsProvider<'_> {
             {
                 // this is an additional safety check for weird auto-detected remappings
                 if ["lib/", "src/", "contracts/"].contains(&r.name.as_str()) {
-                    trace!(target: "forge", "- skipping the remapping");
+                    trace!(target: "arbos-forge", "- skipping the remapping");
                     continue
                 }
                 insert_closest(&mut lib_remappings, r.context, r.name, r.path.into());

@@ -278,7 +278,7 @@ impl VerifyBytecodeArgs {
             let fork_address = crate::utils::deploy_contract(
                 &mut executor,
                 &env,
-                config.evm_spec_id(),
+                arbos_revm::ArbitrumSpecId::ArbosStylusFixes, //TODO: use config.evm_spec_id(),
                 gen_tx_req.to,
             )?;
 
@@ -505,7 +505,7 @@ impl VerifyBytecodeArgs {
             let fork_address = crate::utils::deploy_contract(
                 &mut executor,
                 &env,
-                config.evm_spec_id(),
+                arbos_revm::ArbitrumSpecId::ArbosStylusFixes, //TODO: use config.evm_spec_id(),
                 transaction.to,
             )?;
 

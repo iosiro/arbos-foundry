@@ -11,7 +11,7 @@ use crate::{
         fees::{INITIAL_BASE_FEE, INITIAL_GAS_PRICE},
         pool::transactions::{PoolTransaction, TransactionOrder},
     },
-    hardfork::{ethereum_hardfork_from_block_tag, spec_id_from_ethereum_hardfork, ChainHardfork},
+    hardfork::ChainHardfork,
     mem::{self, in_memory_db::MemDb},
     EthereumHardfork, FeeManager, PrecompileFactory,
 };
@@ -43,11 +43,7 @@ use foundry_evm_core::AsEnvMut;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
-use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
-    context_interface::block::BlobExcessGasAndPrice,
-    primitives::hardfork::SpecId,
-};
+use revm::context_interface::block::BlobExcessGasAndPrice;
 use serde_json::{json, Value};
 use std::{
     fmt::Write as FmtWrite,
@@ -60,6 +56,11 @@ use std::{
 };
 use tokio::sync::RwLock as TokioRwLock;
 use yansi::Paint;
+
+use arbos_revm::{
+    ArbitrumBlockEnv as BlockEnv, ArbitrumCfgEnv as CfgEnv, ArbitrumSpecId as SpecId,
+    ArbitrumTransaction as TxEnv,
+};
 
 pub use foundry_common::version::SHORT_VERSION as VERSION_MESSAGE;
 
@@ -280,7 +281,9 @@ Chain ID
             );
         }
 
-        if (SpecId::from(self.get_hardfork()) as u8) < (SpecId::LONDON as u8) {
+        if (SpecId::default().into_eth_spec() as u8) <
+            (revm::primitives::hardfork::SpecId::LONDON as u8)
+        {
             let _ = write!(
                 s,
                 r#"
@@ -1021,7 +1024,7 @@ impl NodeConfig {
         // configure the revm environment
 
         let mut cfg = CfgEnv::default();
-        cfg.spec = self.get_hardfork().into();
+        // cfg.spec = self.get_hardfork().into();
 
         cfg.chain_id = self.get_chain_id();
         cfg.limit_contract_code_size = self.code_size_limit;
@@ -1039,15 +1042,22 @@ impl NodeConfig {
         let mut env = Env::new(
             cfg,
             BlockEnv {
-                gas_limit: self.gas_limit(),
-                basefee: self.get_base_fee(),
-                ..Default::default()
+                inner: revm::context::BlockEnv {
+                    gas_limit: self.gas_limit(),
+                    basefee: self.get_base_fee(),
+                    ..Default::default()
+                },
             },
-            TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
+            TxEnv {
+                base: revm::context::TxEnv {
+                    chain_id: Some(self.get_chain_id()),
+                    ..Default::default()
+                },
+            },
         );
 
         let fees = FeeManager::new(
-            spec_id,
+            spec_id.into_eth_spec(),
             self.get_base_fee(),
             !self.disable_min_priority_fee,
             self.get_gas_price(),
@@ -1171,23 +1181,8 @@ impl NodeConfig {
                 derive_block_and_transactions(fork_choice, &provider).await.wrap_err(
                     "failed to derive fork block number and force transactions from fork choice",
                 )?;
-            let chain_id = if let Some(chain_id) = self.fork_chain_id {
-                Some(chain_id)
-            } else if self.hardfork.is_none() {
-                // Auto-adjust hardfork if not specified, but only if we're forking mainnet.
-                let chain_id =
-                    provider.get_chain_id().await.wrap_err("failed to fetch network chain ID")?;
-                if alloy_chains::NamedChain::Mainnet == chain_id {
-                    let hardfork: EthereumHardfork =
-                        ethereum_hardfork_from_block_tag(fork_block_number);
-
-                    env.evm_env.cfg_env.spec = spec_id_from_ethereum_hardfork(hardfork);
-                    self.hardfork = Some(ChainHardfork::Ethereum(hardfork));
-                }
-                Some(U256::from(chain_id))
-            } else {
-                None
-            };
+            let chain_id =
+                if let Some(chain_id) = self.fork_chain_id { Some(chain_id) } else { None };
 
             (fork_block_number, chain_id, force_transactions)
         } else {
@@ -1226,16 +1221,18 @@ latest block number: {latest_block}"
         self.gas_limit = Some(gas_limit);
 
         env.evm_env.block_env = BlockEnv {
-            number: fork_block_number,
-            timestamp: block.header.timestamp,
-            difficulty: block.header.difficulty,
-            // ensures prevrandao is set
-            prevrandao: Some(block.header.mix_hash.unwrap_or_default()),
-            gas_limit,
-            // Keep previous `coinbase` and `basefee` value
-            beneficiary: env.evm_env.block_env.beneficiary,
-            basefee: env.evm_env.block_env.basefee,
-            ..Default::default()
+            inner: revm::context::BlockEnv {
+                number: fork_block_number,
+                timestamp: block.header.timestamp,
+                difficulty: block.header.difficulty,
+                // ensures prevrandao is set
+                prevrandao: Some(block.header.mix_hash.unwrap_or_default()),
+                gas_limit,
+                // Keep previous `coinbase` and `basefee` value
+                beneficiary: env.evm_env.block_env.beneficiary,
+                basefee: env.evm_env.block_env.basefee,
+                ..Default::default()
+            },
         };
 
         // if not set explicitly we use the base fee of the latest block
@@ -1297,7 +1294,7 @@ latest block number: {latest_block}"
         // apply changes such as difficulty -> prevrandao and chain specifics for current chain id
         apply_chain_and_block_specific_env_changes::<AnyNetwork>(env.as_env_mut(), &block);
 
-        let meta = BlockchainDbMeta::new(env.evm_env.block_env.clone(), eth_rpc_url.clone());
+        let meta = BlockchainDbMeta::new(env.evm_env.block_env.clone().inner, eth_rpc_url.clone());
         let block_chain_db = if self.fork_chain_id.is_some() {
             BlockchainDb::new_skip_check(meta, self.block_cache_path(fork_block_number))
         } else {

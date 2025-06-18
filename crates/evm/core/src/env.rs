@@ -1,7 +1,11 @@
 use revm::{
-    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, TxEnv},
-    primitives::hardfork::SpecId,
+    context::{JournalInner, JournalTr},
     Context, Database, Journal, JournalEntry,
+};
+
+use arbos_revm::{
+    ArbitrumBlockEnv as BlockEnv, ArbitrumCfgEnv as CfgEnv, ArbitrumContext,
+    ArbitrumSpecId as SpecId, ArbitrumTransaction as TxEnv,
 };
 
 /// Container type that holds both the configuration and block environment for EVM execution.
@@ -12,7 +16,6 @@ pub struct EvmEnv<Spec = SpecId> {
     /// The block environment containing block-specific data
     pub block_env: BlockEnv,
 }
-
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]
@@ -87,6 +90,12 @@ impl<DB: Database, J: JournalTr<Database = DB>, C> AsEnvMut
     }
 }
 
+impl<DB: Database> AsEnvMut for ArbitrumContext<DB> {
+    fn as_env_mut(&mut self) -> EnvMut<'_> {
+        EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
+    }
+}
+
 pub trait ContextExt {
     type DB: Database;
 
@@ -98,6 +107,20 @@ pub trait ContextExt {
 impl<DB: Database, C> ContextExt
     for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C>
 {
+    type DB = DB;
+
+    fn as_db_env_and_journal(
+        &mut self,
+    ) -> (&mut Self::DB, &mut JournalInner<JournalEntry>, EnvMut<'_>) {
+        (
+            &mut self.journaled_state.database,
+            &mut self.journaled_state.inner,
+            EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx },
+        )
+    }
+}
+
+impl<DB: Database> ContextExt for ArbitrumContext<DB> {
     type DB = DB;
 
     fn as_db_env_and_journal(

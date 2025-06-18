@@ -9,10 +9,11 @@ use alloy_provider::{network::AnyRpcBlock, Provider};
 use eyre::WrapErr;
 use foundry_common::{provider::ProviderBuilder, ALCHEMY_FREE_TIER_CUPS};
 use foundry_config::{Chain, Config, GasLimit};
-use revm::context::{BlockEnv, TxEnv};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use url::Url;
+
+use arbos_revm::{ArbitrumBlockEnv as BlockEnv, ArbitrumTransaction as TxEnv};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvmOpts {
@@ -157,21 +158,25 @@ impl EvmOpts {
             evm_env: EvmEnv {
                 cfg_env: cfg,
                 block_env: BlockEnv {
-                    number: self.env.block_number,
-                    beneficiary: self.env.block_coinbase,
-                    timestamp: self.env.block_timestamp,
-                    difficulty: U256::from(self.env.block_difficulty),
-                    prevrandao: Some(self.env.block_prevrandao),
-                    basefee: self.env.block_base_fee_per_gas,
-                    gas_limit: self.gas_limit(),
-                    ..Default::default()
+                    inner: revm::context::BlockEnv {
+                        number: self.env.block_number,
+                        beneficiary: self.env.block_coinbase,
+                        timestamp: self.env.block_timestamp,
+                        difficulty: U256::from(self.env.block_difficulty),
+                        prevrandao: Some(self.env.block_prevrandao),
+                        basefee: self.env.block_base_fee_per_gas,
+                        gas_limit: self.gas_limit(),
+                        ..Default::default()
+                    },
                 },
             },
             tx: TxEnv {
-                gas_price: self.env.gas_price.unwrap_or_default().into(),
-                gas_limit: self.gas_limit(),
-                caller: self.sender,
-                ..Default::default()
+                base: revm::context::TxEnv {
+                    gas_price: self.env.gas_price.unwrap_or_default().into(),
+                    gas_limit: self.gas_limit(),
+                    caller: self.sender,
+                    ..Default::default()
+                },
             },
         }
     }

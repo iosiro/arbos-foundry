@@ -1,6 +1,6 @@
 //! Anvil specific [`revm::Inspector`] implementation
 
-use crate::{eth::macros::node_info};
+use crate::eth::macros::node_info;
 use alloy_primitives::{Address, Log, U256};
 use foundry_evm::{
     backend::DatabaseError,

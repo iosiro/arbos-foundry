@@ -20,10 +20,12 @@ use foundry_evm::{
     traces::TraceMode, Env, EnvMut,
 };
 use reqwest::Url;
-use revm::{bytecode::Bytecode, database::Database, primitives::hardfork::SpecId};
+use revm::{bytecode::Bytecode, database::Database};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use yansi::Paint;
+
+use arbos_revm::ArbitrumSpecId as SpecId;
 
 /// Enum to represent the type of bytecode being verified
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, ValueEnum)]

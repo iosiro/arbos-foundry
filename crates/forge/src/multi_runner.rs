@@ -26,7 +26,6 @@ use foundry_evm::{
 };
 use foundry_linking::{LinkOutput, Linker};
 use rayon::prelude::*;
-use revm::primitives::hardfork::SpecId;
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -35,6 +34,8 @@ use std::{
     sync::{mpsc, Arc},
     time::Instant,
 };
+
+use arbos_revm::ArbitrumSpecId as SpecId;
 
 #[derive(Debug, Clone)]
 pub struct TestContract {
@@ -304,7 +305,7 @@ impl TestRunnerConfig {
     pub fn reconfigure_with(&mut self, config: Arc<Config>) {
         debug_assert!(!Arc::ptr_eq(&self.config, &config));
 
-        self.spec_id = config.evm_spec_id();
+        self.spec_id = SpecId::ArbosStylusChargingFixes; // TODO: Use config.evm_spec_id() once we have a way to set it.
         self.sender = config.sender;
         self.odyssey = config.odyssey;
         self.isolation = config.isolate;
@@ -533,7 +534,7 @@ impl MultiContractRunnerBuilder {
             tcfg: TestRunnerConfig {
                 evm_opts,
                 env,
-                spec_id: self.evm_spec.unwrap_or_else(|| self.config.evm_spec_id()),
+                spec_id: self.evm_spec.unwrap_or_else(|| SpecId::ArbosStylusChargingFixes), /* TODO self.config.evm_spec_id() */
                 sender: self.sender.unwrap_or(self.config.sender),
 
                 coverage: self.coverage,

@@ -351,7 +351,7 @@ impl TestArgs {
             .set_debug(should_debug)
             .set_decode_internal(decode_internal)
             .initial_balance(evm_opts.initial_balance)
-            .evm_spec(config.evm_spec_id())
+            .evm_spec(arbos_revm::ArbitrumSpecId::ArbosStylusChargingFixes) // TODO self.config.evm_spec_id()
             .sender(evm_opts.sender)
             .with_fork(evm_opts.get_fork(&config, env.clone()))
             .enable_isolation(evm_opts.isolate)

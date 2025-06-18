@@ -48,6 +48,7 @@ revm = { workspace = true, features = [
     "secp256r1",
 ] }
 revm-inspectors.workspace = true
+arbos-revm = { workspace = true, features = ["serde"] }
 # op-revm.workspace = true
 # alloy-op-evm.workspace = true
 

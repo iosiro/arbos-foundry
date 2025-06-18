@@ -1,6 +1,9 @@
 use std::fmt::Debug;
 
-use foundry_evm_core::{evm::{EthEvm, EthEvmContext}, precompiles::{DynPrecompile, PrecompilesMap}};
+use foundry_evm_core::{
+    evm::{EthEvm, EthEvmContext},
+    precompiles::{DynPrecompile, PrecompilesMap},
+};
 use revm::{precompile::PrecompileWithAddress, Database, Inspector};
 
 /// Object-safe trait that enables injecting extra precompiles when using
@@ -27,18 +30,28 @@ pub fn inject_precompiles<DB, I>(
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{address, Address, Bytes, TxKind};
+    use arbos_revm::{ArbitrumCfgEnv, ArbitrumLocalContext as LocalContext, ArbitrumTransaction, ArbitrumSpecId as SpecId};
     use foundry_evm::EvmEnv;
     use foundry_evm_core::precompiles::PrecompilesMap;
     use itertools::Itertools;
     use revm::{
-        context::{CfgEnv, JournalTr, LocalContext, TxEnv}, database::{EmptyDB, EmptyDBTyped}, handler::{instructions::EthInstructions, EthPrecompiles}, inspector::NoOpInspector, interpreter::interpreter::EthInterpreter, precompile::{
+        context::{JournalTr, TxEnv},
+        database::{EmptyDB, EmptyDBTyped},
+        handler::{instructions::EthInstructions, EthPrecompiles},
+        inspector::NoOpInspector,
+        interpreter::interpreter::EthInterpreter,
+        precompile::{
             PrecompileOutput, PrecompileResult, PrecompileSpecId, PrecompileWithAddress,
             Precompiles,
-        }, primitives::hardfork::SpecId, ExecuteEvm, Journal
+        },
+        ExecuteEvm, Journal,
     };
     use std::convert::Infallible;
 
-    use crate::{evm::{EthEvm, EthEvmContext}, inject_precompiles, PrecompileFactory};
+    use crate::{
+        evm::{EthEvm, EthEvmContext},
+        inject_precompiles, PrecompileFactory,
+    };
 
     // A precompile activated in the `Prague` spec.
     const ETH_PRAGUE_PRECOMPILE: Address = address!("0x0000000000000000000000000000000000000011");
@@ -70,11 +83,16 @@ mod tests {
         spec: SpecId,
     ) -> (foundry_evm::Env, EthEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap>) {
         let eth_env = foundry_evm::Env {
-            evm_env: EvmEnv { block_env: Default::default(), cfg_env: CfgEnv::new_with_spec(spec) },
-            tx: TxEnv {
-                kind: TxKind::Call(PRECOMPILE_ADDR),
-                data: PAYLOAD.into(),
-                ..Default::default()
+            evm_env: EvmEnv {
+                block_env: Default::default(),
+                cfg_env: ArbitrumCfgEnv::new_with_spec(spec),
+            },
+            tx: ArbitrumTransaction {
+                base: TxEnv {
+                    kind: TxKind::Call(PRECOMPILE_ADDR),
+                    data: PAYLOAD.into(),
+                    ..Default::default()
+                },
             },
         };
 
@@ -89,16 +107,16 @@ mod tests {
         };
 
         let eth_precompiles = EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
+            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec.into_eth_spec())),
+            spec: spec.into_eth_spec(),
         }
         .precompiles;
         let eth_evm = EthEvm::new_with_inspector(
-                eth_evm_context,
-                NoOpInspector,
-                EthInstructions::<EthInterpreter, EthEvmContext<EmptyDB>>::default(),
-                PrecompilesMap::from_static(eth_precompiles),
-            );
+            eth_evm_context,
+            NoOpInspector,
+            EthInstructions::<EthInterpreter, EthEvmContext<EmptyDB>>::default(),
+            PrecompilesMap::from_static(eth_precompiles),
+        );
 
         (eth_env, eth_evm)
     }
@@ -124,7 +142,7 @@ mod tests {
 
     #[test]
     fn build_eth_evm_with_extra_precompiles_london_spec() {
-        let (env, mut evm) = create_eth_evm(SpecId::LONDON);
+        let (env, mut evm) = create_eth_evm(SpecId::ArbosStylusChargingFixes);
 
         // Check that the Prague precompile IS NOT present when using the London spec.
         assert!(!evm.precompiles.addresses().contains(&ETH_PRAGUE_PRECOMPILE));

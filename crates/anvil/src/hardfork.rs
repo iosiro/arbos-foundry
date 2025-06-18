@@ -1,5 +1,4 @@
 use alloy_hardforks::EthereumHardfork;
-use alloy_rpc_types::BlockNumberOrTag;
 use revm::primitives::hardfork::SpecId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,21 +46,9 @@ pub fn spec_id_from_ethereum_hardfork(hardfork: EthereumHardfork) -> SpecId {
 }
 
 
-/// Convert a `BlockNumberOrTag` into an `EthereumHardfork`.
-pub fn ethereum_hardfork_from_block_tag(block: impl Into<BlockNumberOrTag>) -> EthereumHardfork {
-    let num = match block.into() {
-        BlockNumberOrTag::Earliest => 0,
-        BlockNumberOrTag::Number(num) => num,
-        _ => u64::MAX,
-    };
-
-    EthereumHardfork::from_mainnet_block_number(num)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_hardforks::ethereum::mainnet::*;
     #[allow(unused_imports)]
     use alloy_rpc_types::BlockNumberOrTag;
 
@@ -73,18 +60,5 @@ mod tests {
         // Test latest hardforks
         assert_eq!(spec_id_from_ethereum_hardfork(EthereumHardfork::Cancun), SpecId::CANCUN);
         assert_eq!(spec_id_from_ethereum_hardfork(EthereumHardfork::Prague), SpecId::PRAGUE);
-    }
-
-
-    #[test]
-    fn test_hardfork_from_block_tag_numbers() {
-        assert_eq!(
-            ethereum_hardfork_from_block_tag(MAINNET_HOMESTEAD_BLOCK - 1),
-            EthereumHardfork::Frontier
-        );
-        assert_eq!(
-            ethereum_hardfork_from_block_tag(MAINNET_LONDON_BLOCK + 1),
-            EthereumHardfork::London
-        );
     }
 }

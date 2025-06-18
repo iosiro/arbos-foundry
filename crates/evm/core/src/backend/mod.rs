@@ -745,7 +745,7 @@ impl Backend {
     /// We need to track these mainly to prevent issues when switching between different evms
     pub(crate) fn initialize(&mut self, env: &Env) {
         self.set_caller(env.tx.caller);
-        self.set_spec_id(env.evm_env.cfg_env.spec);
+        self.set_spec_id(env.evm_env.cfg_env.spec.into_eth_spec());
 
         let test_contract = match env.tx.kind {
             TxKind::Call(to) => to,
@@ -2066,7 +2066,7 @@ mod tests {
         }
         drop(backend);
 
-        let meta = BlockchainDbMeta { block_env: env.evm_env.block_env, hosts: Default::default() };
+        let meta = BlockchainDbMeta { block_env: env.evm_env.block_env.inner, hosts: Default::default() };
 
         let db = BlockchainDb::new(
             meta,

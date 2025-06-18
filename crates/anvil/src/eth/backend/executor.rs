@@ -3,7 +3,10 @@ use crate::{
         backend::{db::Db, env::Env, validate::TransactionValidator},
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
-    }, inject_precompiles, mem::inspector::AnvilInspector, PrecompileFactory
+    },
+    inject_precompiles,
+    mem::inspector::AnvilInspector,
+    PrecompileFactory,
 };
 use alloy_consensus::{
     constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root, Receipt, ReceiptWithBloom,
@@ -15,11 +18,24 @@ use anvil_core::eth::{
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
 use foundry_evm::{backend::DatabaseError, traces::CallTraceNode};
-use foundry_evm_core::{evm::{EthEvm, EthEvmContext}, precompiles::PrecompilesMap};
+use foundry_evm_core::{
+    evm::{EthEvm, EthEvmContext},
+    precompiles::PrecompilesMap,
+};
 use revm::{
-    context::{Block as RevmBlock, BlockEnv, CfgEnv, JournalTr, LocalContext}, context_interface::result::{EVMError, ExecutionResult, Output}, database::WrapDatabaseRef, handler::{instructions::EthInstructions, EthPrecompiles}, interpreter::InstructionResult, precompile::{secp256r1::P256VERIFY, PrecompileSpecId, Precompiles}, primitives::hardfork::SpecId, Database, DatabaseRef, ExecuteCommitEvm, Inspector, Journal
+    context::{Block as RevmBlock, JournalTr},
+    context_interface::result::{EVMError, ExecutionResult, Output},
+    database::WrapDatabaseRef,
+    handler::{instructions::EthInstructions, EthPrecompiles},
+    interpreter::InstructionResult,
+    precompile::{secp256r1::P256VERIFY, PrecompileSpecId, Precompiles},
+    Database, DatabaseRef, ExecuteCommitEvm, Inspector, Journal,
 };
 use std::sync::Arc;
+
+use arbos_revm::{
+    ArbitrumBlockEnv as BlockEnv, ArbitrumCfgEnv as CfgEnv, ArbitrumLocalContext as LocalContext,
+};
 
 /// Represents an executed transaction (transacted on the DB)
 #[derive(Debug)]
@@ -113,15 +129,23 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         let difficulty = self.block_env.difficulty;
         let beneficiary = self.block_env.beneficiary;
         let timestamp = self.block_env.timestamp;
-        let base_fee = if self.cfg_env.spec.is_enabled_in(SpecId::LONDON) {
+        let base_fee = if self
+            .cfg_env
+            .spec
+            .into_eth_spec()
+            .is_enabled_in(revm::primitives::hardfork::SpecId::LONDON)
+        {
             Some(self.block_env.basefee)
         } else {
             None
         };
 
-        let is_shanghai = self.cfg_env.spec >= SpecId::SHANGHAI;
-        let is_cancun = self.cfg_env.spec >= SpecId::CANCUN;
-        let is_prague = self.cfg_env.spec >= SpecId::PRAGUE;
+        let is_shanghai =
+            self.cfg_env.spec.into_eth_spec() >= revm::primitives::hardfork::SpecId::SHANGHAI;
+        let is_cancun =
+            self.cfg_env.spec.into_eth_spec() >= revm::primitives::hardfork::SpecId::CANCUN;
+        let is_prague =
+            self.cfg_env.spec.into_eth_spec() >= revm::primitives::hardfork::SpecId::PRAGUE;
         let excess_blob_gas = if is_cancun { self.block_env.blob_excess_gas() } else { None };
         let mut cumulative_blob_gas_used = if is_cancun { Some(0u64) } else { None };
 
@@ -403,7 +427,7 @@ where
     let eth_context = EthEvmContext {
         journaled_state: {
             let mut journal = Journal::new(db);
-            journal.set_spec_id(spec);
+            journal.set_spec_id(spec.into_eth_spec());
             journal
         },
         block: env.evm_env.block_env.clone(),
@@ -415,8 +439,8 @@ where
     };
 
     let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
+        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec.into_eth_spec())),
+        spec: spec.into_eth_spec(),
     }
     .precompiles;
     EthEvm::new_with_inspector(

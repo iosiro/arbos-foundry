@@ -14,7 +14,6 @@ use foundry_evm::backend::{
 };
 use revm::{
     bytecode::Bytecode,
-    context::BlockEnv,
     database::{CacheDB, DatabaseRef, DbAccount},
     primitives::KECCAK_EMPTY,
     state::AccountInfo,
@@ -25,6 +24,8 @@ use serde::{
     Deserialize, Deserializer, Serialize,
 };
 use std::{collections::BTreeMap, fmt, path::Path};
+
+use arbos_revm::ArbitrumBlockEnv as BlockEnv;
 
 /// Helper trait get access to the full state data of the database
 pub trait MaybeFullDatabase: DatabaseRef<Error = DatabaseError> {

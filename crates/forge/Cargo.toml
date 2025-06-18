@@ -14,7 +14,7 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "forge"
+name = "arbos-forge"
 path = "bin/main.rs"
 
 [[test]]
@@ -63,6 +63,7 @@ alloy-signer.workspace = true
 alloy-transport.workspace = true
 
 revm.workspace = true
+arbos-revm.workspace = true
 
 clap = { version = "4", features = ["derive", "env", "unicode", "wrap_help"] }
 clap_complete = "4"

@@ -11,10 +11,11 @@ use alloy_primitives::{map::HashMap, Address, B256, U256};
 use alloy_rpc_types::BlockId;
 use foundry_evm::backend::{BlockchainDb, DatabaseResult, StateSnapshot};
 use revm::{
-    context::BlockEnv,
     database::{DatabaseRef, DbAccount},
     state::AccountInfo,
 };
+
+use arbos_revm::ArbitrumBlockEnv as BlockEnv;
 
 // reexport for convenience
 pub use foundry_evm::backend::MemDb;

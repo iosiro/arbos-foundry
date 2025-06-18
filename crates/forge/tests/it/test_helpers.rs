@@ -19,13 +19,14 @@ use foundry_test_utils::{
     fd_lock, init_tracing,
     rpc::{next_http_archive_rpc_url, next_rpc_endpoint},
 };
-use revm::primitives::hardfork::SpecId;
 use std::{
     env, fmt,
     io::Write,
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
 };
+
+use arbos_revm::ArbitrumSpecId as SpecId;
 
 pub const RE_PATH_SEPARATOR: &str = "/";
 const TESTDATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../testdata");
@@ -188,7 +189,7 @@ impl ForgeTestData {
         let config = self.config.clone();
         let mut runner = MultiContractRunnerBuilder::new(config).sender(self.config.sender);
         if self.profile.is_paris() {
-            runner = runner.evm_spec(SpecId::MERGE);
+            runner = runner.evm_spec(SpecId::ArbosStylusChargingFixes);
         }
         runner
     }
@@ -340,7 +341,7 @@ pub fn manifest_root() -> &'static Path {
     let mut root = Path::new(env!("CARGO_MANIFEST_DIR"));
     // need to check here where we're executing the test from, if in `forge` we need to also allow
     // `testdata`
-    if root.ends_with("forge") {
+    if root.ends_with("arbos-forge") {
         root = root.parent().unwrap();
     }
     root

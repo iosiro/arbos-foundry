@@ -91,7 +91,6 @@ use futures::{
 use parking_lot::RwLock;
 use revm::{
     bytecode::Bytecode,
-    context::BlockEnv,
     context_interface::{block::BlobExcessGasAndPrice, result::Output},
     database::{CacheDB, DatabaseRef},
     interpreter::{return_ok, return_revert, InstructionResult},
@@ -99,6 +98,8 @@ use revm::{
 };
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+use arbos_revm::ArbitrumBlockEnv as BlockEnv;
 
 /// The client version: `anvil/v{major}.{minor}.{patch}`
 pub const CLIENT_VERSION: &str = concat!("anvil/v", env!("CARGO_PKG_VERSION"));
