@@ -9,9 +9,5 @@ mod fuzz;
 mod inline;
 mod invariant;
 mod repros;
-<<<<<<< HEAD
-mod spec;
 mod table;
-=======
->>>>>>> 78c247dfe (feat(arbos): initial commit)
 mod vyper;
