@@ -363,6 +363,8 @@ idna_adapter = "=1.1.0"
 # Avoid duplicating `zip 2` and `zip 3`. Remove once all `zip` dependencies are updated to `zip 3`.
 zip-extract = "=0.2.1"
 
+arbos-revm = { path = "../arbos-revm" }
+
 [patch.crates-io]
 ## alloy-core
 # alloy-dyn-abi = { path = "../../alloy-rs/core/crates/dyn-abi" }
