@@ -1,0 +1,30 @@
+[package]
+name = "arbos-revm"
+description = "Arbitrum variant of Revm"
+version = "1.0.0"
+edition = "2021"
+
+[lints.rustdoc]
+all = "warn"
+
+[dependencies]
+revm = { version = "27.0.0", default-features = false, features = ["serde", "optional_eip3541"]}
+serde = { version = "1.0", default-features = false, optional = true }
+once_cell = { version = "1.19", default-features = false }
+
+# arbutil = { path = "../nitro/arbitrator/arbutil", default-features = false }
+# stylus = { path = "../nitro/arbitrator/stylus", default-features = false, features = ["cc_brotli"] }
+# wasmer-types = { path = "../nitro/arbitrator/tools/wasmer/lib/types",  default-features = false }
+
+arbutil = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
+stylus = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false, features = ["cc_brotli"] }
+wasmer-types = { git = "https://github.com/bernard-wagner/nitro", branch = "dev",  default-features = false }
+
+lru = "0.14.0"
+lazy_static = "1.5.0"
+
+[dev-dependencies]
+serde_json = { version = "1.0", default-features = false }
+
+[features]
+serde = ["dep:serde"]

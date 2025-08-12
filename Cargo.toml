@@ -5,6 +5,7 @@ members = [
     "crates/anvil/core/",
     "crates/anvil/rpc/",
     "crates/anvil/server/",
+    "crates/arbos-revm/",
     "crates/cast/",
     "crates/cheatcodes/",
     "crates/cheatcodes/spec/",
@@ -174,6 +175,7 @@ trezor-client.opt-level = "z"
 
 [workspace.dependencies]
 anvil = { path = "crates/anvil" }
+arbos-revm = { path = "crates/arbos-revm" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }
 forge = { path = "crates/forge" }
@@ -362,8 +364,6 @@ flate2 = "1.1"
 idna_adapter = "=1.1.0"
 # Avoid duplicating `zip 2` and `zip 3`. Remove once all `zip` dependencies are updated to `zip 3`.
 zip-extract = "=0.2.1"
-
-arbos-revm = { path = "../arbos-revm" }
 
 [patch.crates-io]
 ## alloy-core
