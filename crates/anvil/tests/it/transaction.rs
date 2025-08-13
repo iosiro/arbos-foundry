@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_hardforks::EthereumHardfork;
 use alloy_network::{EthereumWallet, TransactionBuilder, TransactionResponse};
-use alloy_primitives::{Address, Bytes, FixedBytes, U256, address, hex, map::B256HashSet};
+use alloy_primitives::{address, hex, map::B256HashSet, Address, Bytes, FixedBytes, U256};
 use alloy_provider::{Provider, WsConnect};
 use alloy_rpc_types::{
     AccessList, AccessListItem, BlockId, BlockNumberOrTag, BlockOverrides, BlockTransactions,
@@ -967,8 +967,8 @@ async fn can_stream_pending_transactions() {
         {
             assert_eq!(sent.len(), watch_received.len());
             let sent_txs = sent.iter().map(|tx| tx.transaction_hash).collect::<B256HashSet>();
-            assert_eq!(sent_txs, watch_received.iter().copied().collect());
-            assert_eq!(sent_txs, sub_received.iter().copied().collect());
+            assert_eq!(sent_txs, watch_received.iter().copied().collect::<B256HashSet>());
+            assert_eq!(sent_txs, sub_received.iter().copied().collect::<B256HashSet>());
             break;
         }
     }
