@@ -7,10 +7,10 @@ use revm::{
     precompile::{secp256r1, Precompiles},
     primitives::Address,
 };
-use std::string::String;
 use std::{
     boxed::Box,
     ops::{Deref, DerefMut},
+    string::String,
 };
 
 // Optimism precompile provider

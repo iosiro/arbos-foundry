@@ -609,8 +609,11 @@ impl<'a> InvariantExecutor<'a> {
             ));
         }
 
-        self.executor.inspector_mut().fuzzer =
-            Some(Fuzzer { call_generator, fuzz_state: fuzz_state.clone(), collect: true });
+        self.executor.inspector_mut().set_fuzzer(Fuzzer {
+            call_generator,
+            fuzz_state: fuzz_state.clone(),
+            collect: true,
+        });
 
         // Let's make sure the invariant is sound before actually starting the run:
         // We'll assert the invariant in its initial state, and if it fails, we'll
@@ -787,7 +790,11 @@ impl<'a> InvariantExecutor<'a> {
                     && self.artifact_filters.matches(identifier)
             })
             .map(|(addr, (identifier, abi))| {
-                (*addr, TargetedContract::new(identifier.clone(), abi.clone()))
+                (
+                    *addr,
+                    TargetedContract::new(identifier.clone(), abi.clone())
+                        .with_project_contracts(self.project_contracts),
+                )
             })
             .collect();
         let mut contracts = TargetedContracts { inner: contracts };
@@ -830,8 +837,12 @@ impl<'a> InvariantExecutor<'a> {
             // Identifiers are specified as an array, so we loop through them.
             for identifier in artifacts {
                 // Try to find the contract by name or identifier in the project's contracts.
-                if let Some(abi) = self.project_contracts.find_abi_by_name_or_identifier(identifier)
+                if let Some((_, contract_data)) =
+                    self.project_contracts.iter().find(|(artifact, _)| {
+                        &artifact.name == identifier || &artifact.identifier() == identifier
+                    })
                 {
+                    let abi = &contract_data.abi;
                     combined
                         // Check if there's an entry for the given key in the 'combined' map.
                         .entry(*addr)
@@ -841,7 +852,13 @@ impl<'a> InvariantExecutor<'a> {
                             entry.abi.functions.extend(abi.functions.clone());
                         })
                         // Otherwise insert it into the map.
-                        .or_insert_with(|| TargetedContract::new(identifier.to_string(), abi));
+                        .or_insert_with(|| {
+                            let mut contract =
+                                TargetedContract::new(identifier.to_string(), abi.clone());
+                            contract.storage_layout =
+                                contract_data.storage_layout.as_ref().map(Arc::clone);
+                            contract
+                        });
                 }
             }
         }
@@ -941,7 +958,10 @@ impl<'a> InvariantExecutor<'a> {
                         address
                     )
                 })?;
-                entry.insert(TargetedContract::new(identifier.clone(), abi.clone()))
+                entry.insert(
+                    TargetedContract::new(identifier.clone(), abi.clone())
+                        .with_project_contracts(self.project_contracts),
+                )
             }
         };
         contract.add_selectors(selectors.iter().copied(), should_exclude)?;

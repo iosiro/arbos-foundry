@@ -1,5 +1,5 @@
 use super::{
-    backend::mem::{BlockRequest, DatabaseRef, State, state},
+    backend::mem::{BlockRequest, DatabaseRef, State},
     sign::build_typed_transaction,
 };
 use crate::{
@@ -35,7 +35,7 @@ use alloy_consensus::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Encodable2718;
-use alloy_evm::overrides::OverrideBlockHashes;
+use alloy_evm::overrides::{OverrideBlockHashes, apply_state_overrides};
 use alloy_network::{
     AnyRpcBlock, AnyRpcTransaction, BlockResponse, Ethereum, NetworkWallet, TransactionBuilder,
     TransactionResponse, eip2718::Decodable2718,
@@ -96,7 +96,10 @@ use revm::{
     primitives::eip7702::PER_EMPTY_ACCOUNT_COST,
 };
 use std::{sync::Arc, time::Duration};
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use tokio::{
+    sync::mpsc::{UnboundedReceiver, unbounded_channel},
+    try_join,
+};
 
 /// The client version: `anvil/v{major}.{minor}.{patch}`
 pub const CLIENT_VERSION: &str = concat!("anvil/v", env!("CARGO_PKG_VERSION"));
@@ -345,6 +348,9 @@ impl EthApi {
             }
             EthRequest::AutoImpersonateAccount(enable) => {
                 self.anvil_auto_impersonate_account(enable).await.to_rpc_result()
+            }
+            EthRequest::ImpersonateSignature(signature, address) => {
+                self.anvil_impersonate_signature(signature, address).await.to_rpc_result()
             }
             EthRequest::GetAutoMine(()) => self.anvil_get_auto_mine().to_rpc_result(),
             EthRequest::Mine(blocks, interval) => {
@@ -762,12 +768,9 @@ impl EthApi {
         block_number: Option<BlockId>,
     ) -> Result<alloy_rpc_types::eth::AccountInfo> {
         node_info!("eth_getAccountInfo");
-        let account = self
-            .backend
-            .get_account_at_block(address, Some(self.block_request(block_number).await?))
-            .await?;
-        let code =
-            self.backend.get_code(address, Some(self.block_request(block_number).await?)).await?;
+        let account = self.get_account(address, block_number);
+        let code = self.get_code(address, block_number);
+        let (account, code) = try_join!(account, code)?;
         Ok(alloy_rpc_types::eth::AccountInfo {
             balance: account.balance,
             nonce: account.nonce,
@@ -1819,6 +1822,16 @@ impl EthApi {
         node_info!("anvil_autoImpersonateAccount");
         self.backend.auto_impersonate_account(enabled);
         Ok(())
+    }
+
+    /// Registers a new address and signature pair to impersonate.
+    pub async fn anvil_impersonate_signature(
+        &self,
+        signature: Bytes,
+        address: Address,
+    ) -> Result<()> {
+        node_info!("anvil_impersonateSignature");
+        self.backend.impersonate_signature(signature, address).await
     }
 
     /// Returns true if auto mining is enabled, and false.
@@ -2960,7 +2973,7 @@ impl EthApi {
                 .with_database_at(Some(block_request), |state, mut block| {
                     let mut cache_db = CacheDB::new(state);
                     if let Some(state_overrides) = overrides.state {
-                        state::apply_state_overrides(
+                        apply_state_overrides(
                             state_overrides.into_iter().collect(),
                             &mut cache_db,
                         )?;

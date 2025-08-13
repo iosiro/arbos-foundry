@@ -1,21 +1,17 @@
-use std::num::NonZeroUsize;
-use std::vec::Vec;
+use std::{num::NonZeroUsize, vec::Vec};
 
 use arbutil::{evm::EvmData, Bytes20, Bytes32};
 
 use lru::LruCache;
-use revm::primitives::FixedBytes;
 use revm::{
     context::{Block, Cfg, ContextTr, Transaction},
     interpreter::InputsImpl,
-    primitives::{alloy_primitives::U64, keccak256, U256},
+    primitives::{alloy_primitives::U64, keccak256, FixedBytes, U256},
 };
-use stylus::prover::machine::Module;
-use stylus::prover::programs::StylusData;
+use stylus::prover::{machine::Module, programs::StylusData};
 use wasmer_types::lib::std::sync::Mutex;
 
-use crate::api::ArbitrumContextTr;
-use crate::chain_config::ArbitrumChainInfoTr;
+use crate::{api::ArbitrumContextTr, chain_config::ArbitrumChainInfoTr};
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
 

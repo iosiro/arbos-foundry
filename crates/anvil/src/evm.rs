@@ -1,13 +1,13 @@
-use std::fmt::Debug;
-
 use alloy_evm::{
     Database, Evm,
     eth::EthEvmContext,
     precompiles::{DynPrecompile, PrecompileInput, PrecompilesMap},
 };
+
 use foundry_evm_core::either_evm::EitherEvm;
 use op_revm::OpContext;
 use revm::{Inspector, precompile::PrecompileWithAddress};
+use std::fmt::Debug;
 
 /// Object-safe trait that enables injecting extra precompiles when using
 /// `anvil` as a library.
@@ -85,7 +85,7 @@ mod tests {
     /// Custom precompile that echoes the input data.
     /// In this example it uses `0xdeadbeef` as the input data, returning it as output.
     fn custom_echo_precompile(input: &[u8], _gas_limit: u64) -> PrecompileResult {
-        Ok(PrecompileOutput { bytes: Bytes::copy_from_slice(input), gas_used: 0 })
+        Ok(PrecompileOutput { bytes: Bytes::copy_from_slice(input), gas_used: 0, reverted: false })
     }
 
     /// Creates a new EVM instance with the custom precompile factory.

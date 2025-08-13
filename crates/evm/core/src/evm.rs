@@ -42,11 +42,11 @@ use arbos_revm::{
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
-pub fn new_evm_with_inspector<'i, 'db, I: InspectorExt + ?Sized>(
+pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     db: &'db mut dyn DatabaseExt,
     env: Env,
-    inspector: &'i mut I,
-) -> FoundryEvm<'db, &'i mut I> {
+    inspector: I,
+) -> FoundryEvm<'db, I> {
     let mut ctx = EthEvmContext {
         journaled_state: {
             let mut journal = Journal::new(db);
@@ -331,8 +331,9 @@ impl<'db, I: InspectorExt> FoundryHandler<'db, I> {
                     return Ok(Some(FrameResult::Call(CallOutcome {
                         result: InterpreterResult {
                             result: InstructionResult::Revert,
-                            output: Bytes::copy_from_slice(
-                                format!("missing CREATE2 deployer: {create2_deployer}").as_bytes(),
+                            output: Bytes::from(
+                                format!("missing CREATE2 deployer: {create2_deployer}")
+                                    .into_bytes(),
                             ),
                             gas: Gas::new(gas_limit),
                         },

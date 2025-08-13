@@ -36,7 +36,7 @@ use revm::{
         interpreter::EthInterpreter,
         interpreter_action::FrameInit,
         interpreter_types::InputsTr,
-        CallInput, CallInputs, CreateInputs, FrameInput, Gas, Host, InputsImpl, InstructionResult,
+        CallInput, CallInputs, CreateInputs, FrameInput, Gas, InputsImpl, InstructionResult,
         InterpreterAction, InterpreterResult,
     },
     primitives::{hardfork::SpecId, Address, Bytes, Log, B256},
@@ -65,7 +65,8 @@ pub struct ArbitrumEvm<CTX, INSP, P, I = EthInstructions<EthInterpreter, CTX>, F
 );
 
 impl<CTX, I, INSP, P, F> ArbitrumEvm<CTX, INSP, P, I, F> {
-    /// Create a new EVM instance with a given context, inspector, instruction set, and precompile provider.
+    /// Create a new EVM instance with a given context, inspector, instruction set, and precompile
+    /// provider.
     pub fn new_with_inspector(ctx: CTX, inspector: INSP, instruction: I, precompiles: P) -> Self {
         ArbitrumEvm(Evm {
             ctx,
@@ -929,7 +930,8 @@ where
     ///
     /// It will call:
     /// * [`Inspector::call`],[`Inspector::create`] to inspect call, create and eofcreate.
-    /// * [`Inspector::call_end`],[`Inspector::create_end`] to inspect call, create and eofcreate end.
+    /// * [`Inspector::call_end`],[`Inspector::create_end`] to inspect call, create and eofcreate
+    ///   end.
     /// * [`Inspector::initialize_interp`] to inspect initialized interpreter.
     fn inspect_run_exec_loop(
         &mut self,
