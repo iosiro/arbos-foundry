@@ -39,10 +39,7 @@ use revm::{
         CallInput, CallInputs, CreateInputs, FrameInput, Gas, Host, InputsImpl, InstructionResult,
         InterpreterAction, InterpreterResult,
     },
-    primitives::{
-        hardfork::SpecId,
-        Address, Bytes, Log, B256,
-    },
+    primitives::{hardfork::SpecId, Address, Bytes, Log, B256},
     Database, Inspector,
 };
 use stylus::{
@@ -70,14 +67,13 @@ pub struct ArbitrumEvm<CTX, INSP, P, I = EthInstructions<EthInterpreter, CTX>, F
 impl<CTX, I, INSP, P, F> ArbitrumEvm<CTX, INSP, P, I, F> {
     /// Create a new EVM instance with a given context, inspector, instruction set, and precompile provider.
     pub fn new_with_inspector(ctx: CTX, inspector: INSP, instruction: I, precompiles: P) -> Self {
-        ArbitrumEvm (Evm {
-                ctx,
-                inspector,
-                instruction,
-                precompiles,
-                frame_stack: FrameStack::new(),
-            }
-        )
+        ArbitrumEvm(Evm {
+            ctx,
+            inspector,
+            instruction,
+            precompiles,
+            frame_stack: FrameStack::new(),
+        })
     }
 }
 
@@ -400,9 +396,7 @@ where
             }));
         }
 
-        let ink_limit = stylus_config
-            .pricing
-            .gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
+        let ink_limit = stylus_config.pricing.gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
 
         gas.spend_all();
 
@@ -416,10 +410,7 @@ where
             Ok(outcome) => outcome,
         };
 
-        let mut gas_left = stylus_config
-            .pricing
-            .ink_to_gas(instance.ink_left().into())
-            .0;
+        let mut gas_left = stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
 
         let (kind, data) = outcome.into_data();
 
@@ -436,11 +427,7 @@ where
 
         gas.erase_cost(gas_left);
 
-        Some(InterpreterAction::Return(InterpreterResult {
-            result,
-            output: data.into(),
-            gas,
-        }))
+        Some(InterpreterAction::Return(InterpreterResult { result, output: data.into(), gas }))
     }
 
     pub fn frame_run_stylus(&mut self) -> Option<InterpreterAction> {
@@ -483,11 +470,7 @@ where
         };
 
         if is_static && !value.is_zero() {
-            return (
-                Status::WriteProtection.into(),
-                VecReader::new(vec![]),
-                ArbGas(gas_left),
-            );
+            return (Status::WriteProtection.into(), VecReader::new(vec![]), ArbGas(gas_left));
         }
 
         let gas_limit = if self
@@ -521,10 +504,7 @@ where
         let next_action = InterpreterAction::NewFrame(first_frame_input);
 
         let frame_result: Result<_, ContextError<<<CTX as ContextTr>::Db as Database>::Error>> =
-            self.0
-                .frame_stack
-                .get()
-                .process_next_action(&mut self.0.ctx, next_action);
+            self.0.frame_stack.get().process_next_action(&mut self.0.ctx, next_action);
 
         let original_frame_stack = mem::replace(&mut self.0.frame_stack, FrameStack::new());
 
@@ -532,12 +512,7 @@ where
             let result = call_handler(self, frame_init);
 
             self.0.frame_stack = original_frame_stack;
-            self.0
-                .frame_stack()
-                .get()
-                .interpreter
-                .memory
-                .free_child_context();
+            self.0.frame_stack().get().interpreter.memory.free_child_context();
 
             if let Ok(FrameResult::Call(call_outcome)) = result {
                 gas.erase_cost(call_outcome.gas().remaining());
@@ -546,14 +521,10 @@ where
                     VecReader::new(call_outcome.output().to_vec()),
                     ArbGas(gas.spent()),
                 );
-            }    
+            }
         }
 
-        (
-            Status::Failure.into(),
-            VecReader::new(vec![]),
-            ArbGas(gas.spent()),
-        )
+        (Status::Failure.into(), VecReader::new(vec![]), ArbGas(gas.spent()))
     }
 
     /// Handle contract creation (Create1, Create2)
@@ -616,9 +587,7 @@ where
             } else {
                 return error_response;
             };
-            CreateScheme::Create2 {
-                salt: salt.unwrap(),
-            }
+            CreateScheme::Create2 { salt: salt.unwrap() }
         } else {
             gas_cost += CREATE;
             CreateScheme::Create
@@ -634,11 +603,7 @@ where
 
         let gas_limit = gas_remaining - gas_cost;
 
-        let gas_stipend = if spec.is_enabled_in(SpecId::TANGERINE) {
-            gas_limit / 64
-        } else {
-            0
-        };
+        let gas_stipend = if spec.is_enabled_in(SpecId::TANGERINE) { gas_limit / 64 } else { 0 };
 
         let mut gas = Gas::new(gas_limit);
         _ = gas.record_cost(gas_stipend);
@@ -656,10 +621,7 @@ where
         let next_action = InterpreterAction::NewFrame(first_frame_input);
 
         let frame_result: Result<_, ContextError<<<CTX as ContextTr>::Db as Database>::Error>> =
-            self.0
-                .frame_stack
-                .get()
-                .process_next_action(&mut self.0.ctx, next_action);
+            self.0.frame_stack.get().process_next_action(&mut self.0.ctx, next_action);
 
         let original_frame_stack = mem::replace(&mut self.0.frame_stack, FrameStack::new());
 
@@ -667,12 +629,7 @@ where
             let result = call_handler(self, frame_init);
 
             self.0.frame_stack = original_frame_stack;
-            self.0
-                .frame_stack()
-                .get()
-                .interpreter
-                .memory
-                .free_child_context();
+            self.0.frame_stack().get().interpreter.memory.free_child_context();
 
             if let Ok(FrameResult::Create(create_outcome)) = result {
                 if InstructionResult::Revert == *create_outcome.instruction_result() {
@@ -693,7 +650,7 @@ where
                         ArbGas(gas.spent()),
                     );
                 }
-            }            
+            }
         }
 
         error_response
@@ -774,11 +731,7 @@ where
                 let slot = buffer::take_u256(&mut data);
                 if let Some(result) = context.sload(input.target_address, slot) {
                     let gas = sload_cost(spec.into(), result.is_cold);
-                    (
-                        result.to_be_bytes_vec(),
-                        VecReader::new(vec![]),
-                        ArbGas(gas),
-                    )
+                    (result.to_be_bytes_vec(), VecReader::new(vec![]), ArbGas(gas))
                 } else {
                     (vec![], VecReader::new(vec![]), ArbGas(0))
                 }
@@ -822,11 +775,7 @@ where
                     }
                 }
 
-                (
-                    Status::Success.into(),
-                    VecReader::new(vec![]),
-                    ArbGas(total_cost),
-                )
+                (Status::Success.into(), VecReader::new(vec![]), ArbGas(total_cost))
             }
 
             EvmApiMethod::GetTransientBytes32 => {
@@ -837,11 +786,7 @@ where
 
             EvmApiMethod::SetTransientBytes32 => {
                 if is_static {
-                    return (
-                        Status::WriteProtection.into(),
-                        VecReader::new(vec![]),
-                        ArbGas(0),
-                    );
+                    return (Status::WriteProtection.into(), VecReader::new(vec![]), ArbGas(0));
                 }
                 let key = buffer::take_u256(&mut data);
                 let value = buffer::take_u256(&mut data);
@@ -852,11 +797,7 @@ where
                 let address = buffer::take_address(&mut data);
                 let balance = context.balance(address).unwrap();
                 let gas = wasm_account_touch(context, balance.is_cold, false);
-                (
-                    balance.to_be_bytes_vec(),
-                    VecReader::new(vec![]),
-                    ArbGas(gas),
-                )
+                (balance.to_be_bytes_vec(), VecReader::new(vec![]), ArbGas(gas))
             }
 
             EvmApiMethod::AccountCode => {

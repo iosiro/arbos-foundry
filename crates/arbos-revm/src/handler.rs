@@ -18,10 +18,7 @@ pub struct ArbitrumHandler<EVM, ERROR, FRAME> {
 
 impl<EVM, ERROR, FRAME> ArbitrumHandler<EVM, ERROR, FRAME> {
     pub fn new() -> Self {
-        Self {
-            mainnet: MainnetHandler::default(),
-            _phantom: core::marker::PhantomData,
-        }
+        Self { mainnet: MainnetHandler::default(), _phantom: core::marker::PhantomData }
     }
 }
 

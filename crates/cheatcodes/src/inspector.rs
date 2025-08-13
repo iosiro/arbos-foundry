@@ -35,7 +35,11 @@ use alloy_sol_types::{SolCall, SolInterface, SolValue};
 use arbos_revm::chain_config::ArbitrumChainInfo;
 use foundry_common::{SELECTOR_LEN, TransactionMaybeSigned, evm::Breakpoints};
 use foundry_evm_core::{
-    abi::Vm::stopExpectSafeMemoryCall, backend::{DatabaseError, DatabaseExt, RevertDiagnostic}, constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME}, evm::{new_evm_with_existing_context, EthEvmContext, FoundryEvm}, InspectorExt
+    InspectorExt,
+    abi::Vm::stopExpectSafeMemoryCall,
+    backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
+    constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
+    evm::{EthEvmContext, FoundryEvm, new_evm_with_existing_context},
 };
 use foundry_evm_traces::{TracingInspector, TracingInspectorConfig};
 use foundry_wallets::multi_wallet::MultiWallet;

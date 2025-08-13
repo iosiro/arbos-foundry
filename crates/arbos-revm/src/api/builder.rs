@@ -54,15 +54,13 @@ where
         ArbitrumPrecompiles,
         EthInstructions<EthInterpreter, Self::Context>,
     > {
-        ArbitrumEvm (
-            Evm {
-                ctx: self,
-                inspector: (),
-                instruction: EthInstructions::default(),
-                precompiles: ArbitrumPrecompiles::default(),
-                frame_stack: FrameStack::default(),
-            }
-        )
+        ArbitrumEvm(Evm {
+            ctx: self,
+            inspector: (),
+            instruction: EthInstructions::default(),
+            precompiles: ArbitrumPrecompiles::default(),
+            frame_stack: FrameStack::default(),
+        })
     }
 
     fn build_arbitrum_with_inspector<INSP>(
@@ -74,14 +72,12 @@ where
         ArbitrumPrecompiles,
         EthInstructions<EthInterpreter, Self::Context>,
     > {
-        ArbitrumEvm (
-            Evm {
-                ctx: self,
-                inspector,
-                instruction: EthInstructions::default(),
-                precompiles: ArbitrumPrecompiles::default(),
-                frame_stack: FrameStack::default(),
-            }
-        )
+        ArbitrumEvm(Evm {
+            ctx: self,
+            inspector,
+            instruction: EthInstructions::default(),
+            precompiles: ArbitrumPrecompiles::default(),
+            frame_stack: FrameStack::default(),
+        })
     }
 }

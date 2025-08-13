@@ -49,27 +49,13 @@ where
     fn ctx_inspector_frame(
         &mut self,
     ) -> (&mut Self::Context, &mut Self::Inspector, &mut Self::Frame) {
-        (
-            &mut self.0.ctx,
-            &mut self.0.inspector,
-            self.0.frame_stack.get(),
-        )
+        (&mut self.0.ctx, &mut self.0.inspector, self.0.frame_stack.get())
     }
 
     fn ctx_inspector_frame_instructions(
         &mut self,
-    ) -> (
-        &mut Self::Context,
-        &mut Self::Inspector,
-        &mut Self::Frame,
-        &mut Self::Instructions,
-    ) {
-        (
-            &mut self.0.ctx,
-            &mut self.0.inspector,
-            self.0.frame_stack.get(),
-            &mut self.0.instruction,
-        )
+    ) -> (&mut Self::Context, &mut Self::Inspector, &mut Self::Frame, &mut Self::Instructions) {
+        (&mut self.0.ctx, &mut self.0.inspector, self.0.frame_stack.get(), &mut self.0.instruction)
     }
 
     /// Run the frame from the top of the stack. Returns the frame init or result.

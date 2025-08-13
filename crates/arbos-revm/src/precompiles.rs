@@ -24,13 +24,7 @@ pub struct ArbitrumPrecompiles {
 impl ArbitrumPrecompiles {
     /// Create a new [`OpPrecompiles`] with the given precompiles.
     pub fn new(precompiles: &'static Precompiles, spec: ArbitrumSpecId) -> Self {
-        Self {
-            inner: EthPrecompiles {
-                precompiles,
-                spec: spec.into_eth_spec(),
-            },
-            _spec: spec,
-        }
+        Self { inner: EthPrecompiles { precompiles, spec: spec.into_eth_spec() }, _spec: spec }
     }
 
     /// Create a new precompile provider with the given optimismispec.
@@ -82,8 +76,7 @@ impl<CTX: ContextTr> PrecompileProvider<CTX> for ArbitrumPrecompiles {
         _is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<Self::Output>, String> {
-        self.inner
-            .run(context, address, inputs, _is_static, gas_limit)
+        self.inner.run(context, address, inputs, _is_static, gas_limit)
     }
 
     #[inline]

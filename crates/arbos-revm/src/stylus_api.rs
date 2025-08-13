@@ -41,10 +41,6 @@ pub fn wasm_account_touch<CTX>(context: CTX, is_cold: bool, with_code: bool) -> 
 where
     CTX: ArbitrumContextTr,
 {
-    let code_cost = if with_code {
-        context.cfg().max_code_size() as u64 / 24576 * 700
-    } else {
-        0
-    };
+    let code_cost = if with_code { context.cfg().max_code_size() as u64 / 24576 * 700 } else { 0 };
     code_cost + warm_cold_cost(is_cold)
 }

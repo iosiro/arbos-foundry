@@ -1,8 +1,6 @@
 //! Implementation of the [`ExecuteEvm`] trait for the [`ArbitrumEvm`].
 use crate::{
-    chain_config::{ArbitrumChainInfoTr},
-    evm::ArbitrumEvm,
-    handler::ArbitrumHandler,
+    chain_config::ArbitrumChainInfoTr, evm::ArbitrumEvm, handler::ArbitrumHandler,
     ArbitrumHaltReason, ArbitrumTransactionError,
 };
 use revm::{

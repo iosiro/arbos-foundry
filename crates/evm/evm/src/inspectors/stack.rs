@@ -9,7 +9,9 @@ use alloy_primitives::{
 };
 use foundry_cheatcodes::{CheatcodesExecutor, Wallets};
 use foundry_evm_core::{
-    backend::{DatabaseExt, JournaledState}, evm::{new_evm_with_inspector, EthEvmContext}, ContextExt, Env, InspectorExt
+    ContextExt, Env, InspectorExt,
+    backend::{DatabaseExt, JournaledState},
+    evm::{EthEvmContext, new_evm_with_inspector},
 };
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};

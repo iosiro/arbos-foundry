@@ -14,18 +14,31 @@ use alloy_evm::{
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
+    Context, Journal,
     context::{
-        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState}, BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv
-    }, handler::{
-        instructions::EthInstructions, EthFrame, EthPrecompiles, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult
-    }, inspector::{InspectorEvmTr, InspectorHandler}, interpreter::{
-        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok, CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome, FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory
-    }, precompile::{
-        secp256r1::{P256VERIFY, P256VERIFY_BASE_GAS_FEE}, PrecompileSpecId, Precompiles
-    }, primitives::hardfork::SpecId, Context, Journal
+        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
+        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
+    },
+    handler::{
+        EthFrame, EthPrecompiles, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult,
+        instructions::EthInstructions,
+    },
+    inspector::{InspectorEvmTr, InspectorHandler},
+    interpreter::{
+        CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome,
+        FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory,
+        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok,
+    },
+    precompile::{
+        PrecompileSpecId, Precompiles,
+        secp256r1::{P256VERIFY, P256VERIFY_BASE_GAS_FEE},
+    },
+    primitives::hardfork::SpecId,
 };
 
-use arbos_revm::{api::default_ctx::ArbitrumContext, chain_config::ArbitrumChainInfo, ArbitrumEvm as RevmEvm};
+use arbos_revm::{
+    ArbitrumEvm as RevmEvm, api::default_ctx::ArbitrumContext, chain_config::ArbitrumChainInfo,
+};
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
@@ -76,7 +89,6 @@ pub fn new_evm_with_existing_context<'a>(
             inspector,
             EthInstructions::default(),
             get_precompiles(spec),
-   
         ),
     };
 
@@ -179,7 +191,11 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     }
 
     fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-        (&self.inner.0.ctx.journaled_state.database, &self.inner.0.inspector, &self.inner.0.precompiles)
+        (
+            &self.inner.0.ctx.journaled_state.database,
+            &self.inner.0.inspector,
+            &self.inner.0.precompiles,
+        )
     }
 
     fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
