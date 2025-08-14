@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["take_address","take_bytes32","take_rest","take_u16","take_u256","take_u32","take_u64"],"macro":["take_bytes","take_int"]};

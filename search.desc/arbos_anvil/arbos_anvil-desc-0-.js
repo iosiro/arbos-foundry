@@ -1,0 +1,1 @@
+searchState.loadedDescShard("arbos_anvil", 0, "The <code>anvil</code> CLI: a fast local Ethereum development node, …")

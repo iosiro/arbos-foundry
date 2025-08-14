@@ -1,0 +1,1 @@
+searchState.loadedDescShard("arbos_cast", 0, "The <code>cast</code> CLI: a Swiss Army knife for interacting with EVM …")

@@ -1,0 +1,1 @@
+searchState.loadedDescShard("arbos_chisel", 0, "The <code>chisel</code> CLI: a fast, utilitarian, and verbose Solidity …")
