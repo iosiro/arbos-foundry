@@ -1,4 +1,4 @@
-//! Contains trait [`DefaultOp`] used to create a default context.
+//! Contains trait [`DefaultArbitrum`] used to create a default context.
 use revm::{
     context::{BlockEnv, CfgEnv, TxEnv},
     database_interface::EmptyDB,

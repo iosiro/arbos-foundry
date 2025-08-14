@@ -22,7 +22,7 @@ pub struct ArbitrumPrecompiles {
 }
 
 impl ArbitrumPrecompiles {
-    /// Create a new [`OpPrecompiles`] with the given precompiles.
+    /// Create a new [`ArbitrumPrecompiles`] with the given precompiles.
     pub fn new(precompiles: &'static Precompiles, spec: ArbitrumSpecId) -> Self {
         Self { inner: EthPrecompiles { precompiles, spec: spec.into_eth_spec() }, _spec: spec }
     }
