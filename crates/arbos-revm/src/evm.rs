@@ -926,8 +926,6 @@ where
 
     /// Run inspection on execution loop.
     ///
-    /// This method acts as [`run_exec_loop`] method for inspection.
-    ///
     /// It will call:
     /// * [`Inspector::call`],[`Inspector::create`] to inspect call, create and eofcreate.
     /// * [`Inspector::call_end`],[`Inspector::create_end`] to inspect call, create and eofcreate
