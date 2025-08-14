@@ -132,6 +132,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+          toolchain: 1.88.0
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}

@@ -50,9 +50,10 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
           target: ${{ matrix.target }}
+          toolchain: 1.88.0
       - uses: taiki-e/install-action@nextest
 
       # External tests dependencies
