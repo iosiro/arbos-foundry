@@ -147,6 +147,13 @@ impl ExtTester {
             let forge_bin = prj.exe_root.join(format!("../arbos-forge{}", env::consts::EXE_SUFFIX));
             let forge_dir = forge_bin.parent().expect("forge path should have a parent");
 
+            // copy arbos-forge to forge
+            let forge_fallback_bin = prj.exe_root.join(format!("../forge{}", env::consts::EXE_SUFFIX));
+            if !forge_fallback_bin.exists() {
+                fs::copy(&forge_bin, &forge_fallback_bin)
+                    .expect("failed to copy arbos-forge to forge");
+            }
+
             let existing_path = std::env::var_os("PATH").unwrap_or_default();
             let mut new_paths = vec![vyper_dir.to_path_buf(), forge_dir.to_path_buf()];
             new_paths.extend(std::env::split_paths(&existing_path));
