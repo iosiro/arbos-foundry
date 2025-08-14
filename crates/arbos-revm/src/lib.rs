@@ -1,3 +1,6 @@
+//! # arbos-revm
+//!
+//! This crate provides the Arbitrum EVM implementation
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 mod buffer;
 
