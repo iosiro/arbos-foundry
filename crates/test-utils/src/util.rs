@@ -144,8 +144,16 @@ impl ExtTester {
         // Export vyper and forge in test command - workaround for snekmate venom tests.
         if let Some(vyper) = &prj.inner.project().compiler.vyper {
             let vyper_dir = vyper.path.parent().expect("vyper path should have a parent");
-            let forge_bin = prj.exe_root.join(format!("../forge{}", env::consts::EXE_SUFFIX));
+            let forge_bin = prj.exe_root.join(format!("../arbos-forge{}", env::consts::EXE_SUFFIX));
             let forge_dir = forge_bin.parent().expect("forge path should have a parent");
+
+            // copy arbos-forge to forge
+            let forge_fallback_bin =
+                prj.exe_root.join(format!("../forge{}", env::consts::EXE_SUFFIX));
+            if !forge_fallback_bin.exists() {
+                fs::copy(&forge_bin, &forge_fallback_bin)
+                    .expect("failed to copy arbos-forge to forge");
+            }
 
             let existing_path = std::env::var_os("PATH").unwrap_or_default();
             let mut new_paths = vec![vyper_dir.to_path_buf(), forge_dir.to_path_buf()];
@@ -708,7 +716,7 @@ impl TestProject {
 
     /// Returns the path to the forge executable.
     pub fn forge_bin(&self) -> Command {
-        let forge = self.exe_root.join(format!("../forge{}", env::consts::EXE_SUFFIX));
+        let forge = self.exe_root.join(format!("../arbos-forge{}", env::consts::EXE_SUFFIX));
         let forge = forge.canonicalize().unwrap_or_else(|_| forge.clone());
         let mut cmd = Command::new(forge);
         cmd.current_dir(self.inner.root());
@@ -719,7 +727,7 @@ impl TestProject {
 
     /// Returns the path to the cast executable.
     pub fn cast_bin(&self) -> Command {
-        let cast = self.exe_root.join(format!("../cast{}", env::consts::EXE_SUFFIX));
+        let cast = self.exe_root.join(format!("../arbos-cast{}", env::consts::EXE_SUFFIX));
         let cast = cast.canonicalize().unwrap_or_else(|_| cast.clone());
         let mut cmd = Command::new(cast);
         // disable color output for comparisons

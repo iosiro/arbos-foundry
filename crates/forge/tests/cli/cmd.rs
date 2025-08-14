@@ -24,7 +24,7 @@ forgetest!(print_help, |_prj, cmd| {
     cmd.arg("--help").assert_success().stdout_eq(str![[r#"
 Build, test, fuzz, debug and deploy Solidity contracts
 
-Usage: forge[..] <COMMAND>
+Usage: arbos-forge[..] <COMMAND>
 
 Commands:
 ...

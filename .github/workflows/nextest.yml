@@ -50,11 +50,11 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
           target: ${{ matrix.target }}
+          toolchain: 1.88.0
       - uses: taiki-e/install-action@nextest
-
       # External tests dependencies
       - name: Setup Node.js
         if: contains(matrix.name, 'external')
@@ -89,6 +89,10 @@ jobs:
           git config --global user.name "GitHub Actions Bot"
           git config --global user.email "<>"
           git config --global url."https://github.com/".insteadOf "git@github.com:"
+      - name: Set git config for long paths
+        if: contains(matrix.runner_label, 'windows')
+        run: |
+          git config --system core.longpaths true          
       - name: Test
         env:
           SVM_TARGET_PLATFORM: ${{ matrix.svm_target_platform }}

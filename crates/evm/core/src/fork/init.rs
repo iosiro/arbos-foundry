@@ -90,6 +90,7 @@ pub fn configure_env(chain_id: u64, memory_limit: u64, disable_block_gas_limit: 
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
     cfg.disable_eip3607 = true;
+    cfg.disable_eip3541 = true;
     cfg.disable_block_gas_limit = disable_block_gas_limit;
     cfg.disable_nonce_check = true;
     cfg

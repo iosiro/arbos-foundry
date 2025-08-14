@@ -17,7 +17,7 @@ use std::{path::PathBuf, str::FromStr};
 /// A Swiss Army knife for interacting with Ethereum applications from the command line.
 #[derive(Parser)]
 #[command(
-    name = "cast",
+    name = "arbos-cast",
     version = SHORT_VERSION,
     long_version = LONG_VERSION,
     after_help = "Find more information in the book: https://getfoundry.sh/cast/overview",
