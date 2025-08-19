@@ -90,22 +90,22 @@ jobs:
           # `target`: Rust build target triple
           # `platform` and `arch`: Used in tarball names
           # `svm`: target platform to use for the Solc binary: https://github.com/roynalnaruto/svm-rs/blob/84cbe0ac705becabdc13168bae28a45ad2299749/svm-builds/build.rs#L4-L24
-          - runner: Linux-22.04
+          - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             svm_target_platform: linux-amd64
             platform: linux
             arch: amd64
-          - runner: Linux-22.04
+          - runner: ubuntu-22.04
             target: x86_64-unknown-linux-musl
             svm_target_platform: linux-amd64
             platform: alpine
             arch: amd64
-          - runner: Linux-22.04
+          - runner: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             svm_target_platform: linux-aarch64
             platform: linux
             arch: arm64
-          - runner: Linux-22.04
+          - runner: ubuntu-22.04
             target: aarch64-unknown-linux-musl
             svm_target_platform: linux-aarch64
             platform: alpine
@@ -137,6 +137,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
           cache-on-failure: true
+
+      - name: Set git config for long paths
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          git config --system core.longpaths true
 
       - name: Apple M1 setup
         if: matrix.target == 'aarch64-apple-darwin'
@@ -175,7 +180,7 @@ jobs:
             cargo build "${flags[@]}"
           fi
 
-          bins=(anvil cast chisel forge)
+          bins=(arbos-cast arbos-forge)
           for name in "${bins[@]}"; do
             bin=$OUT_DIR/$name$ext
             echo ""
@@ -196,16 +201,16 @@ jobs:
         shell: bash
         run: |
           if [[ "$PLATFORM_NAME" == "linux" || "$PLATFORM_NAME" == "alpine" ]]; then
-            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C $OUT_DIR forge cast anvil chisel
+            tar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C $OUT_DIR arbos-forge arbos-cast
             echo "file_name=foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> $GITHUB_OUTPUT
           elif [ "$PLATFORM_NAME" == "darwin" ]; then
             # We need to use gtar here otherwise the archive is corrupt.
             # See: https://github.com/actions/virtual-environments/issues/2619
-            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C $OUT_DIR forge cast anvil chisel
+            gtar -czvf "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C $OUT_DIR arbos-forge arbos-cast
             echo "file_name=foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> $GITHUB_OUTPUT
           else
             cd $OUT_DIR
-            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" forge.exe cast.exe anvil.exe chisel.exe
+            7z a -tzip "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe
             mv "foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
             echo "file_name=foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> $GITHUB_OUTPUT
           fi
@@ -220,15 +225,15 @@ jobs:
         shell: bash
         run: |
           sudo apt-get -y install help2man
-          help2man -N $OUT_DIR/forge > forge.1
-          help2man -N $OUT_DIR/cast > cast.1
-          help2man -N $OUT_DIR/anvil > anvil.1
-          help2man -N $OUT_DIR/chisel > chisel.1
-          gzip forge.1
-          gzip cast.1
-          gzip anvil.1
-          gzip chisel.1
-          tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" forge.1.gz cast.1.gz anvil.1.gz chisel.1.gz
+          help2man -N $OUT_DIR/arbos-forge > arbos-forge.1
+          help2man -N $OUT_DIR/arbos-cast > arbos-cast.1
+          help2man -N $OUT_DIR/arbos-anvil > arbos-anvil.1
+          help2man -N $OUT_DIR/arbos-chisel > arbos-chisel.1
+          gzip arbos-forge.1
+          gzip arbos-cast.1
+          gzip arbos-anvil.1
+          gzip arbos-chisel.1
+          tar -czvf "foundry_man_${VERSION_NAME}.tar.gz" arbos-forge.1.gz arbos-cast.1.gz arbos-anvil.1.gz arbos-chisel.1.gz
           echo "foundry_man=foundry_man_${VERSION_NAME}.tar.gz" >> $GITHUB_OUTPUT
 
       - name: Binaries attestation
@@ -236,10 +241,8 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            ${{ env.anvil_bin_path }}
-            ${{ env.cast_bin_path }}
-            ${{ env.chisel_bin_path }}
-            ${{ env.forge_bin_path }}
+            ${{ env.arbos-cast_bin_path }}
+            ${{ env.arbos-forge_bin_path }}
 
       - name: Record attestation URL
         run: |
