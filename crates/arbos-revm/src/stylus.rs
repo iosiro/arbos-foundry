@@ -1,12 +1,12 @@
-use std::{num::NonZeroUsize, vec::Vec};
+use std::num::NonZeroUsize;
 
-use arbutil::{evm::EvmData, Bytes20, Bytes32};
+use arbutil::{Bytes20, Bytes32, evm::EvmData};
 
 use lru::LruCache;
 use revm::{
     context::{Block, Cfg, ContextTr, Transaction},
     interpreter::InputsImpl,
-    primitives::{alloy_primitives::U64, keccak256, FixedBytes, U256},
+    primitives::{FixedBytes, U256, alloy_primitives::U64, keccak256},
 };
 use stylus::prover::{machine::Module, programs::StylusData};
 use wasmer_types::lib::std::sync::Mutex;

@@ -1,4 +1,4 @@
-use std::{boxed::Box, sync::Arc, vec::Vec};
+use std::sync::Arc;
 
 use arbutil::evm::{
     api::{EvmApiMethod, Gas, VecReader},

@@ -1,5 +1,4 @@
-use revm::primitives::{Address, Bytes, B256, U256};
-use std::vec::Vec;
+use revm::primitives::{Address, B256, Bytes, U256};
 
 macro_rules! take_bytes {
     ($data:expr, $len:expr) => {{

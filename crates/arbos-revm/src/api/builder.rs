@@ -1,14 +1,14 @@
 //! Arbitrum builder trait [`ArbitrumBuilder`] used to build [`ArbitrumEvm`].
 
 use revm::{
+    Context, Database,
     context::{Block, Cfg, Evm, FrameStack, Transaction},
     context_interface::JournalTr,
     handler::instructions::EthInstructions,
     interpreter::interpreter::EthInterpreter,
-    Context, Database,
 };
 
-use crate::{chain_config::ArbitrumChainInfoTr, ArbitrumEvm, ArbitrumPrecompiles};
+use crate::{ArbitrumEvm, ArbitrumPrecompiles, chain_config::ArbitrumChainInfoTr};
 
 /// Type alias for default ArbitrumEvm
 pub type DefaultArbitrumEvm<CTX, INSP = ()> =

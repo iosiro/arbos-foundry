@@ -2,12 +2,12 @@ use std::ops::{Deref, DerefMut};
 
 use revm::{
     context::{
+        Transaction, TxEnv,
         result::{EVMError, InvalidTransaction},
         transaction::TransactionError,
-        Transaction, TxEnv,
     },
     handler::SystemCallTx,
-    primitives::{Address, Bytes, TxKind, B256, U256},
+    primitives::{Address, B256, Bytes, TxKind, U256},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,7 +21,7 @@ impl TransactionError for ArbitrumTransactionError {}
 impl std::fmt::Display for ArbitrumTransactionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ArbitrumTransactionError::Base(e) => e.fmt(f),
+            Self::Base(e) => e.fmt(f),
         }
     }
 }
@@ -64,11 +64,7 @@ impl SystemCallTx for ArbitrumTransaction {
         system_contract_address: Address,
         data: Bytes,
     ) -> Self {
-        ArbitrumTransaction::new(TxEnv::new_system_tx_with_caller(
-            caller,
-            system_contract_address,
-            data,
-        ))
+        Self::new(TxEnv::new_system_tx_with_caller(caller, system_contract_address, data))
     }
 
     fn new_system_tx(system_contract_address: Address, data: Bytes) -> Self {

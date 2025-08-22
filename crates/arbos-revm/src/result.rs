@@ -6,7 +6,7 @@ pub struct ArbitrumHaltReason(pub HaltReason);
 
 impl From<HaltReason> for ArbitrumHaltReason {
     fn from(value: HaltReason) -> Self {
-        ArbitrumHaltReason(value)
+        Self(value)
     }
 }
 
