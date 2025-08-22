@@ -1,24 +1,25 @@
 [package]
 name = "arbos-revm"
 description = "Arbitrum variant of Revm"
-version = "0.0.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
 
-[lints.rustdoc]
-all = "warn"
+[lints]
+workspace = true
 
 [dependencies]
 revm = { workspace = true, default-features = false, features = ["serde", "optional_eip3541"]}
 serde = {  workspace = true, optional = true }
 once_cell = { version = "1.21" }
-
-# arbutil = { path = "../nitro/arbitrator/arbutil", default-features = false }
-# stylus = { path = "../nitro/arbitrator/stylus", default-features = false, features = ["cc_brotli"] }
-# wasmer-types = { path = "../nitro/arbitrator/tools/wasmer/lib/types",  default-features = false }
-
-arbutil = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
-stylus = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false, features = ["cc_brotli"] }
-wasmer-types = { git = "https://github.com/bernard-wagner/nitro", branch = "dev",  default-features = false }
+arbutil = { workspace =  true, default-features = false }
+stylus = { workspace = true, default-features = false, features = ["cc_brotli"] }
+wasmer-types = { workspace = true, default-features = false }
 
 lru = "0.14.0"
 lazy_static = "1.5.0"
