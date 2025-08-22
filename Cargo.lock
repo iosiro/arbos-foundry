@@ -386,7 +386,7 @@ dependencies = [
  "foldhash",
  "getrandom 0.3.3",
  "hashbrown 0.15.5",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "itoa",
  "k256",
  "keccak-asm",
@@ -776,7 +776,7 @@ dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
  "heck 0.5.0",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "proc-macro-error2",
  "proc-macro2",
  "quote",
@@ -1203,7 +1203,7 @@ dependencies = [
 [[package]]
 name = "arbutil"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "digest 0.10.7",
  "eyre",
@@ -2301,7 +2301,7 @@ dependencies = [
  "boa_interner",
  "boa_macros",
  "boa_string",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "num-bigint",
  "rustc-hash 2.1.1",
 ]
@@ -2327,7 +2327,7 @@ dependencies = [
  "fast-float2",
  "hashbrown 0.15.5",
  "icu_normalizer",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "intrusive-collections",
  "itertools 0.13.0",
  "num-bigint",
@@ -2373,7 +2373,7 @@ dependencies = [
  "boa_gc",
  "boa_macros",
  "hashbrown 0.15.5",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "once_cell",
  "phf",
  "rustc-hash 2.1.1",
@@ -2446,7 +2446,7 @@ version = "3.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca5abbf2d4a4c6896197c9de13d6d7cb7eff438c63dacde1dde980569cb00248"
 dependencies = [
- "darling 0.21.2",
+ "darling 0.21.3",
  "ident_case",
  "prettyplease",
  "proc-macro2",
@@ -2464,7 +2464,7 @@ checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 [[package]]
 name = "brotli"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "cc",
  "lazy_static",
@@ -2591,7 +2591,7 @@ dependencies = [
 [[package]]
 name = "caller-env"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "brotli",
  "num_enum",
@@ -3549,12 +3549,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.21.2"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08440b3dd222c3d0433e63e097463969485f112baff337dfdaca043a0d760570"
+checksum = "9cdf337090841a411e2a7f3deb9187445851f91b309c0c0a29e05f74a00a48c0"
 dependencies = [
- "darling_core 0.21.2",
- "darling_macro 0.21.2",
+ "darling_core 0.21.3",
+ "darling_macro 0.21.3",
 ]
 
 [[package]]
@@ -3573,9 +3573,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.21.2"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d25b7912bc28a04ab1b7715a68ea03aaa15662b43a1a4b2c480531fd19f8bf7e"
+checksum = "1247195ecd7e3c85f83c8d2a366e4210d588e802133e1e355180a9870b517ea4"
 dependencies = [
  "fnv",
  "ident_case",
@@ -3598,11 +3598,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.21.2"
+version = "0.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce154b9bea7fb0c8e8326e62d00354000c36e79770ff21b8c84e3aa267d9d531"
+checksum = "d38308df82d1080de0afee5d069fa14b0326a88c14f15c5ccda35b4a6c414c81"
 dependencies = [
- "darling_core 0.21.2",
+ "darling_core 0.21.3",
  "quote",
  "syn 2.0.106",
 ]
@@ -4114,7 +4114,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f43e744e4ea338060faee68ed933e46e722fb7f3617e722a5772d7e856d8b3ce"
 dependencies = [
- "darling 0.21.2",
+ "darling 0.21.3",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -4232,7 +4232,7 @@ checksum = "c29ecc930ee2ed03083436c2ddd7e5292c3c3bcda65f6a37369502d578a853f1"
 dependencies = [
  "alloy-dyn-abi",
  "alloy-primitives",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
 ]
 
 [[package]]
@@ -4448,7 +4448,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.16",
  "tokio",
- "toml_edit 0.23.3",
+ "toml_edit 0.23.4",
  "tower-http",
  "tracing",
  "watchexec",
@@ -4636,7 +4636,7 @@ dependencies = [
 [[package]]
 name = "forward"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "eyre",
  "structopt",
@@ -5006,7 +5006,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.16",
  "toml 0.9.5",
- "toml_edit 0.23.3",
+ "toml_edit 0.23.4",
  "tracing",
  "walkdir",
  "yansi",
@@ -5584,7 +5584,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.3.1",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -6136,9 +6136,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
+checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
 dependencies = [
  "arbitrary",
  "equivalent",
@@ -7700,7 +7700,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
  "fixedbitset",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
 ]
 
 [[package]]
@@ -8026,7 +8026,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3ef4f2f0422f23a82ec9f628ea2acd12871c81a9362b02c43c1aa86acfc3ba1"
 dependencies = [
  "futures",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "nix 0.30.1",
  "tokio",
  "tracing",
@@ -8151,7 +8151,7 @@ dependencies = [
 [[package]]
 name = "prover"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "arbutil",
  "bincode",
@@ -8243,7 +8243,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ed1a693391a16317257103ad06a88c6529ac640846021da7c435a06fffdacd7"
 dependencies = [
  "chrono",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "newtype-uuid",
  "quick-xml 0.37.5",
  "strip-ansi-escapes",
@@ -9514,7 +9514,7 @@ version = "1.0.143"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d401abef1d108fbd9cbaebc3e46611f4b1021f714a0597a71f41ee463f5f4a5a"
 dependencies = [
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "itoa",
  "memchr",
  "ryu",
@@ -9571,7 +9571,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "schemars 0.9.0",
  "schemars 1.0.4",
  "serde",
@@ -9906,7 +9906,7 @@ checksum = "3cc21b4df6061e1c825c16faf8e1f16c2341f4c46a2b2a60e03069c4453fc5ac"
 dependencies = [
  "bumpalo",
  "index_vec",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "parking_lot",
  "rayon",
  "rustc-hash 2.1.1",
@@ -10213,7 +10213,7 @@ dependencies = [
 [[package]]
 name = "stylus"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "arbutil",
  "bincode",
@@ -10782,7 +10782,7 @@ version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75129e1dc5000bfbaa9fee9d1b21f974f9fbad9daec557a521ee6e080825f6e8"
 dependencies = [
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "serde",
  "serde_spanned 1.0.0",
  "toml_datetime 0.7.0",
@@ -10815,7 +10815,7 @@ version = "0.22.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
 dependencies = [
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "serde",
  "serde_spanned 0.6.9",
  "toml_datetime 0.6.11",
@@ -10825,11 +10825,11 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.23.3"
+version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17d3b47e6b7a040216ae5302712c94d1cf88c95b47efa80e2c59ce96c878267e"
+checksum = "7211ff1b8f0d3adae1663b7da9ffe396eabe1ca25f0b0bee42b0da29a9ddce93"
 dependencies = [
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "toml_datetime 0.7.0",
  "toml_parser",
  "toml_writer",
@@ -10902,7 +10902,7 @@ checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "pin-project-lite",
  "slab",
  "sync_wrapper",
@@ -11301,7 +11301,7 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 [[package]]
 name = "user-host-trait"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "arbutil",
  "caller-env",
@@ -11588,7 +11588,7 @@ dependencies = [
 [[package]]
 name = "wasmer"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "bytes",
  "cfg-if 1.0.3",
@@ -11616,7 +11616,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "backtrace",
  "bytes",
@@ -11642,7 +11642,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-cranelift"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -11660,7 +11660,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-singlepass"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "byteorder",
  "dynasm",
@@ -11677,7 +11677,7 @@ dependencies = [
 [[package]]
 name = "wasmer-derive"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -11688,7 +11688,7 @@ dependencies = [
 [[package]]
 name = "wasmer-types"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "bytecheck",
  "enum-iterator 0.7.0",
@@ -11703,7 +11703,7 @@ dependencies = [
 [[package]]
 name = "wasmer-vm"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#c40465167821421ee144a4c479141d3c9ca93862"
+source = "git+https://github.com/bernard-wagner/nitro?branch=dev#fd26e1b5deee6ed427b022de593e4e43149903f0"
 dependencies = [
  "backtrace",
  "cc",
@@ -11721,6 +11721,7 @@ dependencies = [
  "memoffset 0.9.1",
  "more-asserts",
  "region",
+ "rustversion",
  "scopeguard",
  "thiserror 1.0.69",
  "wasmer-types",
@@ -11734,7 +11735,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9dbe55c8f9d0dbd25d9447a5a889ff90c0cc3feaa7395310d3d826b2c703eaab"
 dependencies = [
  "bitflags 2.9.3",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "semver 1.0.26",
 ]
 
@@ -12273,9 +12274,9 @@ checksum = "271414315aff87387382ec3d271b52d7ae78726f5d44ac98b4f4030c91880486"
 
 [[package]]
 name = "winnow"
-version = "0.7.12"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3edebf492c8125044983378ecb5766203ad3b4c2f7a922bd7dd207f6d443e95"
+checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 dependencies = [
  "memchr",
 ]
@@ -12472,7 +12473,7 @@ dependencies = [
  "arbitrary",
  "crc32fast",
  "flate2",
- "indexmap 2.10.0",
+ "indexmap 2.11.0",
  "memchr",
  "zopfli",
 ]
