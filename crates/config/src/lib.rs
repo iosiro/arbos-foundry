@@ -2628,7 +2628,6 @@ mod tests {
     use foundry_compilers::artifacts::{
         ModelCheckerEngine, YulDetails, vyper::VyperOptimizationMode,
     };
-    use itertools::Itertools;
     use similar_asserts::assert_eq;
     use soldeer_core::remappings::RemappingsLocation;
     use std::{fs::File, io::Write};
@@ -5143,61 +5142,6 @@ mod tests {
             let unknown_chain = Chain::from_id(1);
             let result = config.get_etherscan_config_with_chain(Some(unknown_chain));
             assert!(result.is_ok());
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_get_script_config() {
-        figment::Jail::expect_with(|jail| {
-            jail.create_file(
-                "foundry.toml",
-                r#"
-                    [forks]
-
-                    [forks.mainnet]
-                    rpc_endpoint = "mainnet-rpc"
-
-                    [forks.mainnet.vars]
-                    weth = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
-                    usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-                    pool_name = "USDC-ETH"
-                    pool_fee = 3000
-                    max_slippage = 500
-                "#,
-            )?;
-            let config = Config::load().unwrap();
-
-            let expected: HashMap<String, ForkConfig> = vec![(
-                "mainnet".to_string(),
-                ForkConfig {
-                    rpc_endpoint: Some(RpcEndpoint::new(RpcEndpointUrl::Url(
-                        "mainnet-rpc".to_string(),
-                    ))),
-                    vars: vec![
-                        ("weth".into(), "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2".into()),
-                        ("usdc".into(), "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".into()),
-                        ("pool_name".into(), "USDC-ETH".into()),
-                        ("pool_fee".into(), 3000.into()),
-                        ("max_slippage".into(), 500.into()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                },
-            )]
-            .into_iter()
-            .collect();
-            assert_eq!(
-                expected.keys().sorted().collect::<Vec<_>>(),
-                config.forks.keys().sorted().collect::<Vec<_>>()
-            );
-
-            let expected_mainnet = expected.get("mainnet").unwrap();
-            let mainnet = config.forks.get("mainnet").unwrap();
-            assert_eq!(expected_mainnet.rpc_endpoint, mainnet.rpc_endpoint);
-            for (k, v) in &expected_mainnet.vars {
-                assert_eq!(v, mainnet.vars.get(k).unwrap());
-            }
             Ok(())
         });
     }

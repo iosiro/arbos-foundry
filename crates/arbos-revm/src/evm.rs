@@ -317,6 +317,7 @@ where
                 compile_config.version,
                 false,
                 wasmer_types::compilation::target::Target::default(),
+                true,
             )
             .unwrap();
 
