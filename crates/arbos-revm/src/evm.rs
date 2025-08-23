@@ -172,6 +172,7 @@ where
 // Shared data structure for Stylus execution context
 struct StylusExecutionContext {
     target_address: Address,
+    bytecode_address: Address,
     caller_address: Address,
     call_value: revm::primitives::U256,
     is_static: bool,
@@ -217,7 +218,7 @@ where
     }
 
     /// Extract common Stylus execution context from frame input
-    fn extract_stylus_context(&mut self) -> Option<(StylusExecutionContext, B256, Bytes)> {
+    fn extract_stylus_context(&mut self) -> Option<(StylusExecutionContext, B256)> {
         let frame_input = {
             let frame = self.frame_stack().get();
             match frame.input {
@@ -228,11 +229,10 @@ where
 
         let bytecode_address = frame_input.bytecode_address;
 
-        let (code_hash, bytecode) = {
+        let code_hash = {
             let ctx = self.ctx();
             if let Ok(code_hash) = ctx.journal_mut().code_hash(bytecode_address) {
-                let bytecode = ctx.journal_mut().code(bytecode_address).unwrap().data;
-                (code_hash.data, bytecode)
+                code_hash.data
             } else {
                 return None;
             }
@@ -251,6 +251,7 @@ where
 
         let context = StylusExecutionContext {
             target_address: frame_input.target_address,
+            bytecode_address,
             caller_address: frame_input.caller,
             call_value: frame_input.value.get(),
             is_static: frame_input.is_static,
@@ -258,14 +259,15 @@ where
             calldata,
         };
 
-        Some((context, code_hash, bytecode))
+        Some((context, code_hash))
     }
 
     /// Compile Stylus bytecode
     fn compile_stylus_bytecode(
         bytecode: &Bytes,
         code_hash: B256,
-        stylus_env: &dyn ArbitrumChainInfoTr,
+        arbos_version: u16,
+        stylus_version: u16,
         _gas_limit: u64,
         compile_config: &CompileConfig,
     ) -> Result<(Vec<u8>, Module, StylusData), ()> {
@@ -297,8 +299,8 @@ where
             let (module, stylus_data) = native::activate(
                 bytecode.as_slice(),
                 &Bytes32::from(code_hash.0),
-                stylus_env.stylus_version(),
-                stylus_env.arbos_version() as u64,
+                stylus_version,
+                arbos_version as u64,
                 128,
                 false,
                 &mut activation_gas,
@@ -325,7 +327,6 @@ where
         &mut self,
         stylus_ctx: StylusExecutionContext,
         code_hash: B256,
-        bytecode: Bytes,
         api_request_handler: impl Fn(
             &mut Self,
             InputsImpl,
@@ -336,32 +337,53 @@ where
     ) -> Option<InterpreterAction> {
         let context = self.ctx();
 
-        let stylus_env = context.chain();
-
         let compile_config =
-            CompileConfig::version(stylus_env.stylus_version(), stylus_env.debug_mode());
+            CompileConfig::version(context.chain().stylus_version(), context.chain().debug_mode());
+
         let stylus_config = StylusConfig::new(
-            stylus_env.stylus_version(),
-            stylus_env.max_depth(),
-            stylus_env.ink_price(),
+            context.chain().stylus_version(),
+            context.chain().max_depth(),
+            context.chain().ink_price(),
         );
 
-        let (serialized, _module, stylus_data) = {
-            let mut cache = PROGRAM_CACHE.lock().unwrap();
-            if let Ok((serialized, module, stylus_data)) =
-                cache.try_get_or_insert(code_hash, || {
-                    Self::compile_stylus_bytecode(
-                        &bytecode,
-                        code_hash,
-                        stylus_env,
-                        stylus_ctx.gas_limit,
-                        &compile_config,
-                    )
-                })
-            {
-                (serialized.clone(), module.clone(), *stylus_data)
+        let (serialized, _, stylus_data) = {
+            // Use read lock to get cached program if available
+            // if not available drop the read lock and acquire write lock to compile and insert
+            let maybe_cached = {
+                let mut cache = PROGRAM_CACHE.lock().unwrap();
+                if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
+                    Some((serialized, module, stylus_data))
+                } else {
+                    None
+                }
+            };
+
+            if let Some((serialized, module, stylus_data)) = maybe_cached {
+                (serialized, module, stylus_data)
             } else {
-                return None;
+                let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
+
+                if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
+                    return None;
+                }
+
+                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
+                    &bytecode,
+                    code_hash,
+                    context.chain().arbos_version(),
+                    context.chain().stylus_version(),
+                    stylus_ctx.gas_limit,
+                    &compile_config,
+                ) {
+                    let mut cache = PROGRAM_CACHE.lock().unwrap();
+                    cache.get_or_insert(code_hash, || {
+                        (serialized.clone(), module.clone(), stylus_data)
+                    });
+
+                    (serialized, module, stylus_data)
+                } else {
+                    return None;
+                }
             }
         };
 
@@ -426,11 +448,10 @@ where
     }
 
     pub fn frame_run_stylus(&mut self) -> Option<InterpreterAction> {
-        let (stylus_ctx, code_hash, bytecode) = self.extract_stylus_context()?;
+        let (stylus_ctx, code_hash) = self.extract_stylus_context()?;
         self.execute_stylus_program(
             stylus_ctx,
             code_hash,
-            bytecode,
             |evm, inputs, is_static, req_type, data| evm.request(inputs, is_static, req_type, data),
         )
     }
@@ -874,11 +895,10 @@ where
     INSP: Inspector<CTX>,
 {
     pub fn inspect_frame_run_stylus(&mut self) -> Option<InterpreterAction> {
-        let (stylus_ctx, code_hash, bytecode) = self.extract_stylus_context()?;
+        let (stylus_ctx, code_hash) = self.extract_stylus_context()?;
         self.execute_stylus_program(
             stylus_ctx,
             code_hash,
-            bytecode,
             |evm, inputs, is_static, req_type, data| {
                 evm.inspect_request(inputs, is_static, req_type, data)
             },
