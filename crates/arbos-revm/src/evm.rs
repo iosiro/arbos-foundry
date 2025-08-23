@@ -267,7 +267,7 @@ where
         bytecode: &Bytes,
         code_hash: B256,
         arbos_version: u16,
-        stylus_verison: u16,
+        stylus_version: u16,
         _gas_limit: u64,
         compile_config: &CompileConfig,
     ) -> Result<(Vec<u8>, Module, StylusData), ()> {
@@ -299,7 +299,7 @@ where
             let (module, stylus_data) = native::activate(
                 bytecode.as_slice(),
                 &Bytes32::from(code_hash.0),
-                stylus_verison,
+                stylus_version,
                 arbos_version as u64,
                 128,
                 false,
