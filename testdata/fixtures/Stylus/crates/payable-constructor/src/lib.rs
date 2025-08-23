@@ -2,12 +2,13 @@
 extern crate alloc;
 
 use alloy_primitives::{Address, B256, U256};
-use stylus_sdk::{abi::Bytes, deploy::RawDeploy, prelude::*, storage::StorageU256};
+use stylus_sdk::{abi::Bytes, prelude::*, stylus_core::calls::context::Call};
 
-#[entrypoint]
-#[storage]
-pub struct StylusTestProgramWithPayableConstructor {
-    constructor_value: StorageU256,
+sol_storage! {
+    #[entrypoint]
+    pub struct StylusTestProgramWithPayableConstructor {
+        uint256 number;
+    }
 }
 
 #[public]
@@ -15,11 +16,11 @@ impl StylusTestProgramWithPayableConstructor {
     #[constructor]
     #[payable]
     pub fn constructor(&mut self, value: U256) {
-        self.constructor_value.set(value);
+        self.number.set(value);
     }
 
-    pub fn get_constructor_value(&self) -> U256 {
-        self.constructor_value.get()
+    pub fn number(&self) -> U256 {
+        self.number.get()
     }
 
     #[payable]
@@ -30,14 +31,14 @@ impl StylusTestProgramWithPayableConstructor {
         value: U256,
         gas_limit: U256,
     ) -> Result<(Bytes, U256), Vec<u8>> {
-        let mut raw_call = RawCall::new_with_value(self.vm(), value);
+        let mut raw_call = Call::new().value(value);
 
         if !gas_limit.is_zero() {
             raw_call = raw_call.gas(gas_limit.as_limbs()[0]);
         }
 
         let ink_left = self.vm().evm_ink_left();
-        let result = unsafe { raw_call.call(target, &data.to_vec())? };
+        let result = self.vm().call(&raw_call, target, data.as_ref())?;
         let ink_used = ink_left - self.vm().evm_ink_left();
 
         Ok((Bytes::from(result), U256::from(ink_used)))
@@ -49,14 +50,14 @@ impl StylusTestProgramWithPayableConstructor {
         data: Bytes,
         gas_limit: U256,
     ) -> Result<(Bytes, U256), Vec<u8>> {
-        let mut raw_call = RawCall::new_delegate(self.vm());
+        let mut raw_call = Call::new();
 
         if !gas_limit.is_zero() {
             raw_call = raw_call.gas(gas_limit.as_limbs()[0]);
         }
 
         let ink_left = self.vm().evm_ink_left();
-        let result = unsafe { raw_call.call(target, &data.to_vec())? };
+        let result = unsafe { self.vm().delegate_call(&raw_call, target, data.as_ref())? };
         let ink_used = ink_left - self.vm().evm_ink_left();
 
         Ok((Bytes::from(result), U256::from(ink_used)))
@@ -68,14 +69,14 @@ impl StylusTestProgramWithPayableConstructor {
         data: Bytes,
         gas_limit: U256,
     ) -> Result<(Bytes, U256), Vec<u8>> {
-        let mut raw_call = RawCall::new_static(self.vm());
+        let mut raw_call = Call::new();
 
         if !gas_limit.is_zero() {
             raw_call = raw_call.gas(gas_limit.as_limbs()[0]);
         }
 
         let ink_left = self.vm().evm_ink_left();
-        let result = unsafe { raw_call.call(target, &data.to_vec())? };
+        let result = self.vm().static_call(&raw_call, target, data.as_ref())?;
         let ink_used = ink_left - self.vm().evm_ink_left();
 
         Ok((Bytes::from(result), U256::from(ink_used)))
@@ -84,7 +85,7 @@ impl StylusTestProgramWithPayableConstructor {
     fn sstore(&mut self, key: U256, value: U256) -> U256 {
         let ink_left = self.vm().evm_ink_left();
         unsafe {
-            self.vm().storage_cache_bytes32(key.into(), value.into());
+            self.vm().storage_cache_bytes32(key, value.into());
         }
 
         let ink_used = ink_left - self.vm().evm_ink_left();
@@ -93,7 +94,7 @@ impl StylusTestProgramWithPayableConstructor {
 
     fn sload(&self, key: U256) -> (U256, U256) {
         let ink_left = self.vm().evm_ink_left();
-        let result = self.vm().storage_load_bytes32(key.into());
+        let result = self.vm().storage_load_bytes32(key);
         let ink_used = ink_left - self.vm().evm_ink_left();
         (result.into(), U256::from(ink_used))
     }
@@ -108,7 +109,7 @@ impl StylusTestProgramWithPayableConstructor {
     #[payable]
     fn create(&self, code: Bytes, value: U256) -> Result<(Address, U256), Vec<u8>> {
         let ink_left = self.vm().evm_ink_left();
-        let result = unsafe { RawDeploy::new().deploy(self.vm(), code.as_ref(), value)? };
+        let result = unsafe { self.vm().deploy(code.as_ref(), value, None)? };
         let ink_used = ink_left - self.vm().evm_ink_left();
         Ok((result, U256::from(ink_used)))
     }

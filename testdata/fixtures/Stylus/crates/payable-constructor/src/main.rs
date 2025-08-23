@@ -6,5 +6,5 @@ pub extern "C" fn main() {}
 
 #[cfg(feature = "export-abi")]
 fn main() {
-    foundry_stylus_program_constructor_payable::print_from_args();
+    foundry_stylus_program_payable_constructor::print_from_args();
 }
