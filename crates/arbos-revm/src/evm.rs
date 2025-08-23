@@ -10,37 +10,37 @@ use crate::{
     buffer,
     chain_config::ArbitrumChainInfoTr,
     constants::STYLUS_DISCRIMINANT,
-    stylus::{build_evm_data, PROGRAM_CACHE},
-    stylus_api::{wasm_account_touch, StylusHandler},
+    stylus::{PROGRAM_CACHE, build_evm_data},
+    stylus_api::{StylusHandler, wasm_account_touch},
 };
 use arbutil::{
+    Bytes32,
     evm::{
         api::{EvmApiMethod, Gas as ArbGas, VecReader},
         req::EvmApiRequestor,
         user::{UserOutcome, UserOutcomeKind},
     },
-    Bytes32,
 };
 use revm::{
+    Database, Inspector,
     context::{
         Cfg, ContextError, ContextSetters, ContextTr, CreateScheme, Evm, FrameStack, JournalTr,
         LocalContextTr,
     },
     handler::{
-        instructions::{EthInstructions, InstructionProvider},
         EthFrame, EvmTr, FrameInitOrResult, FrameResult, FrameTr, ItemOrResult, PrecompileProvider,
+        instructions::{EthInstructions, InstructionProvider},
     },
     inspector::{InspectorEvmTr, JournalExt},
     interpreter::{
-        gas::{create2_cost, initcode_cost, sload_cost, sstore_cost, CREATE},
+        CallInput, CallInputs, CreateInputs, FrameInput, Gas, InputsImpl, InstructionResult,
+        InterpreterAction, InterpreterResult,
+        gas::{CREATE, create2_cost, initcode_cost, sload_cost, sstore_cost},
         interpreter::EthInterpreter,
         interpreter_action::FrameInit,
         interpreter_types::InputsTr,
-        CallInput, CallInputs, CreateInputs, FrameInput, Gas, InputsImpl, InstructionResult,
-        InterpreterAction, InterpreterResult,
     },
-    primitives::{hardfork::SpecId, Address, Bytes, Log, B256},
-    Database, Inspector,
+    primitives::{Address, B256, Bytes, Log, hardfork::SpecId},
 };
 use stylus::{
     brotli::{self, Dictionary},
@@ -48,8 +48,8 @@ use stylus::{
     prover::{
         machine::Module,
         programs::{
-            config::{CompileConfig, StylusConfig},
             StylusData,
+            config::{CompileConfig, StylusConfig},
         },
     },
     run::RunProgram,
@@ -68,13 +68,7 @@ impl<CTX, I, INSP, P, F> ArbitrumEvm<CTX, INSP, P, I, F> {
     /// Create a new EVM instance with a given context, inspector, instruction set, and precompile
     /// provider.
     pub fn new_with_inspector(ctx: CTX, inspector: INSP, instruction: I, precompiles: P) -> Self {
-        ArbitrumEvm(Evm {
-            ctx,
-            inspector,
-            instruction,
-            precompiles,
-            frame_stack: FrameStack::new(),
-        })
+        Self(Evm { ctx, inspector, instruction, precompiles, frame_stack: FrameStack::new() })
     }
 }
 
@@ -208,13 +202,12 @@ where
 
         let callback = {
             let evm = evm.clone();
-            let inputs = input.clone();
 
             move |req_type: arbutil::evm::api::EvmApiMethod,
                   req_data: Vec<u8>|
                   -> (Vec<u8>, VecReader, arbutil::evm::api::Gas) {
                 let mut evm = evm.lock().unwrap();
-                request_handler(&mut evm, inputs.clone(), is_static, req_type, req_data)
+                request_handler(&mut evm, input.clone(), is_static, req_type, req_data)
             }
         };
 
@@ -772,7 +765,7 @@ where
                                 Status::Failure.into(),
                                 VecReader::new(vec![]),
                                 ArbGas(gas_left),
-                            )
+                            );
                         }
                     }
                 }
@@ -973,7 +966,7 @@ enum Status {
 }
 
 impl From<Status> for Vec<u8> {
-    fn from(status: Status) -> Vec<u8> {
+    fn from(status: Status) -> Self {
         match status {
             Status::Success => vec![0],
             Status::Failure => vec![1],

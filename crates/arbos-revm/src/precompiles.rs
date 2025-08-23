@@ -4,14 +4,10 @@ use revm::{
     context::{Cfg, ContextTr},
     handler::{EthPrecompiles, PrecompileProvider},
     interpreter::{InputsImpl, InterpreterResult},
-    precompile::{secp256r1, Precompiles},
+    precompile::{Precompiles, secp256r1},
     primitives::Address,
 };
-use std::{
-    boxed::Box,
-    ops::{Deref, DerefMut},
-    string::String,
-};
+use std::ops::{Deref, DerefMut};
 
 // Optimism precompile provider
 #[derive(Debug, Clone)]

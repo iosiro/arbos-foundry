@@ -1,8 +1,8 @@
 //! Contains trait [`DefaultArbitrum`] used to create a default context.
 use revm::{
+    Context, Journal, MainContext,
     context::{BlockEnv, CfgEnv, TxEnv},
     database_interface::EmptyDB,
-    Context, Journal, MainContext,
 };
 
 use crate::chain_config::ArbitrumChainInfo;

@@ -1,23 +1,23 @@
 //! Implementation of the [`ExecuteEvm`] trait for the [`ArbitrumEvm`].
 use crate::{
-    chain_config::ArbitrumChainInfoTr, evm::ArbitrumEvm, handler::ArbitrumHandler,
-    ArbitrumHaltReason, ArbitrumTransactionError,
+    ArbitrumHaltReason, ArbitrumTransactionError, chain_config::ArbitrumChainInfoTr,
+    evm::ArbitrumEvm, handler::ArbitrumHandler,
 };
 use revm::{
-    context::{result::ExecResultAndState, ContextSetters},
+    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm,
+    context::{ContextSetters, result::ExecResultAndState},
     context_interface::{
-        result::{EVMError, ExecutionResult},
         ContextTr, Database, JournalTr,
+        result::{EVMError, ExecutionResult},
     },
     handler::{
-        instructions::EthInstructions, system_call::SystemCallEvm, EthFrame, Handler,
-        PrecompileProvider, SystemCallTx,
+        EthFrame, Handler, PrecompileProvider, SystemCallTx, instructions::EthInstructions,
+        system_call::SystemCallEvm,
     },
     inspector::{InspectCommitEvm, InspectEvm, Inspector, InspectorHandler, JournalExt},
-    interpreter::{interpreter::EthInterpreter, InterpreterResult},
+    interpreter::{InterpreterResult, interpreter::EthInterpreter},
     primitives::{Address, Bytes},
     state::EvmState,
-    DatabaseCommit, ExecuteCommitEvm, ExecuteEvm,
 };
 
 /// Type alias for Arbitrum context

@@ -24,7 +24,7 @@ impl ArbitrumSpecId {
         }
     }
 
-    pub const fn is_enabled_in(self, other: ArbitrumSpecId) -> bool {
+    pub const fn is_enabled_in(self, other: Self) -> bool {
         other as u8 <= self as u8
     }
 }

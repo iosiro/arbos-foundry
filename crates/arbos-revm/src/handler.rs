@@ -1,11 +1,11 @@
-use crate::{api::ArbitrumContextTr, ArbitrumHaltReason, ArbitrumTransactionError};
+use crate::{ArbitrumHaltReason, ArbitrumTransactionError, api::ArbitrumContextTr};
 use revm::{
-    context::{result::FromStringError, JournalTr},
-    handler::{handler::EvmTrError, EthFrame, EvmTr, Handler, MainnetHandler},
+    Inspector,
+    context::{JournalTr, result::FromStringError},
+    handler::{EthFrame, EvmTr, Handler, MainnetHandler, handler::EvmTrError},
     inspector::{InspectorEvmTr, InspectorHandler},
     interpreter::interpreter::EthInterpreter,
     state::EvmState,
-    Inspector,
 };
 
 pub struct ArbitrumHandler<EVM, ERROR, FRAME> {
@@ -31,9 +31,9 @@ impl<EVM, ERROR, FRAME> Default for ArbitrumHandler<EVM, ERROR, FRAME> {
 impl<EVM, ERROR> Handler for ArbitrumHandler<EVM, ERROR, EthFrame<EthInterpreter>>
 where
     EVM: EvmTr<
-        Context: ArbitrumContextTr<Journal: JournalTr<State = EvmState>>,
-        Frame = EthFrame<EthInterpreter>,
-    >,
+            Context: ArbitrumContextTr<Journal: JournalTr<State = EvmState>>,
+            Frame = EthFrame<EthInterpreter>,
+        >,
     ERROR: EvmTrError<EVM> + From<ArbitrumTransactionError> + FromStringError,
 {
     type Evm = EVM;
@@ -44,10 +44,10 @@ where
 impl<EVM, ERROR> InspectorHandler for ArbitrumHandler<EVM, ERROR, EthFrame<EthInterpreter>>
 where
     EVM: InspectorEvmTr<
-        Context: ArbitrumContextTr<Journal: JournalTr<State = EvmState>>,
-        Frame = EthFrame<EthInterpreter>,
-        Inspector: Inspector<<<Self as Handler>::Evm as EvmTr>::Context, EthInterpreter>,
-    >,
+            Context: ArbitrumContextTr<Journal: JournalTr<State = EvmState>>,
+            Frame = EthFrame<EthInterpreter>,
+            Inspector: Inspector<<<Self as Handler>::Evm as EvmTr>::Context, EthInterpreter>,
+        >,
     ERROR: EvmTrError<EVM> + From<ArbitrumTransactionError> + FromStringError,
 {
     type IT = EthInterpreter;

@@ -2,18 +2,18 @@ use revm::context::ContextSetters;
 
 use revm::{
     handler::{
-        evm::ContextDbError, instructions::InstructionProvider, FrameInitOrResult, ItemOrResult,
-        PrecompileProvider,
+        FrameInitOrResult, ItemOrResult, PrecompileProvider, evm::ContextDbError,
+        instructions::InstructionProvider,
     },
-    inspector::{handler::frame_end, InspectorEvmTr, InspectorFrame, JournalExt},
+    inspector::{InspectorEvmTr, InspectorFrame, JournalExt, handler::frame_end},
 };
 
 use revm::{
-    interpreter::{interpreter::EthInterpreter, InterpreterResult},
     Inspector,
+    interpreter::{InterpreterResult, interpreter::EthInterpreter},
 };
 
-use crate::{api::ArbitrumContextTr, ArbitrumEvm};
+use crate::{ArbitrumEvm, api::ArbitrumContextTr};
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I> {
     /// Consumed self and returns a new Evm type with given Inspector.
