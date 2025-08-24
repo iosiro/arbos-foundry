@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["arbos_revm",[["impl&lt;EVM, ERROR&gt; InspectorHandler for <a class=\"struct\" href=\"arbos_revm/handler/struct.ArbitrumHandler.html\" title=\"struct arbos_revm::handler::ArbitrumHandler\">ArbitrumHandler</a>&lt;EVM, ERROR, EthFrame&lt;EthInterpreter&gt;&gt;<div class=\"where\">where\n    EVM: InspectorEvmTr&lt;Context: <a class=\"trait\" href=\"arbos_revm/api/exec/trait.ArbitrumContextTr.html\" title=\"trait arbos_revm::api::exec::ArbitrumContextTr\">ArbitrumContextTr</a>&lt;Journal: JournalTr&lt;State = EvmState&gt;&gt;, Frame = EthFrame&lt;EthInterpreter&gt;, Inspector: Inspector&lt;&lt;&lt;Self as Handler&gt;::Evm as EvmTr&gt;::Context, EthInterpreter&gt;&gt;,\n    ERROR: EvmTrError&lt;EVM&gt; + <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/convert/trait.From.html\" title=\"trait core::convert::From\">From</a>&lt;<a class=\"enum\" href=\"arbos_revm/transaction/enum.ArbitrumTransactionError.html\" title=\"enum arbos_revm::transaction::ArbitrumTransactionError\">ArbitrumTransactionError</a>&gt; + FromStringError,</div>"]]],["cast",[]],["forge",[]],["foundry_evm_core",[["impl&lt;I: <a class=\"trait\" href=\"foundry_evm_core/trait.InspectorExt.html\" title=\"trait foundry_evm_core::InspectorExt\">InspectorExt</a>&gt; InspectorHandler for <a class=\"struct\" href=\"foundry_evm_core/evm/struct.FoundryHandler.html\" title=\"struct foundry_evm_core::evm::FoundryHandler\">FoundryHandler</a>&lt;'_, I&gt;"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1061,12,13,360]}
