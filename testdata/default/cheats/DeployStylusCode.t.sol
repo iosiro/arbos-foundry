@@ -5,7 +5,7 @@ import "ds-test/test.sol";
 import "cheats/Vm.sol";
 
 interface TestContract {
-    function get_constructor_value() external view returns (uint256);
+    function number() external view returns (uint256);
 }
 
 contract DeployStylusCodeTest is DSTest {
@@ -30,7 +30,7 @@ contract DeployStylusCodeTest is DSTest {
         address addrDeployCode =
             vm.deployStylusCode("fixtures/Stylus/foundry_stylus_program_constructor.wasm", abi.encode(1337));
         assertEq(defaultWasm, addrDeployCode.code);
-        assertEq(TestContract(addrDeployCode).get_constructor_value(), 1337);
+        assertEq(TestContract(addrDeployCode).number(), 1337);
     }
 
     function testStylusDeployCodeWithPayableConstructor() public {
@@ -40,7 +40,7 @@ contract DeployStylusCodeTest is DSTest {
         address addrDeployCode =
             vm.deployStylusCode("fixtures/Stylus/foundry_stylus_program_payable_constructor.wasm", abi.encode(1337));
         assertEq(defaultWasm, addrDeployCode.code);
-        assertEq(TestContract(addrDeployCode).get_constructor_value(), 1337);
+        assertEq(TestContract(addrDeployCode).number(), 1337);
     }
 
     function testStylusDeployCodeWithSalt() public {
@@ -59,7 +59,7 @@ contract DeployStylusCodeTest is DSTest {
             "fixtures/Stylus/foundry_stylus_program_constructor.wasm", abi.encode(1337), bytes32("salt")
         );
         assertEq(defaultWasm, addrDeployCode.code);
-        assertEq(TestContract(addrDeployCode).get_constructor_value(), 1337);
+        assertEq(TestContract(addrDeployCode).number(), 1337);
     }
 
     function testStylusDeployCodeWithPayableConstructorAndSalt() public {
@@ -70,7 +70,7 @@ contract DeployStylusCodeTest is DSTest {
             "fixtures/Stylus/foundry_stylus_program_payable_constructor.wasm", abi.encode(1337), bytes32("salt")
         );
         assertEq(defaultWasm, addrDeployCode.code);
-        assertEq(TestContract(addrDeployCode).get_constructor_value(), 1337);
+        assertEq(TestContract(addrDeployCode).number(), 1337);
     }
 
     function testStylusDeployCodeWithPayableConstructorAndArgsAndSalt() public {
@@ -81,6 +81,6 @@ contract DeployStylusCodeTest is DSTest {
             "fixtures/Stylus/foundry_stylus_program_payable_constructor.wasm", abi.encode(1337), 101, bytes32("salt")
         );
         assertEq(defaultWasm, addrDeployCode.code);
-        assertEq(TestContract(addrDeployCode).get_constructor_value(), 1337);
+        assertEq(TestContract(addrDeployCode).number(), 1337);
     }
 }
