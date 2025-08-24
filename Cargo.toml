@@ -27,6 +27,7 @@ members = [
     "crates/test-utils/",
     "crates/lint/",
 ]
+exclude = [ "testdata" ]
 resolver = "2"
 
 [workspace.package]
