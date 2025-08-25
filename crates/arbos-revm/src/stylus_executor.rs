@@ -126,7 +126,7 @@ pub fn stylus_call_cost(new: u16, open: u16, ever: u16) -> u64 {
             return MEMORY_EXPONENTS[x as usize] as u64;
         }
 
-        return u64::MAX;
+        u64::MAX
     };
 
     let expand = exp(new_ever) - exp(ever);
@@ -363,9 +363,8 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-        let call_cost =
-            stylus_call_cost(stylus_data.footprint, 0 as u16, INITIAL_FREE_PAGES as u16)
-                + cached_gas(stylus_data.clone());
+        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16)
+            + cached_gas(stylus_data);
 
         let mut gas = Gas::new(stylus_ctx.gas_limit);
         if !gas.record_cost(call_cost) {
