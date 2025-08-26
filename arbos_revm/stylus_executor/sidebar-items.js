@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_evm_data","cached_gas","init_gas","stylus_call_cost"],"struct":["PROGRAM_CACHE","StylusExecutionContext"],"type":["EvmApiHandler","ProgramCacheEntry"]};
