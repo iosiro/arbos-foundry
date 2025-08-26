@@ -32,7 +32,7 @@ use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
 };
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
-use arbos_revm::chain_config::ArbitrumChainInfo;
+use arbos_revm::chain::ArbitrumChainInfo;
 use foundry_common::{SELECTOR_LEN, TransactionMaybeSigned, evm::Breakpoints};
 use foundry_evm_core::{
     InspectorExt,

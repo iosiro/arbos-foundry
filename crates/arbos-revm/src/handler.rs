@@ -1,4 +1,4 @@
-use crate::{ArbitrumHaltReason, ArbitrumTransactionError, api::ArbitrumContextTr};
+use crate::{ArbitrumContextTr, ArbitrumHaltReason, transaction::ArbitrumTransactionError};
 use revm::{
     Inspector,
     context::{JournalTr, result::FromStringError},

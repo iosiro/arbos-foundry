@@ -1,11 +1,13 @@
-use revm::context::ContextSetters;
+use revm::context::{ContextError, ContextSetters, ContextTr};
 
 use revm::{
+    Database,
     handler::{
-        FrameInitOrResult, ItemOrResult, PrecompileProvider, evm::ContextDbError,
-        instructions::InstructionProvider,
+        EvmTr, FrameInitOrResult, FrameResult, ItemOrResult, PrecompileProvider,
+        evm::ContextDbError, instructions::InstructionProvider,
     },
     inspector::{InspectorEvmTr, InspectorFrame, JournalExt, handler::frame_end},
+    interpreter::interpreter_action::FrameInit,
 };
 
 use revm::{
@@ -13,7 +15,7 @@ use revm::{
     interpreter::{InterpreterResult, interpreter::EthInterpreter},
 };
 
-use crate::{ArbitrumEvm, api::ArbitrumContextTr};
+use crate::{ArbitrumContextTr, ArbitrumEvm};
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I> {
     /// Consumed self and returns a new Evm type with given Inspector.
@@ -82,5 +84,54 @@ where
         }
 
         self.0.inspect_frame_run()
+    }
+}
+
+impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I>
+where
+    CTX: ArbitrumContextTr,
+    CTX::Journal: JournalExt,
+    I: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
+    P: PrecompileProvider<CTX, Output = InterpreterResult>,
+    CTX: ContextSetters,
+    INSP: Inspector<CTX>,
+{
+    /// Run inspection on execution loop.
+    ///
+    /// It will call:
+    /// * [`Inspector::call`],[`Inspector::create`] to inspect call, create and eofcreate.
+    /// * [`Inspector::call_end`],[`Inspector::create_end`] to inspect call, create and eofcreate
+    ///   end.
+    /// * [`Inspector::initialize_interp`] to inspect initialized interpreter.
+    pub(crate) fn inspect_run_exec_loop(
+        &mut self,
+        first_frame_input: FrameInit,
+    ) -> Result<FrameResult, ContextError<<<CTX as ContextTr>::Db as Database>::Error>> {
+        let res = self.inspect_frame_init(first_frame_input)?;
+
+        if let ItemOrResult::Result(frame_result) = res {
+            return Ok(frame_result);
+        }
+
+        loop {
+            let call_or_result = self.inspect_frame_run()?;
+
+            let result = match call_or_result {
+                ItemOrResult::Item(init) => {
+                    match self.inspect_frame_init(init)? {
+                        ItemOrResult::Item(_) => {
+                            continue;
+                        }
+                        // Do not pop the frame since no new frame was created
+                        ItemOrResult::Result(result) => result,
+                    }
+                }
+                ItemOrResult::Result(result) => result,
+            };
+
+            if let Some(result) = self.frame_return_result(result)? {
+                return Ok(result);
+            }
+        }
     }
 }

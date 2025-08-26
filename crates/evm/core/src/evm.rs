@@ -36,9 +36,7 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
-use arbos_revm::{
-    ArbitrumEvm as RevmEvm, api::default_ctx::ArbitrumContext, chain_config::ArbitrumChainInfo,
-};
+use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo};
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
