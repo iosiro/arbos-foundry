@@ -9,12 +9,21 @@ struct ReturnData {
     uint256 inkUsed;
 }
 
-interface IStylusTestProgram  {
-    function call(address target, bytes calldata data, uint256 value, uint256 gas_limit) external payable returns (ReturnData memory);
+interface IStylusTestProgram {
+    function call(address target, bytes calldata data, uint256 value, uint256 gas_limit)
+        external
+        payable
+        returns (ReturnData memory);
 
-    function delegateCall(address target, bytes calldata data, uint256 gas_limit) external payable returns (ReturnData memory);
+    function delegateCall(address target, bytes calldata data, uint256 gas_limit)
+        external
+        payable
+        returns (ReturnData memory);
 
-    function staticCall(address target, bytes calldata data, uint256 gas_limit) external view returns (ReturnData memory);
+    function staticCall(address target, bytes calldata data, uint256 gas_limit)
+        external
+        view
+        returns (ReturnData memory);
 
     function sstore(uint256 key, uint256 value) external returns (uint256);
 
@@ -33,7 +42,7 @@ interface IStylusTestProgram  {
     function ping() external view returns (bytes memory);
 }
 
-contract StylusProgramTester is DSTest{
+contract StylusProgramTester is DSTest {
     Vm constant vm = Vm(HEVM_ADDRESS);
 
     struct MagicContainer {
@@ -43,7 +52,6 @@ contract StylusProgramTester is DSTest{
     IStylusTestProgram immutable stylusTestProgram;
     // keccak256("magic.slot") & ~bytes32(uint256(0xff));
     bytes32 constant MAGIC_SLOT = bytes32(0x017dd401d442586760055db46687b9dc91afe0bc2762cf929f079f8791599000);
-
 
     constructor() {
         // Source available at: testdata/fixtures/Stylus/crates/program
@@ -95,24 +103,21 @@ contract StylusProgramTester is DSTest{
         StylusProgramTester(address(this)).storageAtomic();
     }
 
-    function testStorage2() public  {
+    function testStorage2() public {
         // COLD SLOAD after update
         (uint256 value, uint256 inkUsed) = stylusTestProgram.sload(0x2345);
         uint256 gasUsed = vm.lastCallGas().gasTotalUsed;
         assertEq(value, 0x1234);
         assertEq(inkUsed, 21182530);
         assertEq(gasUsed, 22866);
-
     }
 
-    function staticCall() public { 
+    function staticCall() public {
         uint256 sentinel = 0xdeadbeef;
         bytes memory data = abi.encodeWithSignature("staticCallReceiver(uint256)", sentinel);
         (ReturnData memory result) = stylusTestProgram.staticCall(address(this), data, 0);
         uint256 gasUsed = vm.lastCallGas().gasTotalUsed;
-        (
-            uint256 invertedSentinel
-        ) = abi.decode(result.data, (uint256));
+        (uint256 invertedSentinel) = abi.decode(result.data, (uint256));
 
         assertEq(invertedSentinel, ~sentinel);
         assertEq(result.inkUsed, 16532329);
@@ -120,7 +125,7 @@ contract StylusProgramTester is DSTest{
     }
 
     function testDelegateCall() public {
-        (uint256 value, ) = stylusTestProgram.sload(uint256(MAGIC_SLOT));
+        (uint256 value,) = stylusTestProgram.sload(uint256(MAGIC_SLOT));
 
         uint256 expectedValue = uint256(keccak256(abi.encodePacked(value)));
         bytes memory data = abi.encodeWithSignature("mutableCallReceiver(uint256)", expectedValue);
@@ -130,12 +135,11 @@ contract StylusProgramTester is DSTest{
         string memory response = abi.decode(result.data, (string));
         assertEq(keccak256(abi.encodePacked(response)), keccak256("pong"));
 
-        (uint256 newValue, ) = stylusTestProgram.sload(uint256(MAGIC_SLOT));
+        (uint256 newValue,) = stylusTestProgram.sload(uint256(MAGIC_SLOT));
         assertEq(newValue, expectedValue);
         assertEq(result.inkUsed, 228614140);
         assertEq(gasUsed, 66553);
     }
-
 
     function testMutableCall() public {
         uint256 magic = 0xdeadbeef;
@@ -155,7 +159,13 @@ contract StylusProgramTester is DSTest{
     function testPing() public {
         bytes memory result = stylusTestProgram.ping();
         uint256 gasUsed = vm.lastCallGas().gasTotalUsed;
-        assertEq(keccak256(result), keccak256("this is a really long response that should be returned by the ping function to test the multicall functionality"), "Ping call failed");
+        assertEq(
+            keccak256(result),
+            keccak256(
+                "this is a really long response that should be returned by the ping function to test the multicall functionality"
+            ),
+            "Ping call failed"
+        );
         assertEq(gasUsed, 20756);
     }
 
@@ -180,7 +190,9 @@ contract StylusProgramTester is DSTest{
     function testAccountCodeHash() public {
         bytes32 expectedCodeHash;
         address thizz = address(this);
-        assembly { expectedCodeHash := extcodehash(thizz) }
+        assembly {
+            expectedCodeHash := extcodehash(thizz)
+        }
 
         (bytes32 codeHash, uint256 inkUsed) = stylusTestProgram.accountCodeHash(thizz);
         uint256 gasUsed = vm.lastCallGas().gasTotalUsed;

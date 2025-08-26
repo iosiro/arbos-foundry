@@ -1,7 +1,10 @@
 //! Filesystem tests.
 
-use crate::{config::*, test_helpers::{TEST_DATA_DEFAULT, RE_PATH_SEPARATOR}};
-use foundry_config::{fs_permissions::PathPermission, FsPermissions, GasLimit};
+use crate::{
+    config::*,
+    test_helpers::{RE_PATH_SEPARATOR, TEST_DATA_DEFAULT},
+};
+use foundry_config::{FsPermissions, GasLimit, fs_permissions::PathPermission};
 use foundry_test_utils::Filter;
 
 #[tokio::test(flavor = "multi_thread")]
