@@ -77,7 +77,7 @@ fn deploy_stylus_code(
     value: Option<U256>,
     salt: Option<U256>,
 ) -> Result {
-    let bytecode = get_artifact_code(ccx.state, path, false)?.to_vec();
+    let bytecode = get_artifact_code(ccx.state, path, true)?.to_vec();
 
     let scheme =
         if let Some(salt) = salt { CreateScheme::Create2 { salt } } else { CreateScheme::Create };
