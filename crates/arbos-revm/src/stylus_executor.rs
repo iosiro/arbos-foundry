@@ -372,7 +372,7 @@ where
                 call_value: stylus_ctx.call_value,
                 bytecode_address: Some(stylus_ctx.target_address),
             };
-            let evm_data = build_evm_data(context, inputs_tmp.clone());
+            let evm_data = build_evm_data(context, inputs_tmp);
 
             (
                 compile_config,
