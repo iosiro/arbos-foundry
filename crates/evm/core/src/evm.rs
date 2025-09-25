@@ -16,7 +16,7 @@ use foundry_fork_db::DatabaseError;
 use revm::{
     Context, Journal,
     context::{
-        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
+        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContextTr, TxEnv,
         result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
     },
     handler::{
@@ -36,7 +36,7 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
-use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo};
+use arbos_revm::{chain::ArbitrumChainInfo, local_context::ArbitrumLocalContext, ArbitrumContext, ArbitrumEvm as RevmEvm};
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
@@ -55,7 +55,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         cfg: env.evm_env.cfg_env,
         tx: env.tx,
         chain: ArbitrumChainInfo::default(),
-        local: LocalContext::default(),
+        local: ArbitrumLocalContext::default(),
         error: Ok(()),
     };
     ctx.cfg.tx_chain_id_check = true;

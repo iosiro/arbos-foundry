@@ -32,7 +32,7 @@ use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
 };
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
-use arbos_revm::chain::ArbitrumChainInfo;
+use arbos_revm::{chain::ArbitrumChainInfo, local_context::ArbitrumLocalContext};
 use foundry_common::{SELECTOR_LEN, TransactionMaybeSigned, evm::Breakpoints};
 use foundry_evm_core::{
     InspectorExt,
@@ -51,7 +51,7 @@ use rand::Rng;
 use revm::{
     Inspector, Journal,
     bytecode::opcode as op,
-    context::{BlockEnv, JournalTr, LocalContext, TransactionType, result::EVMError},
+    context::{BlockEnv, JournalTr, TransactionType, result::EVMError},
     context_interface::{CreateScheme, transaction::SignedAuthorization},
     handler::FrameResult,
     interpreter::{
@@ -163,7 +163,7 @@ where
             inner: ccx.ecx.journaled_state.inner.clone(),
             database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
         },
-        local: LocalContext::default(),
+        local: ArbitrumLocalContext::default(),
         chain: ArbitrumChainInfo::default(),
         error,
     };

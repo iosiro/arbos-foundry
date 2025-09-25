@@ -42,15 +42,11 @@ use stylus::{
 };
 
 use crate::{
-    ArbitrumEvm,
-    chain::ArbitrumChainInfoTr,
-    constants::{
+    chain::ArbitrumChainInfoTr, constants::{
         COST_SCALAR_PERCENT, INITIAL_CACHED_COST_SCALAR, INITIAL_FREE_PAGES,
         INITIAL_INIT_COST_SCALAR, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS, INITIAL_PAGE_GAS,
         MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    },
-    context::ArbitrumContextTr,
-    stylus_api::StylusHandler,
+    }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, stylus_api::StylusHandler, ArbitrumEvm
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -62,7 +58,7 @@ lazy_static::lazy_static! {
 type EvmApiHandler<'a> =
     Arc<Box<dyn Fn(EvmApiMethod, Vec<u8>) -> (Vec<u8>, VecReader, arbutil::evm::api::Gas) + 'a>>;
 
-pub fn build_evm_data<CTX>(context: &mut CTX, input: InputsImpl) -> EvmData
+pub fn build_evm_data<CTX>(context: &CTX, input: InputsImpl) -> EvmData
 where
     CTX: ArbitrumContextTr,
 {
@@ -290,7 +286,6 @@ where
         Err(())
     }
 
-    /// Core Stylus execution logic shared between inspected and non-inspected modes
     pub(crate) fn execute_stylus_program(
         &mut self,
         stylus_ctx: StylusExecutionContext,
@@ -303,56 +298,78 @@ where
             Vec<u8>,
         ) -> (Vec<u8>, VecReader, ArbGas),
     ) -> Option<InterpreterAction> {
-        let context = self.ctx();
+        let (
+            compile_config,
+            stylus_config,
+            (serialized, _module),
+            wasm_open_pages,
+            call_cost,
+            evm_data,
+        ) = {
+            let context = self.ctx();
 
-        let compile_config =
-            CompileConfig::version(context.chain().stylus_version(), context.chain().debug_mode());
+            let compile_config = CompileConfig::version(
+                context.chain().stylus_version(),
+                context.chain().debug_mode(),
+            );
 
-        let stylus_config = StylusConfig::new(
-            context.chain().stylus_version(),
-            context.chain().max_depth(),
-            context.chain().ink_price(),
-        );
+            let stylus_config = StylusConfig::new(
+                context.chain().stylus_version(),
+                context.chain().max_depth(),
+                context.chain().ink_price(),
+            );
 
-        let (serialized, _module, stylus_data) = {
-            // Use read lock to get cached program if available
-            // if not available drop the read lock and acquire write lock to compile and insert
-            let maybe_cached = {
-                let mut cache = PROGRAM_CACHE.lock().unwrap();
-                if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
-                    Some((serialized, module, stylus_data))
+            let (serialized, _module, stylus_data) = {
+                let maybe_cached = PROGRAM_CACHE.lock().unwrap().get(&code_hash).cloned();
+                if let Some(cached) = maybe_cached {
+                    cached
                 } else {
-                    None
-                }
-            };
+                    let bytecode =
+                        context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
 
-            if let Some((serialized, module, stylus_data)) = maybe_cached {
-                (serialized, module, stylus_data)
-            } else {
-                let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
+                    if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
+                        return None;
+                    }
 
-                if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
-                    return None;
-                }
+                    let compiled = Self::compile_stylus_bytecode(
+                        &bytecode,
+                        code_hash,
+                        context.chain().arbos_version(),
+                        context.chain().stylus_version(),
+                        stylus_ctx.gas_limit,
+                        &compile_config,
+                    ).ok()?;
 
-                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
-                    &bytecode,
-                    code_hash,
-                    context.chain().arbos_version(),
-                    context.chain().stylus_version(),
-                    stylus_ctx.gas_limit,
-                    &compile_config,
-                ) {
-                    let mut cache = PROGRAM_CACHE.lock().unwrap();
-                    cache.get_or_insert(code_hash, || {
+                    let (serialized, module, stylus_data) = compiled;
+                    PROGRAM_CACHE.lock().unwrap().get_or_insert(code_hash, || {
                         (serialized.clone(), module.clone(), stylus_data)
                     });
 
                     (serialized, module, stylus_data)
-                } else {
-                    return None;
                 }
-            }
+            };
+
+            let wasm_open_pages = context.local().stylus_pages_open();
+
+            let call_cost = stylus_call_cost(
+                stylus_data.footprint,
+                wasm_open_pages as u16,
+                context.local().stylus_pages_ever() as u16,
+            ) + cached_gas(stylus_data);
+
+            context.local_mut().add_stylus_pages_open(stylus_data.footprint as u64);
+
+            let inputs_tmp = InputsImpl {
+                target_address: stylus_ctx.target_address,
+                caller_address: stylus_ctx.caller_address,
+                input: CallInput::Bytes(Bytes::from(stylus_ctx.calldata.to_vec())),
+                call_value: stylus_ctx.call_value,
+                bytecode_address: Some(stylus_ctx.target_address),
+            };
+            let evm_data = build_evm_data(context, inputs_tmp.clone());
+
+            (compile_config, stylus_config, (serialized, _module,),
+            wasm_open_pages, call_cost, evm_data)
         };
 
         let inputs = InputsImpl {
@@ -363,9 +380,6 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16)
-            + cached_gas(stylus_data);
-
         let mut gas = Gas::new(stylus_ctx.gas_limit);
         if !gas.record_cost(call_cost) {
             return Some(InterpreterAction::Return(InterpreterResult {
@@ -375,16 +389,20 @@ where
             }));
         }
 
-        let evm_data = build_evm_data(self.ctx(), inputs.clone());
         let evm_api =
             self.build_api_requestor(inputs.clone(), stylus_ctx.is_static, api_request_handler);
 
         let mut instance = unsafe {
-            NativeInstance::deserialize(serialized.as_slice(), compile_config, evm_api, evm_data)
-                .unwrap()
+            NativeInstance::deserialize(
+                serialized.as_slice(),
+                compile_config,
+                evm_api,
+                evm_data,
+            ).unwrap()
         };
 
-        let ink_limit = stylus_config.pricing.gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
+        let ink_limit =
+            stylus_config.pricing.gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
         gas.spend_all();
 
         let bytecode = match inputs.input() {
@@ -397,24 +415,32 @@ where
             Ok(outcome) => outcome,
         };
 
-        let mut gas_left = stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
+        let mut gas_left =
+            stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
 
         let (kind, data) = outcome.into_data();
 
         let result = match kind {
-            UserOutcomeKind::Success => revm::interpreter::InstructionResult::Return,
-            UserOutcomeKind::Revert => revm::interpreter::InstructionResult::Revert,
-            UserOutcomeKind::Failure => revm::interpreter::InstructionResult::Revert,
-            UserOutcomeKind::OutOfInk => revm::interpreter::InstructionResult::OutOfGas,
+            UserOutcomeKind::Success => InstructionResult::Return,
+            UserOutcomeKind::Revert => InstructionResult::Revert,
+            UserOutcomeKind::Failure => InstructionResult::Revert,
+            UserOutcomeKind::OutOfInk => InstructionResult::OutOfGas,
             UserOutcomeKind::OutOfStack => {
                 gas_left = 0;
-                revm::interpreter::InstructionResult::StackOverflow
+                InstructionResult::StackOverflow
             }
         };
 
         gas.erase_cost(gas_left);
 
-        Some(InterpreterAction::Return(InterpreterResult { result, output: data.into(), gas }))
+        // re-borrow context briefly for the update
+        self.ctx().local_mut().set_stylus_pages_open(wasm_open_pages);
+
+        Some(InterpreterAction::Return(InterpreterResult {
+            result,
+            output: data.into(),
+            gas,
+        }))
     }
 
     pub fn frame_run_stylus(&mut self) -> Option<InterpreterAction> {

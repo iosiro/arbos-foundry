@@ -1,8 +1,6 @@
 pub use alloy_evm::EvmEnv;
 use revm::{
-    Context, Database, Journal, JournalEntry,
-    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, TxEnv},
-    primitives::hardfork::SpecId,
+    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, LocalContextTr, TxEnv}, primitives::hardfork::SpecId, Context, Database, Journal, JournalEntry
 };
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
@@ -70,8 +68,8 @@ impl AsEnvMut for Env {
     }
 }
 
-impl<DB: Database, J: JournalTr<Database = DB>, C> AsEnvMut
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C>
+impl<DB: Database, J: JournalTr<Database = DB>, C, LOCAL: LocalContextTr> AsEnvMut
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C, LOCAL>
 {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
         EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
@@ -86,8 +84,8 @@ pub trait ContextExt {
     ) -> (&mut Self::DB, &mut JournalInner<JournalEntry>, EnvMut<'_>);
 }
 
-impl<DB: Database, C> ContextExt
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C>
+impl<DB: Database, C, LOCAL: LocalContextTr> ContextExt
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C, LOCAL>
 {
     type DB = DB;
 
