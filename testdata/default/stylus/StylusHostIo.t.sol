@@ -90,13 +90,13 @@ contract StylusProgramTester is DSTest {
         gasUsed = vm.lastCallGas().gasTotalUsed;
         assertEq(value, 0x5678);
         assertEq(inkUsed, 1182530);
-        assertEq(gasUsed, 20866);
+        assertEq(gasUsed, 20858);
 
         // HOT SSTORE
         inkUsed = stylusTestProgram.sstore(0x1234, 0x9abc);
         gasUsed = vm.lastCallGas().gasTotalUsed;
         assertEq(inkUsed, 182059);
-        assertEq(gasUsed, 20905);
+        assertEq(gasUsed, 20897);
     }
 
     function testStorage() public {
