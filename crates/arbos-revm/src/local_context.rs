@@ -65,7 +65,6 @@ impl ArbitrumLocalContextTr for ArbitrumLocalContext {
     }
 }
 
-
 impl ArbitrumLocalContext {
     /// Creates a new local context, initcodes are hashes and added to the mapping.
     pub fn new() -> Self {

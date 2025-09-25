@@ -42,11 +42,16 @@ use stylus::{
 };
 
 use crate::{
-    chain::ArbitrumChainInfoTr, constants::{
+    ArbitrumEvm,
+    chain::ArbitrumChainInfoTr,
+    constants::{
         COST_SCALAR_PERCENT, INITIAL_CACHED_COST_SCALAR, INITIAL_FREE_PAGES,
         INITIAL_INIT_COST_SCALAR, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS, INITIAL_PAGE_GAS,
         MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, stylus_api::StylusHandler, ArbitrumEvm
+    },
+    context::ArbitrumContextTr,
+    local_context::ArbitrumLocalContextTr,
+    stylus_api::StylusHandler,
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -338,7 +343,8 @@ where
                         context.chain().stylus_version(),
                         stylus_ctx.gas_limit,
                         &compile_config,
-                    ).ok()?;
+                    )
+                    .ok()?;
 
                     let (serialized, module, stylus_data) = compiled;
                     PROGRAM_CACHE.lock().unwrap().get_or_insert(code_hash, || {
@@ -368,8 +374,14 @@ where
             };
             let evm_data = build_evm_data(context, inputs_tmp.clone());
 
-            (compile_config, stylus_config, (serialized, _module,),
-            wasm_open_pages, call_cost, evm_data)
+            (
+                compile_config,
+                stylus_config,
+                (serialized, _module),
+                wasm_open_pages,
+                call_cost,
+                evm_data,
+            )
         };
 
         let inputs = InputsImpl {
@@ -393,16 +405,11 @@ where
             self.build_api_requestor(inputs.clone(), stylus_ctx.is_static, api_request_handler);
 
         let mut instance = unsafe {
-            NativeInstance::deserialize(
-                serialized.as_slice(),
-                compile_config,
-                evm_api,
-                evm_data,
-            ).unwrap()
+            NativeInstance::deserialize(serialized.as_slice(), compile_config, evm_api, evm_data)
+                .unwrap()
         };
 
-        let ink_limit =
-            stylus_config.pricing.gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
+        let ink_limit = stylus_config.pricing.gas_to_ink(arbutil::evm::api::Gas(gas.remaining()));
         gas.spend_all();
 
         let bytecode = match inputs.input() {
@@ -415,8 +422,7 @@ where
             Ok(outcome) => outcome,
         };
 
-        let mut gas_left =
-            stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
+        let mut gas_left = stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
 
         let (kind, data) = outcome.into_data();
 
@@ -436,11 +442,7 @@ where
         // re-borrow context briefly for the update
         self.ctx().local_mut().set_stylus_pages_open(wasm_open_pages);
 
-        Some(InterpreterAction::Return(InterpreterResult {
-            result,
-            output: data.into(),
-            gas,
-        }))
+        Some(InterpreterAction::Return(InterpreterResult { result, output: data.into(), gas }))
     }
 
     pub fn frame_run_stylus(&mut self) -> Option<InterpreterAction> {
