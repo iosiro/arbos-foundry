@@ -405,8 +405,8 @@ idna_adapter = "=1.1.0"
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "7fab7ee" }
 
 ## alloy-evm
-# alloy-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "7762adc" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm.git", rev = "7762adc" }
+alloy-evm = { git = "https://github.com/bernard-wagner/alloy-evm.git", rev = "213ad42" }
+alloy-op-evm = { git = "https://github.com/bernard-wagner/alloy-evm.git", rev = "213ad42" }
 
 ## revm
 revm = { git = "https://github.com/bluealloy/revm.git", rev = "409c2b3" }
