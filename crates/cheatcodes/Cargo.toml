@@ -66,3 +66,6 @@ serde.workspace = true
 
 arbos-revm.workspace = true
 stylus = { workspace = true, features = ["cc_brotli"] }
+wasmprinter = "0.239.0"
+wasmparser = "0.239.0"
+wasm-encoder = "0.239.0"
