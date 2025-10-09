@@ -691,7 +691,6 @@ impl Backend {
     }
 
     /// Returns the current database implementation as a `&dyn` value.
-    #[inline(always)]
     pub fn db(&self) -> &dyn Database<Error = DatabaseError> {
         match self.active_fork_db() {
             Some(fork_db) => fork_db,
@@ -700,7 +699,6 @@ impl Backend {
     }
 
     /// Returns the current database implementation as a `&mut dyn` value.
-    #[inline(always)]
     pub fn db_mut(&mut self) -> &mut dyn Database<Error = DatabaseError> {
         match self.active_fork_ids.map(|(_, idx)| &mut self.inner.get_fork_mut(idx).db) {
             Some(fork_db) => fork_db,
@@ -1133,8 +1131,6 @@ impl DatabaseExt for Backend {
             // selected. This ensures that there are no gaps in depth which would
             // otherwise cause issues with the tracer
             fork.journaled_state.depth = active_journaled_state.depth;
-            // Set proper journal of state changes into the fork.
-            fork.journaled_state.journal = active_journaled_state.journal.clone();
 
             // another edge case where a fork is created and selected during setup with not
             // necessarily the same caller as for the test, however we must always
@@ -1831,7 +1827,9 @@ impl BackendInner {
             journal_inner.set_spec_id(self.spec_id);
             journal_inner
         };
-        journal.precompiles.extend(self.precompiles().addresses().copied());
+        journal
+            .warm_addresses
+            .set_precompile_addresses(self.precompiles().addresses().copied().collect());
         journal
     }
 }

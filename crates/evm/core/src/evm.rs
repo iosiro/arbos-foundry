@@ -7,10 +7,7 @@ use crate::{
     Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{
-    Evm, EvmEnv,
-    precompiles::{DynPrecompile, PrecompileInput, PrecompilesMap},
-};
+use alloy_evm::{Evm, EvmEnv, precompiles::PrecompilesMap};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
@@ -29,10 +26,7 @@ use revm::{
         FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory,
         interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok,
     },
-    precompile::{
-        PrecompileSpecId, Precompiles,
-        secp256r1::{P256VERIFY, P256VERIFY_BASE_GAS_FEE},
-    },
+    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 
@@ -70,8 +64,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         ),
     };
 
-    inject_precompiles(&mut evm);
-
+    evm.inspector().get_networks().inject_precompiles(evm.precompiles_mut());
     evm
 }
 
@@ -90,22 +83,8 @@ pub fn new_evm_with_existing_context<'a>(
         ),
     };
 
-    inject_precompiles(&mut evm);
-
+    evm.inspector().get_networks().inject_precompiles(evm.precompiles_mut());
     evm
-}
-
-/// Conditionally inject additional precompiles into the EVM context.
-fn inject_precompiles(evm: &mut FoundryEvm<'_, impl InspectorExt>) {
-    if evm.inspector().is_odyssey() {
-        evm.precompiles_mut().apply_precompile(P256VERIFY.address(), |_| {
-            // Create a wrapper function that adapts the new API
-            let precompile_fn = |input: PrecompileInput<'_>| -> Result<_, _> {
-                P256VERIFY.precompile()(input.data, P256VERIFY_BASE_GAS_FEE)
-            };
-            Some(DynPrecompile::from(precompile_fn))
-        });
-    }
 }
 
 /// Get the precompiles for the given spec.
