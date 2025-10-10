@@ -1,0 +1,211 @@
+name: release-debug
+
+permissions: {}
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      tag_name: ${{ steps.release_info.outputs.tag_name }}
+      release_name: ${{ steps.release_info.outputs.release_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Compute release name and tag
+        id: release_info
+        run: |
+          printf 'tag_name=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          printf 'release_name=%s\n' "$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+  release:
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    name: ${{ matrix.target }} (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `runner`: GHA runner label
+          # `target`: Rust build target triple
+          # `platform` and `arch`: Used in tarball names
+          # `svm`: target platform to use for the Solc binary: https://github.com/roynalnaruto/svm-rs/blob/84cbe0ac705becabdc13168bae28a45ad2299749/svm-builds/build.rs#L4-L24
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            svm_target_platform: linux-amd64
+            platform: linux
+            arch: amd64
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            svm_target_platform: linux-amd64
+            platform: alpine
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            svm_target_platform: linux-aarch64
+            platform: linux
+            arch: arm64
+          - runner: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            svm_target_platform: linux-aarch64
+            platform: alpine
+            arch: arm64
+          # This is pinned to `macos-13` to support old SDK versions.
+          # If the runner is deprecated it should be pinned to the oldest available version of the runner.
+          - runner: macos-13
+            target: x86_64-apple-darwin
+            svm_target_platform: macosx-amd64
+            platform: darwin
+            arch: amd64
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            svm_target_platform: macosx-aarch64
+            platform: darwin
+            arch: arm64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            svm_target_platform: windows-amd64
+            platform: win32
+            arch: amd64
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
+
+      - name: Set git config for long paths
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          git config --system core.longpaths true
+
+      - name: Apple M1 setup
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          printf 'SDKROOT=%s\n' "$(xcrun -sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          printf 'MACOSX_DEPLOYMENT_TARGET=%s\n' "$(xcrun -sdk macosx --show-sdk-platform-version)" >> "$GITHUB_ENV"
+
+      - name: cross setup
+        if: contains(matrix.target, 'musl')
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross --rev baf457efc2555225af47963475bd70e8d2f5993f
+
+      - name: Build binaries
+        env:
+          TAG_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
+          SVM_TARGET_PLATFORM: ${{ matrix.svm_target_platform }}
+          PLATFORM_NAME: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          OUT_DIR: target/${{ matrix.target }}/${{ env.PROFILE }}
+        shell: bash
+        run: |
+          set -eo pipefail
+          flags=(--target $TARGET --profile $PROFILE --bins
+            --no-default-features --features aws-kms,gcp-kms,cli,asm-keccak,js-tracer)
+
+          # `jemalloc` is not fully supported on MSVC or aarch64 Linux.
+          if [[ "$TARGET" != *msvc* && "$TARGET" != "aarch64-unknown-linux-gnu" ]]; then
+            flags+=(--features jemalloc)
+          fi
+
+          [[ "$TARGET" == *windows* ]] && ext=".exe"
+
+          if [[ "$TARGET" == *-musl ]]; then
+            cross build "${flags[@]}"
+          else
+            cargo build "${flags[@]}"
+          fi
+
+          bins=(arbos-cast arbos-forge)
+          for name in "${bins[@]}"; do
+            bin="$OUT_DIR/$name$ext"
+            printf '\n'
+            file "$bin" || true
+            du -h "$bin" || true
+            ldd "$bin" || true
+            $bin --version || true
+            printf '%s_bin_path=%s\n' "$name" "$bin" >> "$GITHUB_ENV"
+          done
+
+      - name: Archive binaries
+        id: artifacts
+        env:
+          PLATFORM_NAME: ${{ matrix.platform }}
+          OUT_DIR: target/${{ matrix.target }}/${{ env.PROFILE }}
+          VERSION_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
+          ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          if [[ "$PLATFORM_NAME" == "linux" || "$PLATFORM_NAME" == "alpine" ]]; then
+            tar -czvf "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+          elif [ "$PLATFORM_NAME" == "darwin" ]; then
+            # We need to use gtar here otherwise the archive is corrupt.
+            # See: https://github.com/actions/virtual-environments/issues/2619
+            gtar -czvf "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" -C "$OUT_DIR" arbos-forge arbos-cast
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.tar.gz" >> "$GITHUB_OUTPUT"
+          else
+            cd "$OUT_DIR"
+            7z a -tzip "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" arbos-forge.exe arbos-cast.exe
+            mv "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" ../../../
+            printf "file_name=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.zip" >> "$GITHUB_OUTPUT"
+          fi
+          printf "arbos-foundry_attestation=%s\n" "arbos-foundry_${VERSION_NAME}_${PLATFORM_NAME}_${ARCH}.attestation.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: ${{ steps.artifacts.outputs.file_name }}
+          path: ${{ steps.artifacts.outputs.file_name }}
+
+      - name: Build man page
+        id: man
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          OUT_DIR: target/${{ matrix.target }}/${{ env.PROFILE }}
+          VERSION_NAME: ${{ (env.IS_NIGHTLY == 'true' && 'nightly') || needs.prepare.outputs.tag_name }}
+        shell: bash
+        run: |
+          sudo apt-get -y install help2man
+          help2man -N $OUT_DIR/arbos-forge > arbos-forge.1
+          help2man -N $OUT_DIR/arbos-cast > arbos-cast.1
+          gzip arbos-forge.1
+          gzip arbos-cast.1
+          tar -czvf "arbos-foundry_man_${VERSION_NAME}.tar.gz" arbos-forge.1.gz arbos-cast.1.gz
+          printf 'arbos-foundry_man=%s\n' "arbos-foundry_man_${VERSION_NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Binaries attestation
+        id: attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            ${{ env.arbos-cast_bin_path }}
+            ${{ env.arbos-forge_bin_path }}
+
+      - name: Record attestation URL
+        env:
+          ATTESTATION_URL: ${{ steps.attestation.outputs.attestation-url }}
+          FOUNDRY_ATTESTATION: ${{ steps.artifacts.outputs.arbos-foundry_attestation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ATTESTATION_URL" > "$FOUNDRY_ATTESTATION"
