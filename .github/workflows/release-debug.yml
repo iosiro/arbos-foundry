@@ -5,6 +5,12 @@ permissions: {}
 on:
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+  IS_NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+  PROFILE: maxperf
+  STABLE_VERSION: "v1.3.6"
+
 jobs:
   prepare:
     name: Prepare release
