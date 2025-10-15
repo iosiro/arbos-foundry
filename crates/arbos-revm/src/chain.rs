@@ -4,6 +4,9 @@ pub trait ArbitrumChainInfoTr {
     fn max_depth(&self) -> u32;
     fn ink_price(&self) -> u32;
     fn debug_mode(&self) -> bool;
+
+    fn auto_activate_stylus(&self) -> bool;
+    fn auto_cache_stylus(&self) -> bool;
 }
 
 pub struct ArbitrumChainInfo {
@@ -12,16 +15,22 @@ pub struct ArbitrumChainInfo {
     pub max_depth: u32,
     pub ink_price: u32,
     pub debug_mode: bool,
+
+    pub auto_activate_stylus: bool,
+    pub auto_cache_stylus: bool,
 }
 
 impl Default for ArbitrumChainInfo {
     fn default() -> Self {
         Self {
             arbos_version: 32,
-            stylus_version: 1,
+            stylus_version: 2,
             max_depth: 4 * 65536,
             ink_price: 10000,
             debug_mode: false,
+
+            auto_activate_stylus: false,
+            auto_cache_stylus: false,
         }
     }
 }
@@ -45,5 +54,13 @@ impl ArbitrumChainInfoTr for ArbitrumChainInfo {
 
     fn debug_mode(&self) -> bool {
         self.debug_mode
+    }
+
+    fn auto_activate_stylus(&self) -> bool {
+        self.auto_activate_stylus
+    }
+
+    fn auto_cache_stylus(&self) -> bool {
+        self.auto_cache_stylus
     }
 }
