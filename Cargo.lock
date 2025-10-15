@@ -1224,10 +1224,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "arbos-precompiles"
+version = "1.4.0"
+dependencies = [
+ "alloy-evm",
+ "alloy-sol-types",
+ "arbos-revm",
+ "arbutil",
+ "foundry-macros",
+ "revm",
+ "serde",
+ "serde_json",
+ "stylus",
+ "wasmer-types",
+]
+
+[[package]]
 name = "arbos-revm"
 version = "1.4.0"
 dependencies = [
+ "alloy-sol-types",
  "arbutil",
+ "foundry-macros",
  "lazy_static",
  "lru 0.14.0",
  "revm",

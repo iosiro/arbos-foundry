@@ -1,6 +1,6 @@
 [package]
-name = "arbos-revm"
-description = "Arbitrum variant of Revm"
+name = "arbos-precompiles"
+description = "Arbitrum precompiles for Revm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,9 +21,8 @@ stylus = { workspace = true, default-features = false, features = ["cc_brotli"] 
 wasmer-types = { workspace = true, default-features = false }
 foundry-macros = { workspace = true }
 alloy-sol-types = { workspace = true, features = ["std"] }
-
-lru = "0.14.0"
-lazy_static = "1.5.0"
+alloy-evm = { workspace = true }
+arbos-revm = { workspace = true }
 
 [dev-dependencies]
 serde_json = { version = "1.0", default-features = false }

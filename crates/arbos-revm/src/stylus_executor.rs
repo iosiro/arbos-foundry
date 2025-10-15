@@ -230,65 +230,6 @@ where
         Some((context, code_hash))
     }
 
-    /// Compile Stylus bytecode
-    fn compile_stylus_bytecode(
-        bytecode: &Bytes,
-        code_hash: B256,
-        arbos_version: u16,
-        stylus_version: u16,
-        _gas_limit: u64,
-        compile_config: &CompileConfig,
-    ) -> Result<(Vec<u8>, Module, StylusData), ()> {
-        if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
-            let (dictionary, compressed_bytecode) =
-                if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
-                    (dictionary, compressed_bytecode)
-                } else {
-                    return Err(());
-                };
-
-            let dictionary = match dictionary[0] {
-                0x00 => Dictionary::Empty,
-                0x01 => Dictionary::StylusProgram,
-                _ => unreachable!(),
-            };
-
-            let bytecode = brotli::decompress(compressed_bytecode, dictionary)
-                .or_else(|err| {
-                    if dictionary == Dictionary::Empty {
-                        Ok(compressed_bytecode.to_vec())
-                    } else {
-                        Err(err)
-                    }
-                })
-                .unwrap();
-
-            let mut activation_gas = 10_000_000u64;
-            let (module, stylus_data) = native::activate(
-                bytecode.as_slice(),
-                &Bytes32::from(code_hash.0),
-                stylus_version,
-                arbos_version as u64,
-                128,
-                false,
-                &mut activation_gas,
-            )
-            .unwrap();
-
-            let bytecode = native::compile(
-                bytecode.as_slice(),
-                compile_config.version,
-                false,
-                wasmer_types::compilation::target::Target::default(),
-                true,
-            )
-            .unwrap();
-
-            return Ok((bytecode, module, stylus_data));
-        }
-
-        Err(())
-    }
 
     /// Core Stylus execution logic shared between inspected and non-inspected modes
     pub(crate) fn execute_stylus_program(
@@ -314,6 +255,11 @@ where
             context.chain().ink_price(),
         );
 
+        // 1. convert code_hash to module_hash by checking activated
+        // 2. if not activated and activation is required, revert
+        // 3. if not activated and activation is not required, activate
+        // 3. if default cache is 
+
         let (serialized, _module, stylus_data) = {
             // Use read lock to get cached program if available
             // if not available drop the read lock and acquire write lock to compile and insert
@@ -335,7 +281,7 @@ where
                     return None;
                 }
 
-                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
+                if let Ok((serialized, module, stylus_data)) = compile_stylus_bytecode(
                     &bytecode,
                     code_hash,
                     context.chain().arbos_version(),
@@ -355,6 +301,60 @@ where
             }
         };
 
+
+        // let stored_module_hash = crate::stylus_state::module_hash(context, &code_hash)?;
+        // println!(
+        //     "Stylus module hash from ArbOS state: {}, computed module hash: {}",
+        //     stored_module_hash, module_hash
+        // );
+
+        let mut cached = false;
+
+        if let Some(program_info) = crate::stylus_state::program_info(context, &code_hash) {
+            cached = program_info.cached;
+
+            if context.chain().auto_activate_stylus() {
+                // auto-activate if not matching
+                // println!("Found existing stylus program info: {:?}", program_info);
+            } else {
+                // if not auto-activate, require match
+                if program_info.version != stylus_config.version
+                    || program_info.init_cost != stylus_data.init_cost
+                    || program_info.cached_cost != stylus_data.cached_init_cost
+                    || program_info.footprint != stylus_data.footprint
+                {
+                    // mismatch, revert
+                    println!(
+                        "Stylus program info mismatch, reverting. Stored: {:?}, Current: {:?}",
+                        program_info, stylus_data
+                    );
+                    return Some(InterpreterAction::Return(InterpreterResult {
+                        result: InstructionResult::Revert,
+                        output: Default::default(),
+                        gas: Default::default(),
+                    }));
+                } else {
+                    // println!("Stylus program info matched: {:?}", program_info);
+                }
+            }
+        } else if !context.chain().auto_activate_stylus() {
+            // require activation, but no info found, revert
+            println!("No stylus program info found, reverting.");
+            return Some(InterpreterAction::Return(InterpreterResult {
+                result: InstructionResult::Revert,
+                output: Default::default(),
+                gas: Default::default(),
+            }));
+        } else {
+            println!("No existing stylus program info found, auto-activating.");
+        }
+
+        // TODO: should we have a mode that only auto-caches newly deployed programs, but keep
+        // existing programs as non-cached unless explicitly cached?
+        cached = cached || context.chain().auto_cache_stylus();
+
+        
+
         let inputs = InputsImpl {
             target_address: stylus_ctx.target_address,
             caller_address: stylus_ctx.caller_address,
@@ -363,8 +363,13 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16)
-            + cached_gas(stylus_data);
+        let mut call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16);
+        
+        if cached {
+            call_cost += cached_gas(stylus_data);
+        } else {
+            call_cost += init_gas(stylus_data);
+        }
 
         let mut gas = Gas::new(stylus_ctx.gas_limit);
         if !gas.record_cost(call_cost) {
@@ -426,6 +431,66 @@ where
         )
     }
 }
+
+ /// Compile Stylus bytecode
+    pub fn compile_stylus_bytecode(
+        bytecode: &Bytes,
+        code_hash: B256,
+        arbos_version: u16,
+        stylus_version: u16,
+        _gas_limit: u64,
+        compile_config: &CompileConfig,
+    ) -> Result<(Vec<u8>, Module, StylusData), ()> {
+        if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
+            let (dictionary, compressed_bytecode) =
+                if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
+                    (dictionary, compressed_bytecode)
+                } else {
+                    return Err(());
+                };
+
+            let dictionary = match dictionary[0] {
+                0x00 => Dictionary::Empty,
+                0x01 => Dictionary::StylusProgram,
+                _ => unreachable!(),
+            };
+
+            let bytecode = brotli::decompress(compressed_bytecode, dictionary)
+                .or_else(|err| {
+                    if dictionary == Dictionary::Empty {
+                        Ok(compressed_bytecode.to_vec())
+                    } else {
+                        Err(err)
+                    }
+                })
+                .unwrap();
+
+            let mut activation_gas = 10_000_000u64;
+            let (module, stylus_data) = native::activate(
+                bytecode.as_slice(),
+                &Bytes32::from(code_hash.0),
+                stylus_version,
+                arbos_version as u64,
+                128,
+                false,
+                &mut activation_gas,
+            )
+            .unwrap();
+
+            let bytecode = native::compile(
+                bytecode.as_slice(),
+                compile_config.version,
+                false,
+                wasmer_types::compilation::target::Target::default(),
+                true,
+            )
+            .unwrap();
+
+            return Ok((bytecode, module, stylus_data));
+        }
+
+        Err(())
+    }
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I>
 where

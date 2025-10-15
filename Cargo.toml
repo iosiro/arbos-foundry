@@ -6,6 +6,7 @@ members = [
     "crates/anvil/rpc/",
     "crates/anvil/server/",
     "crates/arbos-revm/",
+    "crates/arbos-precompiles/",
     "crates/cast/",
     "crates/cheatcodes/",
     "crates/cheatcodes/spec/",
@@ -180,6 +181,7 @@ trezor-client.opt-level = "z"
 [workspace.dependencies]
 anvil = { path = "crates/anvil" }
 arbos-revm = { path = "crates/arbos-revm" }
+arbos-precompiles = { path = "crates/arbos-precompiles" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }
 forge = { path = "crates/forge" }
