@@ -120,6 +120,10 @@ impl<SPEC: Into<SpecId> + Copy> Cfg for ArbitrumConfig<SPEC> {
     fn is_fee_charge_disabled(&self) -> bool {
         self.inner.is_fee_charge_disabled()
     }
+
+    fn is_eip7623_disabled(&self) -> bool {
+        self.inner.is_eip7623_disabled()
+    }
 }
 
 impl<SPEC> ArbitrumConfigTr for ArbitrumConfig<SPEC>

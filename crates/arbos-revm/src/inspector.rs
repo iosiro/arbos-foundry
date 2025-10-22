@@ -9,7 +9,7 @@ use revm::{
         EthFrame, EvmTr, FrameInitOrResult, FrameResult, ItemOrResult, PrecompileProvider,
         evm::ContextDbError, instructions::InstructionProvider,
     },
-    inspector::{InspectorEvmTr, InspectorFrame, InspectorHandler, JournalExt, handler::frame_end},
+    inspector::{InspectorEvmTr, InspectorHandler, JournalExt, handler::frame_end},
     interpreter::interpreter_action::FrameInit,
     state::EvmState,
 };
@@ -85,13 +85,49 @@ where
 
             if let Ok(ItemOrResult::Result(frame_result)) = &mut result {
                 let (ctx, inspector, frame) = self.ctx_inspector_frame();
-                frame_end(ctx, inspector, frame.frame_input(), frame_result);
+                frame_end(ctx, inspector, &frame.input, frame_result);
                 frame.set_finished(true);
             };
             return result;
         }
 
         self.0.inspect_frame_run()
+    }
+    
+    fn all_inspector(
+        &self,
+    ) -> (
+        &Self::Context,
+        &Self::Instructions,
+        &Self::Precompiles,
+        &revm::context::FrameStack<Self::Frame>,
+        &Self::Inspector,
+    ) {
+        (
+            &self.0.ctx,
+            &self.0.instruction,
+            &self.0.precompiles,
+            &self.0.frame_stack,
+            &self.0.inspector,
+        )
+    }
+    
+    fn all_mut_inspector(
+        &mut self,
+    ) -> (
+        &mut Self::Context,
+        &mut Self::Instructions,
+        &mut Self::Precompiles,
+        &mut revm::context::FrameStack<Self::Frame>,
+        &mut Self::Inspector,
+    ) {
+        (
+            &mut self.0.ctx,
+            &mut self.0.instruction,
+            &mut self.0.precompiles,
+            &mut self.0.frame_stack,
+            &mut self.0.inspector,
+        )
     }
 }
 

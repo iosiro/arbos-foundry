@@ -119,6 +119,7 @@ fn get_create2_factory_call_inputs(
     CallInputs {
         caller: inputs.caller,
         bytecode_address: deployer,
+        known_bytecode: None,
         target_address: deployer,
         scheme: CallScheme::Call,
         value: CallValue::Transfer(inputs.value),

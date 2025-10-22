@@ -15,18 +15,22 @@ pub trait ArbitrumLocalContextTr: LocalContextTr {
 pub struct ArbitrumLocalContext {
     /// Interpreter shared memory buffer. A reused memory buffer for calls.
     pub shared_memory_buffer: Rc<RefCell<Vec<u8>>>,
+    /// Optional precompile error message to bubble up.
+    pub precompile_error_message: Option<String>,
     /// Stylus pages ever used in this transaction.
     pub stylus_pages_ever: u16,
     /// Stylus pages currently open.
     pub stylus_pages_open: u16,
     /// Recently invoked Stylus wasm code hashes (block-local LRU).
     pub recent_wasms: VecDeque<B256>,
+    
 }
 
 impl Default for ArbitrumLocalContext {
     fn default() -> Self {
         Self {
             shared_memory_buffer: Rc::new(RefCell::new(Vec::with_capacity(1024 * 4))),
+            precompile_error_message: None,
             stylus_pages_ever: 0,
             stylus_pages_open: 0,
             recent_wasms: VecDeque::new(),
@@ -42,6 +46,14 @@ impl LocalContextTr for ArbitrumLocalContext {
 
     fn shared_memory_buffer(&self) -> &Rc<RefCell<Vec<u8>>> {
         &self.shared_memory_buffer
+    }
+    
+    fn set_precompile_error_context(&mut self, output: String) {
+        self.precompile_error_message = Some(output);
+    }
+    
+    fn take_precompile_error_context(&mut self) -> Option<String> {
+        self.precompile_error_message.take()
     }
 }
 

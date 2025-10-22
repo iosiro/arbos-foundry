@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
-    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
+    interpreter::{CallInput, CallInputs, Gas, InstructionResult, InterpreterResult},
     precompile::{PrecompileError, PrecompileFn, PrecompileId, PrecompileResult},
     primitives::{
         Address, Bytes, U256,
@@ -304,23 +304,20 @@ where
     fn run(
         &mut self,
         context: &mut CTX,
-        address: &Address,
-        inputs: &InputsImpl,
-        _is_static: bool,
-        gas_limit: u64,
+        inputs: &CallInputs,
     ) -> Result<Option<Self::Output>, String> {
         // Check if address matches either static or dynamic precompiles
-        if !self.contains(address) {
+        if !self.contains(&inputs.bytecode_address) {
             return Ok(None);
         }
 
         let mut result = InterpreterResult {
             result: InstructionResult::Return,
-            gas: Gas::new(gas_limit),
+            gas: Gas::new(inputs.gas_limit),
             output: Bytes::new(),
         };
 
-        let result = if let Some(precompile) = self.dyn_precompiles.inner.get(address) {
+        let result = if let Some(precompile) = self.dyn_precompiles.inner.get(&inputs.bytecode_address) {
             // === Dynamic precompile ===
 
             // Execute the precompile
@@ -338,12 +335,12 @@ where
 
             let precompile_result = precompile.call(PrecompileInput {
                 data: &input_bytes,
-                gas: gas_limit,
-                caller: inputs.caller_address,
-                value: inputs.call_value,
+                gas: inputs.gas_limit,
+                caller: inputs.caller,
+                value: inputs.call_value(),
                 internals: EvmInternals::new(context),
                 target_address: inputs.target_address,
-                bytecode_address: inputs.bytecode_address.expect("always set for precompile calls"),
+                bytecode_address: inputs.bytecode_address,
             });
 
             match precompile_result {
@@ -369,7 +366,7 @@ where
                 }
             }
         } else if let Some(inner_result) =
-            self.inner.run(context, address, inputs, _is_static, gas_limit)?
+            self.inner.run(context, inputs)?
         {
             // === Inner provider ===
             inner_result

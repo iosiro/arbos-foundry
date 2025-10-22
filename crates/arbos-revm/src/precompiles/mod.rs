@@ -7,7 +7,7 @@ use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
     interpreter::{
-        CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS,
+        CallInput, CallInputs, Gas, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS
     },
     precompile::{PrecompileError, PrecompileId, PrecompileSpecId, Precompiles},
     primitives::{
@@ -137,23 +137,20 @@ impl<CTX: ArbitrumContextTr> PrecompileProvider<CTX> for ArbitrumPrecompileProvi
     fn run(
         &mut self,
         ctx: &mut CTX,
-        address: &Address,
-        inputs: &InputsImpl,
-        is_static: bool,
-        gas_limit: u64,
+        inputs: &CallInputs,
     ) -> Result<Option<InterpreterResult>, String> {
-        let Some(precompile) = self.registry.get(address) else {
+        let Some(precompile) = self.registry.get(&inputs.bytecode_address) else {
             return Ok(None);
         };
 
         // revert for mutating calls to code addresses other than their own
-        if !is_static
-            && inputs.target_address != inputs.bytecode_address.expect("bytecode must be set")
+        if !inputs.is_static
+            && inputs.target_address != inputs.bytecode_address
         {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 output: Bytes::default(),
-                gas: Gas::new(gas_limit),
+                gas: Gas::new(inputs.gas_limit),
             }));
         }
 
@@ -170,11 +167,11 @@ impl<CTX: ArbitrumContextTr> PrecompileProvider<CTX> for ArbitrumPrecompileProvi
         precompile.call(
             ctx,
             &input_bytes,
-            address,
-            inputs.caller_address,
-            inputs.call_value,
-            is_static,
-            gas_limit,
+            &inputs.target_address,
+            inputs.caller,
+            inputs.call_value(),
+            inputs.is_static,
+            inputs.gas_limit,
         )
     }
 
