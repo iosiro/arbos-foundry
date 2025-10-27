@@ -11,26 +11,16 @@ use alloy_evm::{Evm, EvmEnv, precompiles::PrecompilesMap};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
-    Context, Journal,
     context::{
-        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
-        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
-    },
-    handler::{
-        EthFrame, EthPrecompiles, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult,
-        instructions::EthInstructions,
-    },
-    inspector::{InspectorEvmTr, InspectorHandler},
-    interpreter::{
-        CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome,
-        FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory,
-        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok,
-    },
-    precompile::{PrecompileSpecId, Precompiles},
-    primitives::hardfork::SpecId,
+        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState}, BlockEnv, CfgEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv
+    }, handler::{
+        instructions::EthInstructions, EthFrame, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult
+    }, inspector::{InspectorEvmTr, InspectorHandler}, interpreter::{
+        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok, CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome, FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory
+    }, primitives::hardfork::SpecId, Context, Journal
 };
 
-use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo};
+use arbos_revm::{chain::ArbitrumChainInfo, precompiles::ArbitrumPrecompiles, ArbitrumContext, ArbitrumEvm as RevmEvm};
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
@@ -60,7 +50,9 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
             ctx,
             inspector,
             EthInstructions::default(),
-            get_precompiles(spec),
+                PrecompilesMap::new(
+        ArbitrumPrecompiles::default()
+    ),
         ),
     };
 
@@ -79,23 +71,14 @@ pub fn new_evm_with_existing_context<'a>(
             ctx,
             inspector,
             EthInstructions::default(),
-            get_precompiles(spec),
+                PrecompilesMap::new(
+        ArbitrumPrecompiles::default()
+),
         ),
     };
 
     evm.inspector().get_networks().inject_precompiles(evm.precompiles_mut());
     evm
-}
-
-/// Get the precompiles for the given spec.
-fn get_precompiles(spec: SpecId) -> PrecompilesMap {
-    PrecompilesMap::from_static(
-        EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }
-        .precompiles,
-    )
 }
 
 /// Get the call inputs for the CREATE2 factory.
@@ -123,7 +106,7 @@ pub struct FoundryEvm<'db, I: InspectorExt> {
     pub inner: RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        PrecompilesMap,
+        PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >,
@@ -151,12 +134,14 @@ impl<I: InspectorExt> FoundryEvm<'_, I> {
 }
 
 impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
-    type Precompiles = PrecompilesMap;
+    type Precompiles = PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>;
     type Inspector = I;
     type DB = &'db mut dyn DatabaseExt;
     type Error = EVMError<DatabaseError>;
     type HaltReason = HaltReason;
     type Spec = SpecId;
+    type Block = BlockEnv;
+    type Config = CfgEnv;
     type Tx = TxEnv;
 
     fn block(&self) -> &BlockEnv {
@@ -228,7 +213,7 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
         unimplemented!()
     }
 
-    fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>)
+    fn finish(self) -> (Self::DB, EvmEnv<Self::Block, Self::Config>)
     where
         Self: Sized,
     {
@@ -269,7 +254,7 @@ impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
     type Evm = RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        PrecompilesMap,
+        PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >;

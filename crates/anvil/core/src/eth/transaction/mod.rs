@@ -1,6 +1,6 @@
 //! Transaction related types
 use alloy_consensus::{
-    Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, Transaction, TxEip1559, TxEip2930,
+    Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, TxEip1559, TxEip2930,
     TxEnvelope, TxLegacy, TxReceipt, Typed2718,
     transaction::{
         Recovered, TxEip7702,
@@ -10,20 +10,15 @@ use alloy_consensus::{
 
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
 use alloy_network::{AnyReceiptEnvelope, AnyRpcTransaction, AnyTransactionReceipt, AnyTxEnvelope};
-use alloy_primitives::{Address, B256, Bloom, Bytes, Signature, TxHash, TxKind, U64, U256};
+use alloy_primitives::{Address, B256, Bloom, Bytes, Signature, TxHash, TxKind, U256};
 use alloy_rlp::{Decodable, Encodable, Header};
 use alloy_rpc_types::{
     AccessList, ConversionError, Transaction as RpcTransaction, TransactionReceipt,
     request::TransactionRequest, trace::otterscan::OtsReceipt,
 };
-use alloy_serde::{OtherFields, WithOtherFields};
+use alloy_serde::WithOtherFields;
 use bytes::BufMut;
 use foundry_evm::traces::CallTraceNode;
-
-use op_alloy_consensus::{
-    DEPOSIT_TX_TYPE_ID, OpDepositReceipt, OpDepositReceiptWithBloom, TxDeposit,
-};
-use op_revm::{OpTransaction, transaction::deposit::DepositTransactionParts};
 use revm::{context::TxEnv, interpreter::InstructionResult};
 use serde::{Deserialize, Serialize};
 use std::ops::{Deref, Mul};
@@ -36,7 +31,7 @@ pub fn transaction_request_to_typed(
     let WithOtherFields::<TransactionRequest> {
         inner:
             TransactionRequest {
-                from,
+                from: _,
                 to,
                 gas_price,
                 max_fee_per_gas,
@@ -53,24 +48,8 @@ pub fn transaction_request_to_typed(
                 authorization_list,
                 chain_id: _,
             },
-        other,
+        other: _,
     } = tx;
-
-    // Special case: OP-stack deposit tx
-    if transaction_type == Some(0x7E) || has_optimism_fields(&other) {
-        let mint = other.get_deserialized::<U256>("mint")?.map(|m| m.to::<u128>()).ok()?;
-
-        return Some(TypedTransactionRequest::Deposit(TxDeposit {
-            from: from.unwrap_or_default(),
-            source_hash: other.get_deserialized::<B256>("sourceHash")?.ok()?,
-            to: to.unwrap_or_default(),
-            mint,
-            value: value.unwrap_or_default(),
-            gas_limit: gas.unwrap_or_default(),
-            is_system_transaction: other.get_deserialized::<bool>("isSystemTx")?.ok()?,
-            input: input.into_input().unwrap_or_default(),
-        }));
-    }
 
     // EIP7702
     if transaction_type == Some(4) || authorization_list.is_some() {
@@ -176,12 +155,6 @@ pub fn transaction_request_to_typed(
     }
 }
 
-pub fn has_optimism_fields(other: &OtherFields) -> bool {
-    other.contains_key("sourceHash")
-        && other.contains_key("mint")
-        && other.contains_key("isSystemTx")
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TypedTransactionRequest {
     Legacy(TxLegacy),
@@ -189,7 +162,6 @@ pub enum TypedTransactionRequest {
     EIP1559(TxEip1559),
     EIP7702(TxEip7702),
     EIP4844(TxEip4844Variant),
-    Deposit(TxDeposit),
 }
 
 /// A wrapper for [TypedTransaction] that allows impersonating accounts.
@@ -352,9 +324,6 @@ pub fn to_alloy_transaction_with_hash_and_sender(
                 ),
             }
         }
-        TypedTransaction::Deposit(_t) => {
-            unreachable!("cannot reach here, handled in `transaction_build` ")
-        }
     }
 }
 
@@ -410,9 +379,7 @@ impl PendingTransaction {
 
     /// Converts the [PendingTransaction] into the [TxEnv] context that [`revm`](foundry_evm)
     /// expects.
-    ///
-    /// Base [`TxEnv`] is encapsulated in the [`op_revm::OpTransaction`]
-    pub fn to_revm_tx_env(&self) -> OpTransaction<TxEnv> {
+    pub fn to_revm_tx_env(&self) -> TxEnv {
         fn transact_to(kind: &TxKind) -> TxKind {
             match kind {
                 TxKind::Call(c) => TxKind::Call(*c),
@@ -425,7 +392,7 @@ impl PendingTransaction {
             TypedTransaction::Legacy(tx) => {
                 let chain_id = tx.tx().chain_id;
                 let TxLegacy { nonce, gas_price, gas_limit, value, to, input, .. } = tx.tx();
-                OpTransaction::new(TxEnv {
+                TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -438,7 +405,7 @@ impl PendingTransaction {
                     access_list: vec![].into(),
                     tx_type: 0,
                     ..Default::default()
-                })
+                }
             }
             TypedTransaction::EIP2930(tx) => {
                 let TxEip2930 {
@@ -452,7 +419,7 @@ impl PendingTransaction {
                     access_list,
                     ..
                 } = tx.tx();
-                OpTransaction::new(TxEnv {
+                TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -465,7 +432,7 @@ impl PendingTransaction {
                     access_list: access_list.clone(),
                     tx_type: 1,
                     ..Default::default()
-                })
+                }
             }
             TypedTransaction::EIP1559(tx) => {
                 let TxEip1559 {
@@ -480,7 +447,7 @@ impl PendingTransaction {
                     access_list,
                     ..
                 } = tx.tx();
-                OpTransaction::new(TxEnv {
+                TxEnv {
                     caller,
                     kind: transact_to(to),
                     data: input.clone(),
@@ -493,7 +460,7 @@ impl PendingTransaction {
                     access_list: access_list.clone(),
                     tx_type: 2,
                     ..Default::default()
-                })
+                }
             }
             TypedTransaction::EIP4844(tx) => {
                 let TxEip4844 {
@@ -510,7 +477,7 @@ impl PendingTransaction {
                     blob_versioned_hashes,
                     ..
                 } = tx.tx().tx();
-                OpTransaction::new(TxEnv {
+                TxEnv {
                     caller,
                     kind: TxKind::Call(*to),
                     data: input.clone(),
@@ -525,7 +492,7 @@ impl PendingTransaction {
                     access_list: access_list.clone(),
                     tx_type: 3,
                     ..Default::default()
-                })
+                }
             }
             TypedTransaction::EIP7702(tx) => {
                 let TxEip7702 {
@@ -557,43 +524,7 @@ impl PendingTransaction {
                 };
                 tx.set_signed_authorization(authorization_list.clone());
 
-                OpTransaction::new(tx)
-            }
-            TypedTransaction::Deposit(tx) => {
-                let chain_id = tx.chain_id();
-                let TxDeposit {
-                    source_hash,
-                    to,
-                    mint,
-                    value,
-                    gas_limit,
-                    is_system_transaction,
-                    input,
-                    ..
-                } = tx;
-
-                let base = TxEnv {
-                    caller,
-                    kind: transact_to(to),
-                    data: input.clone(),
-                    chain_id,
-                    nonce: 0,
-                    value: *value,
-                    gas_price: 0,
-                    gas_priority_fee: None,
-                    gas_limit: { *gas_limit },
-                    access_list: vec![].into(),
-                    tx_type: DEPOSIT_TX_TYPE_ID,
-                    ..Default::default()
-                };
-
-                let deposit = DepositTransactionParts {
-                    source_hash: *source_hash,
-                    mint: Some(*mint),
-                    is_system_transaction: *is_system_transaction,
-                };
-
-                OpTransaction { base, deposit, enveloped_tx: None }
+                tx
             }
         }
     }
@@ -612,8 +543,6 @@ pub enum TypedTransaction {
     EIP4844(Signed<TxEip4844Variant>),
     /// EIP-7702 transaction
     EIP7702(Signed<TxEip7702>),
-    /// op-stack deposit transaction
-    Deposit(TxDeposit),
 }
 
 impl TryFrom<AnyRpcTransaction> for TypedTransaction {
@@ -621,7 +550,6 @@ impl TryFrom<AnyRpcTransaction> for TypedTransaction {
 
     fn try_from(value: AnyRpcTransaction) -> Result<Self, Self::Error> {
         let WithOtherFields { inner, .. } = value.0;
-        let from = inner.inner.signer();
         match inner.inner.into_inner() {
             AnyTxEnvelope::Ethereum(tx) => match tx {
                 TxEnvelope::Legacy(tx) => Ok(Self::Legacy(tx)),
@@ -630,20 +558,7 @@ impl TryFrom<AnyRpcTransaction> for TypedTransaction {
                 TxEnvelope::Eip4844(tx) => Ok(Self::EIP4844(tx)),
                 TxEnvelope::Eip7702(tx) => Ok(Self::EIP7702(tx)),
             },
-            AnyTxEnvelope::Unknown(mut tx) => {
-                // Try to convert to deposit transaction
-                if tx.ty() == DEPOSIT_TX_TYPE_ID {
-                    tx.inner.fields.insert("from".to_string(), serde_json::to_value(from).unwrap());
-                    let deposit_tx =
-                        tx.inner.fields.deserialize_into::<TxDeposit>().map_err(|e| {
-                            ConversionError::Custom(format!(
-                                "Failed to deserialize deposit tx: {e}"
-                            ))
-                        })?;
-
-                    return Ok(Self::Deposit(deposit_tx));
-                };
-
+            AnyTxEnvelope::Unknown(_) => {
                 Err(ConversionError::Custom("UnknownTxType".to_string()))
             }
         }
@@ -663,7 +578,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().max_fee_per_gas,
             Self::EIP4844(tx) => tx.tx().tx().max_fee_per_gas,
             Self::EIP7702(tx) => tx.tx().max_fee_per_gas,
-            Self::Deposit(_) => 0,
         }
     }
 
@@ -674,7 +588,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().gas_limit,
             Self::EIP4844(tx) => tx.tx().tx().gas_limit,
             Self::EIP7702(tx) => tx.tx().gas_limit,
-            Self::Deposit(tx) => tx.gas_limit,
         }
     }
 
@@ -685,7 +598,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().value,
             Self::EIP4844(tx) => tx.tx().tx().value,
             Self::EIP7702(tx) => tx.tx().value,
-            Self::Deposit(tx) => tx.value,
         })
     }
 
@@ -696,7 +608,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => &tx.tx().input,
             Self::EIP4844(tx) => &tx.tx().tx().input,
             Self::EIP7702(tx) => &tx.tx().input,
-            Self::Deposit(tx) => &tx.input,
         }
     }
 
@@ -708,7 +619,6 @@ impl TypedTransaction {
             Self::EIP1559(_) => Some(2),
             Self::EIP4844(_) => Some(3),
             Self::EIP7702(_) => Some(4),
-            Self::Deposit(_) => Some(0x7E),
         }
     }
 
@@ -828,20 +738,6 @@ impl TypedTransaction {
                 chain_id: Some(t.tx().chain_id),
                 access_list: t.tx().access_list.clone(),
             },
-            Self::Deposit(t) => TransactionEssentials {
-                kind: t.to,
-                input: t.input.clone(),
-                nonce: 0,
-                gas_limit: t.gas_limit,
-                gas_price: Some(0),
-                max_fee_per_gas: None,
-                max_priority_fee_per_gas: None,
-                max_fee_per_blob_gas: None,
-                blob_versioned_hashes: None,
-                value: t.value,
-                chain_id: t.chain_id(),
-                access_list: Default::default(),
-            },
         }
     }
 
@@ -852,7 +748,6 @@ impl TypedTransaction {
             Self::EIP1559(t) => t.tx().nonce,
             Self::EIP4844(t) => t.tx().tx().nonce,
             Self::EIP7702(t) => t.tx().nonce,
-            Self::Deposit(_t) => 0,
         }
     }
 
@@ -863,7 +758,6 @@ impl TypedTransaction {
             Self::EIP1559(t) => Some(t.tx().chain_id),
             Self::EIP4844(t) => Some(t.tx().tx().chain_id),
             Self::EIP7702(t) => Some(t.tx().chain_id),
-            Self::Deposit(t) => t.chain_id(),
         }
     }
 
@@ -910,7 +804,6 @@ impl TypedTransaction {
             Self::EIP1559(t) => *t.hash(),
             Self::EIP4844(t) => *t.hash(),
             Self::EIP7702(t) => *t.hash(),
-            Self::Deposit(t) => t.tx_hash(),
         }
     }
 
@@ -932,7 +825,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.recover_signer(),
             Self::EIP4844(tx) => tx.recover_signer(),
             Self::EIP7702(tx) => tx.recover_signer(),
-            Self::Deposit(tx) => Ok(tx.from),
         }
     }
 
@@ -944,7 +836,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => tx.tx().to,
             Self::EIP4844(tx) => TxKind::Call(tx.tx().tx().to),
             Self::EIP7702(tx) => TxKind::Call(tx.tx().to),
-            Self::Deposit(tx) => tx.to,
         }
     }
 
@@ -961,11 +852,6 @@ impl TypedTransaction {
             Self::EIP1559(tx) => *tx.signature(),
             Self::EIP4844(tx) => *tx.signature(),
             Self::EIP7702(tx) => *tx.signature(),
-            Self::Deposit(_) => Signature::from_scalars_and_parity(
-                B256::with_last_byte(1),
-                B256::with_last_byte(1),
-                false,
-            ),
         }
     }
 }
@@ -990,14 +876,7 @@ impl Decodable for TypedTransaction {
             return Ok(TxEnvelope::decode(buf)?.into());
         }
 
-        // Check byte after header
-        let ty = *h_decode_copy.first().ok_or(alloy_rlp::Error::Custom("empty slice"))?;
-
-        if ty != 0x7E {
-            Ok(TxEnvelope::decode(buf)?.into())
-        } else {
-            Ok(Self::Deposit(TxDeposit::decode_2718(buf)?))
-        }
+        Ok(TxEnvelope::decode(buf)?.into())
     }
 }
 
@@ -1015,7 +894,6 @@ impl Encodable2718 for TypedTransaction {
             Self::EIP1559(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
             Self::EIP4844(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
             Self::EIP7702(tx) => TxEnvelope::from(tx.clone()).encode_2718_len(),
-            Self::Deposit(tx) => 1 + tx.length(),
         }
     }
 
@@ -1026,18 +904,12 @@ impl Encodable2718 for TypedTransaction {
             Self::EIP1559(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
             Self::EIP4844(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
             Self::EIP7702(tx) => TxEnvelope::from(tx.clone()).encode_2718(out),
-            Self::Deposit(tx) => {
-                tx.encode_2718(out);
-            }
         }
     }
 }
 
 impl Decodable2718 for TypedTransaction {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Result<Self, Eip2718Error> {
-        if ty == 0x7E {
-            return Ok(Self::Deposit(TxDeposit::decode(buf)?));
-        }
         match TxEnvelope::typed_decode(ty, buf)? {
             TxEnvelope::Eip2930(tx) => Ok(Self::EIP2930(tx)),
             TxEnvelope::Eip1559(tx) => Ok(Self::EIP1559(tx)),
@@ -1111,8 +983,6 @@ pub enum TypedReceipt {
     EIP4844(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
     #[serde(rename = "0x4", alias = "0x04")]
     EIP7702(ReceiptWithBloom<Receipt<alloy_primitives::Log>>),
-    #[serde(rename = "0x7E", alias = "0x7e")]
-    Deposit(OpDepositReceiptWithBloom),
 }
 
 /// RPC-specific variant of TypedReceipt for boundary conversion
@@ -1129,8 +999,6 @@ pub enum TypedReceiptRpc {
     EIP4844(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
     #[serde(rename = "0x4", alias = "0x04")]
     EIP7702(ReceiptWithBloom<Receipt<alloy_rpc_types::Log>>),
-    #[serde(rename = "0x7E", alias = "0x7e")]
-    Deposit(OpDepositReceiptWithBloom),
 }
 
 impl TypedReceipt {
@@ -1142,7 +1010,6 @@ impl TypedReceipt {
             Self::EIP1559(r) => TypedReceiptRpc::EIP1559(convert_receipt_to_rpc(r)),
             Self::EIP4844(r) => TypedReceiptRpc::EIP4844(convert_receipt_to_rpc(r)),
             Self::EIP7702(r) => TypedReceiptRpc::EIP7702(convert_receipt_to_rpc(r)),
-            Self::Deposit(r) => TypedReceiptRpc::Deposit(r),
         }
     }
 
@@ -1153,7 +1020,6 @@ impl TypedReceipt {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => r,
-            Self::Deposit(_) => unreachable!("use variant-specific helpers for deposit"),
         }
     }
 
@@ -1164,7 +1030,6 @@ impl TypedReceipt {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => &r.receipt.logs,
-            Self::Deposit(_) => unreachable!("use variant-specific helpers for deposit"),
         }
     }
 
@@ -1175,15 +1040,12 @@ impl TypedReceipt {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => &r.logs_bloom,
-            Self::Deposit(r) => &r.logs_bloom,
         }
     }
 
     pub fn cumulative_gas_used(&self) -> u64 {
-        match self {
-            Self::Deposit(r) => r.receipt.inner.cumulative_gas_used,
-            _ => self.as_receipt_with_bloom().cumulative_gas_used(),
-        }
+        self.as_receipt_with_bloom().cumulative_gas_used()
+        
     }
 }
 
@@ -1225,7 +1087,6 @@ impl TypedReceiptRpc {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => r,
-            Self::Deposit(_) => unreachable!("use variant-specific helpers for deposit"),
         }
     }
 
@@ -1236,7 +1097,6 @@ impl TypedReceiptRpc {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => &r.logs_bloom,
-            Self::Deposit(r) => &r.logs_bloom,
         }
     }
 
@@ -1247,7 +1107,6 @@ impl TypedReceiptRpc {
             | Self::EIP2930(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => &r.receipt.logs,
-            Self::Deposit(_) => unreachable!("use variant-specific helpers for deposit"),
         }
     }
 
@@ -1265,30 +1124,6 @@ impl From<TypedReceiptRpc> for ReceiptWithBloom<Receipt<alloy_rpc_types::Log>> {
             | TypedReceiptRpc::EIP2930(r)
             | TypedReceiptRpc::EIP4844(r)
             | TypedReceiptRpc::EIP7702(r) => r,
-            TypedReceiptRpc::Deposit(r) => {
-                // Convert OP deposit receipt (primitives::Log) to RPC receipt (rpc_types::Log)
-                let receipt = Receipt::<alloy_rpc_types::Log> {
-                    status: r.receipt.inner.status,
-                    cumulative_gas_used: r.receipt.inner.cumulative_gas_used,
-                    logs: r
-                        .receipt
-                        .inner
-                        .logs
-                        .into_iter()
-                        .map(|l| alloy_rpc_types::Log {
-                            inner: l,
-                            block_hash: None,
-                            block_number: None,
-                            block_timestamp: None,
-                            transaction_hash: None,
-                            transaction_index: None,
-                            log_index: None,
-                            removed: false,
-                        })
-                        .collect(),
-                };
-                Self { receipt, logs_bloom: r.logs_bloom }
-            }
         }
     }
 }
@@ -1301,7 +1136,6 @@ impl From<TypedReceiptRpc> for OtsReceipt {
             TypedReceiptRpc::EIP1559(_) => 0x02,
             TypedReceiptRpc::EIP4844(_) => 0x03,
             TypedReceiptRpc::EIP7702(_) => 0x04,
-            TypedReceiptRpc::Deposit(_) => 0x7E,
         } as u8;
         let receipt = ReceiptWithBloom::<Receipt<alloy_rpc_types::Log>>::from(value);
         let status = receipt.status();
@@ -1335,7 +1169,6 @@ impl Encodable for TypedReceipt {
                     Self::EIP1559(r) => r.length() + 1,
                     Self::EIP4844(r) => r.length() + 1,
                     Self::EIP7702(r) => r.length() + 1,
-                    Self::Deposit(r) => r.length() + 1,
                     _ => unreachable!("receipt already matched"),
                 };
 
@@ -1358,11 +1191,6 @@ impl Encodable for TypedReceipt {
                     Self::EIP7702(r) => {
                         Header { list: true, payload_length: payload_len }.encode(out);
                         4u8.encode(out);
-                        r.encode(out);
-                    }
-                    Self::Deposit(r) => {
-                        Header { list: true, payload_length: payload_len }.encode(out);
-                        0x7Eu8.encode(out);
                         r.encode(out);
                     }
                     _ => unreachable!("receipt already matched"),
@@ -1403,9 +1231,6 @@ impl Decodable for TypedReceipt {
                 } else if receipt_type == 0x04 {
                     buf.advance(1);
                     <ReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::EIP7702)
-                } else if receipt_type == 0x7E {
-                    buf.advance(1);
-                    <OpDepositReceiptWithBloom as Decodable>::decode(buf).map(TypedReceipt::Deposit)
                 } else {
                     Err(alloy_rlp::Error::Custom("invalid receipt type"))
                 }
@@ -1428,7 +1253,6 @@ impl Typed2718 for TypedReceipt {
             Self::EIP1559(_) => alloy_consensus::constants::EIP1559_TX_TYPE_ID,
             Self::EIP4844(_) => alloy_consensus::constants::EIP4844_TX_TYPE_ID,
             Self::EIP7702(_) => alloy_consensus::constants::EIP7702_TX_TYPE_ID,
-            Self::Deposit(_) => DEPOSIT_TX_TYPE_ID,
         }
     }
 }
@@ -1441,7 +1265,6 @@ impl Encodable2718 for TypedReceipt {
             Self::EIP1559(r) => ReceiptEnvelope::Eip1559(r.clone()).encode_2718_len(),
             Self::EIP4844(r) => ReceiptEnvelope::Eip4844(r.clone()).encode_2718_len(),
             Self::EIP7702(r) => 1 + r.length(),
-            Self::Deposit(r) => 1 + r.length(),
         }
     }
 
@@ -1455,16 +1278,12 @@ impl Encodable2718 for TypedReceipt {
             | Self::EIP1559(r)
             | Self::EIP4844(r)
             | Self::EIP7702(r) => r.encode(out),
-            Self::Deposit(r) => r.encode(out),
         }
     }
 }
 
 impl Decodable2718 for TypedReceipt {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Result<Self, Eip2718Error> {
-        if ty == 0x7E {
-            return Ok(Self::Deposit(OpDepositReceiptWithBloom::decode(buf)?));
-        }
         match ReceiptEnvelope::typed_decode(ty, buf)? {
             ReceiptEnvelope::Eip2930(tx) => Ok(Self::EIP2930(tx)),
             ReceiptEnvelope::Eip1559(tx) => Ok(Self::EIP1559(tx)),
@@ -1501,7 +1320,7 @@ pub fn convert_to_anvil_receipt(receipt: AnyTransactionReceipt) -> Option<Receip
                 blob_gas_used,
                 inner: AnyReceiptEnvelope { inner: receipt_with_bloom, r#type },
             },
-        other,
+        other: _,
     } = receipt;
 
     Some(TransactionReceipt {
@@ -1522,31 +1341,6 @@ pub fn convert_to_anvil_receipt(receipt: AnyTransactionReceipt) -> Option<Receip
             0x02 => TypedReceiptRpc::EIP1559(receipt_with_bloom),
             0x03 => TypedReceiptRpc::EIP4844(receipt_with_bloom),
             0x04 => TypedReceiptRpc::EIP7702(receipt_with_bloom),
-            0x7E => TypedReceiptRpc::Deposit(OpDepositReceiptWithBloom {
-                receipt: OpDepositReceipt {
-                    inner: Receipt {
-                        status: alloy_consensus::Eip658Value::Eip658(receipt_with_bloom.status()),
-                        cumulative_gas_used: receipt_with_bloom.cumulative_gas_used(),
-                        logs: receipt_with_bloom
-                            .receipt
-                            .logs
-                            .into_iter()
-                            .map(|l| l.inner)
-                            .collect(),
-                    },
-                    deposit_nonce: other
-                        .get_deserialized::<U64>("depositNonce")
-                        .transpose()
-                        .ok()?
-                        .map(|v| v.to()),
-                    deposit_receipt_version: other
-                        .get_deserialized::<U64>("depositReceiptVersion")
-                        .transpose()
-                        .ok()?
-                        .map(|v| v.to()),
-                },
-                logs_bloom: receipt_with_bloom.logs_bloom,
-            }),
             _ => return None,
         },
     })

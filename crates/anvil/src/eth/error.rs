@@ -12,7 +12,6 @@ use anvil_rpc::{
     response::ResponseResult,
 };
 use foundry_evm::{backend::DatabaseError, decode::RevertDecoder};
-use op_revm::OpTransactionError;
 use revm::{
     context_interface::result::{EVMError, InvalidHeader, InvalidTransaction},
     interpreter::InstructionResult,
@@ -141,31 +140,6 @@ where
     fn from(err: EVMError<T>) -> Self {
         match err {
             EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
-            EVMError::Header(err) => match err {
-                InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
-                InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
-            },
-            EVMError::Database(err) => err.into(),
-            EVMError::Custom(err) => Self::Message(err),
-        }
-    }
-}
-
-impl<T> From<EVMError<T, OpTransactionError>> for BlockchainError
-where
-    T: Into<Self>,
-{
-    fn from(err: EVMError<T, OpTransactionError>) -> Self {
-        match err {
-            EVMError::Transaction(err) => match err {
-                OpTransactionError::Base(err) => InvalidTransactionError::from(err).into(),
-                OpTransactionError::DepositSystemTxPostRegolith => {
-                    Self::DepositTransactionUnsupported
-                }
-                OpTransactionError::HaltedDepositPostRegolith => {
-                    Self::DepositTransactionUnsupported
-                }
-            },
             EVMError::Header(err) => match err {
                 InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
                 InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
@@ -374,15 +348,6 @@ impl From<InvalidTransaction> for InvalidTransactionError {
     }
 }
 
-impl From<OpTransactionError> for InvalidTransactionError {
-    fn from(value: OpTransactionError) -> Self {
-        match value {
-            OpTransactionError::Base(err) => err.into(),
-            OpTransactionError::DepositSystemTxPostRegolith
-            | OpTransactionError::HaltedDepositPostRegolith => Self::DepositTxErrorPostRegolith,
-        }
-    }
-}
 /// Helper trait to easily convert results to rpc results
 pub(crate) trait ToRpcResponseResult {
     fn to_rpc_result(self) -> ResponseResult;

@@ -19,9 +19,7 @@ serde = {  workspace = true, optional = true }
 arbutil = { workspace =  true, default-features = false }
 stylus = { workspace = true, default-features = false, features = ["cc_brotli"] }
 wasmer-types = { workspace = true, default-features = false }
-foundry-macros = { workspace = true }
-alloy-sol-types = { workspace = true, features = ["std"] }
-
+alloy-sol-types = { workspace = true, features = ["std", "json"] }
 lru = "0.14.0"
 lazy_static = "1.5.0"
 
