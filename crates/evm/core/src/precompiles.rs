@@ -1,5 +1,4 @@
 use alloy_primitives::{Address, address};
-
 /// The ECRecover precompile address.
 pub const EC_RECOVER: Address = address!("0x0000000000000000000000000000000000000001");
 

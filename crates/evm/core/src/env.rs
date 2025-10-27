@@ -8,7 +8,7 @@ use revm::{
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]
 pub struct Env {
-    pub evm_env: EvmEnv,
+    pub evm_env: EvmEnv<BlockEnv, CfgEnv>,
     pub tx: TxEnv,
 }
 
