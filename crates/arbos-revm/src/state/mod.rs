@@ -1,6 +1,6 @@
 use revm::{context::{Host, JournalTr}, primitives::{B256, U256}};
 
-use crate::{state::{program::Programs, types::{map_address, substorage, StorageBackedAddress, StorageBackedAddressSet, StorageBackedU256, StorageBackedU64}}, constants::{ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY}, ArbitrumContextTr};
+use crate::{constants::{ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY}, state::{address_table::AddressTable, program::Programs, types::{map_address, substorage, StorageBackedAddress, StorageBackedAddressSet, StorageBackedU256, StorageBackedU64}}, ArbitrumContextTr};
 
 pub mod address_table;
 pub mod program;
@@ -28,7 +28,7 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn genesis_block_num(&mut self) ->  StorageBackedU64<'_, CTX>;
     fn brotli_compression_level(&mut self) ->  StorageBackedU64<'_, CTX>;
     fn native_token_enabled_time(&mut self) ->  StorageBackedU64<'_, CTX>;
-    fn address_table(&mut self) -> 
+    fn address_table(&mut self) -> AddressTable<'_, CTX>;
 }
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
@@ -126,5 +126,10 @@ where
             self.context,
             map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET as u64))),
         )
+    }
+    
+    fn address_table(&mut self) -> AddressTable<'_, CTX> {
+        let subkey = substorage(&B256::ZERO, ARBOS_STATE_ADDRESS_TABLE_KEY);
+        AddressTable::new(self.context, subkey)
     }
 }

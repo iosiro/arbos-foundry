@@ -1,4 +1,4 @@
-use alloy_sol_types::{sol, SolCall, SolError};
+use alloy_sol_types::{sol, SolCall};
 use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
 
 use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
