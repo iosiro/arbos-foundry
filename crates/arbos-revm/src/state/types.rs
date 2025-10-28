@@ -6,10 +6,10 @@ use revm::{
 use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS};
 
 // --- utility helpers moved to module scope ---
-pub fn substorage(root: &B256, index: u8) -> B256 {
+pub fn substorage(root: &B256, index: &[u8]) -> B256 {
     let mut subkey_bytes =
         if root.is_zero() { Vec::with_capacity(1) } else { root.as_slice().to_vec() };
-    subkey_bytes.push(index);
+    subkey_bytes.extend_from_slice(index);
     keccak256(subkey_bytes)
 }
 
@@ -57,29 +57,6 @@ where
     }
 }
 
-/// Generic wrapper for a storage-backed u32 value (stored as U256)
-pub struct StorageBackedU32<'a, CTX>(&'a mut CTX, B256)
-where
-    CTX: ArbitrumContextTr;
-
-impl<'a, CTX> StorageBackedU32<'a, CTX>
-where
-    CTX: ArbitrumContextTr,
-{
-    pub fn new(context: &'a mut CTX, slot: B256) -> Self {
-        Self(context, slot)
-    }
-
-    pub fn get(&mut self) -> u32 {
-        let v =
-            self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, self.1.into()).unwrap_or_default().data;
-        v.saturating_to()
-    }
-
-    pub fn set(&mut self, value: u32) {
-        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, self.1.into(), U256::from(value));
-    }
-}
 
 /// Storage-backed address set implemented as array-with-length at index 0. Values are left-padded B256.
 pub struct StorageBackedAddressSet<'a, CTX>(&'a mut CTX, B256)
@@ -127,7 +104,7 @@ where
     }
 
     pub fn contains(&mut self, address: &Address) -> bool {
-        let by_address = substorage(&self.1, 0);
+        let by_address = substorage(&self.1, &[0]);
         let slot = map_address(&by_address, &B256::left_padding_from(address.as_slice()));
         let v =
             self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into()).unwrap_or_default().data;
@@ -154,7 +131,7 @@ where
         let _ = self.0.sstore(ARBOS_STATE_ADDRESS, size_slot.into(), U256::from(size));
 
         // also set by-address index so contains() is O(1)
-        let by_address = substorage(&self.1, 0);
+        let by_address = substorage(&self.1, &[0]);
         let _ = self.0.sstore(
             ARBOS_STATE_ADDRESS,
             map_address(&by_address, &B256::left_padding_from(address.as_slice())).into(),
@@ -163,13 +140,38 @@ where
     }
 
     pub fn remove(&mut self, address: &Address) {
-        let by_address = substorage(&self.1, 0);
+        let by_address = substorage(&self.1, &[0]);
         let by_address_slot =
             map_address(&by_address, &B256::left_padding_from(address.as_slice()));
         let _ = self.0.sstore(ARBOS_STATE_ADDRESS, by_address_slot.into(), U256::from(0u64));
         // NOTE: we don't compact the array in storage to keep logic simple and predictable.
     }
 }
+
+/// Generic wrapper for a storage-backed u32 value (stored as U256)
+pub struct StorageBackedU32<'a, CTX>(&'a mut CTX, B256)
+where
+    CTX: ArbitrumContextTr;
+
+impl<'a, CTX> StorageBackedU32<'a, CTX>
+where
+    CTX: ArbitrumContextTr,
+{
+    pub fn new(context: &'a mut CTX, slot: B256) -> Self {
+        Self(context, slot)
+    }
+
+    pub fn get(&mut self) -> u32 {
+        let v =
+            self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, self.1.into()).unwrap_or_default().data;
+        v.saturating_to()
+    }
+
+    pub fn set(&mut self, value: u32) {
+        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, self.1.into(), U256::from(value));
+    }
+}
+
 
 pub struct StorageBackedU256<'a, CTX>(&'a mut CTX, B256)
 where

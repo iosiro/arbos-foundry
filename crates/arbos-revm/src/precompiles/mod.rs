@@ -62,6 +62,7 @@ impl<CTX: ArbitrumContextTr> Default for ArbitrumPrecompiles<CTX> {
 
         precompiles.extend([
             // Arbitrum specific precompiles can be added here
+            Precompile::Extended(arb_address_table::arb_address_table_precompile::<CTX>()),
             Precompile::Extended(arb_info::arb_info_precompile::<CTX>()),
             Precompile::Extended(arb_wasm_precompile::<CTX>()),
             Precompile::Extended(arb_wasm_cache_precompile::<CTX>()),

@@ -1,13 +1,13 @@
 #![allow(missing_docs)]
 
 use crate::{
-    chain::ArbitrumChainInfoTr, constants::{COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT}, precompiles::extension::ExtendedPrecompile, state::{program::{ProgramInfo, StylusParams}, ArbState}, ArbitrumContextTr
+    chain::ArbitrumChainInfoTr, constants::{COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT}, precompiles::extension::ExtendedPrecompile, state::{program::{ProgramInfo, StylusParams}, ArbState, ArbStateGetter}, ArbitrumContextTr
 };
 use alloy_sol_types::{sol, SolCall, SolError};
 use arbutil::evm::ARBOS_VERSION_STYLUS_CHARGING_FIXES;
 use revm::{
     context::{Block, JournalTr},
-    interpreter::{Gas, InstructionResult, InterpreterAction, InterpreterResult},
+    interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
     primitives::{address, Address, Bytes, B256, U256},
 };
@@ -183,7 +183,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
     let mut gas = Gas::new(gas_limit);
 
 
-    let (params, _) = context.programs().get_stylus_params();
+    let (params, _) = context.arb_state().programs().get_stylus_params();
 
     match selector {
         IArbWasm::activateProgramCall::SELECTOR => {
@@ -207,7 +207,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let cached = if let Some(program_info) =  context.programs().program_info(&code_hash) {    
+            let cached = if let Some(program_info) =  context.arb_state().programs().program_info(&code_hash) {    
                 let expired = program_info.age > params.expiry_days as u32 * 24 * 60 * 60;
                 // program is already activated
                 if program_info.version == params.version && !expired {
@@ -271,10 +271,10 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             let estimate_kb = (stylus_data.asm_estimate + 1023) / 1024;
 
             // TODO: dataFee calculation
-            let data_pricer =  context.programs().get_data_pricer();
+            let data_pricer =  context.arb_state().programs().get_data_pricer();
             println!("Data pricer: {:?}", data_pricer);
             let timestamp = context.block().timestamp();
-            let data_free =  context.programs().update_data_pricer_model(data_pricer, stylus_data.asm_estimate, timestamp.saturating_to());
+            let data_free =  context.arb_state().programs().update_data_pricer_model(data_pricer, stylus_data.asm_estimate, timestamp.saturating_to());
 
             let program_info = ProgramInfo {
                 version: compile_config.version,
@@ -286,8 +286,8 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 cached: false,
             };
 
-            context.programs().save_module_hash(&code_hash, &module_hash);
-            context.programs().save_program_info(&code_hash, &program_info);
+            context.arb_state().programs().save_module_hash(&code_hash, &module_hash);
+            context.arb_state().programs().save_program_info(&code_hash, &program_info);
             if !gas.record_cost(gas_cost) {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::OutOfGas,
@@ -347,7 +347,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
         IArbWasm::codehashVersionCall::SELECTOR => {
             let call = IArbWasm::codehashVersionCall::abi_decode(&input).unwrap();
 
-            let program_info = match get_active_program(&mut  context, &call.codehash, &params)  {
+            let program_info = match get_active_program(context, &call.codehash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -369,7 +369,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
         IArbWasm::codehashKeepaliveCall::SELECTOR => {
             let call = IArbWasm::codehashKeepaliveCall::abi_decode(&input).unwrap();            
 
-            let mut program_info = match get_active_program(&mut context, &call.codehash, &params)  {
+            let mut program_info = match get_active_program(context, &call.codehash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -405,13 +405,13 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             }
 
-            let data_pricer = context.programs().get_data_pricer();
+            let data_pricer = context.arb_state().programs().get_data_pricer();
             let timestamp = context.block().timestamp();
-            let data_fee = context.programs().update_data_pricer_model(data_pricer, program_info.asm_estimated_kb.saturating_mul(1024), timestamp.saturating_to());
+            let data_fee = context.arb_state().programs().update_data_pricer_model(data_pricer, program_info.asm_estimated_kb.saturating_mul(1024), timestamp.saturating_to());
 
             program_info.age = 0;
 
-             context.programs().save_program_info(&call.codehash, &program_info);
+             context.arb_state().programs().save_program_info(&call.codehash, &program_info);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
@@ -422,7 +422,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
         IArbWasm::codehashAsmSizeCall::SELECTOR => {
             let call = IArbWasm::codehashAsmSizeCall::abi_decode(&input).unwrap();
 
-            let program_info = match get_active_program(&mut  context, &call.codehash, &params)  {
+            let program_info = match get_active_program(context, &call.codehash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -454,7 +454,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let program_info = match get_active_program(&mut  context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -487,7 +487,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let program_info = match get_active_program(&mut  context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -525,7 +525,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let program_info = match get_active_program(&mut  context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -557,7 +557,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let program_info = match get_active_program(&mut  context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params)  {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -697,9 +697,9 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
     }
 }
 
-fn get_active_program<'a, CTX: ArbitrumContextTr>(state: &mut ArbState<'a, CTX>, code_hash: &B256, params: &StylusParams) -> Result<ProgramInfo, IArbWasm::IArbWasmErrors> {
+fn get_active_program<'a, CTX: ArbitrumContextTr>(context: &mut CTX, code_hash: &B256, params: &StylusParams) -> Result<ProgramInfo, IArbWasm::IArbWasmErrors> {
 
-    let program_info = if let Some(program_info) = state.programs().program_info(code_hash) {
+    let program_info = if let Some(program_info) = context.arb_state().programs().program_info(code_hash) {
         program_info
     } else {
         return Err(IArbWasm::IArbWasmErrors::ProgramNotActivated(IArbWasm::ProgramNotActivated{}));

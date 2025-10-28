@@ -1,8 +1,7 @@
-use alloy_sol_types::{sol, SolCall, SolError};
+use alloy_sol_types::sol;
 use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
 
-use crate::{precompiles::extension::ExtendedPrecompile, state::ArbStateGetter, ArbitrumContextTr};
-use crate::state::ArbState;
+use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
 
 
 sol!{
@@ -72,7 +71,7 @@ pub fn arb_aggregator_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile
 /// Run the precompile with the given context and input data.
 /// Run the arb_aggregator precompile with the given context and input data.
 fn arb_aggregator_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
+    _context: &mut CTX,
     input: &[u8],
     _target_address: &Address,
     _caller_address: Address,
@@ -93,19 +92,6 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     match selector {
-        ArbAggregator::getBatchPostersCall::SELECTOR => {
-            let _call = ArbAggregator::getBatchPostersCall::abi_decode(&input).unwrap();
-
-            let batch_posters = context.arb_state().aggregator().get_batch_posters();
-
-            let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&batch_posters);
-
-            return Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }));
-        },
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,

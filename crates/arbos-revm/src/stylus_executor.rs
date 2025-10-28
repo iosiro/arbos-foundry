@@ -358,8 +358,6 @@ where
                 program_info
             }
         } else if context.chain().enforce_activate_stylus() {
-            // require activation, but no info found, revert
-            println!("No stylus program info found, reverting.");
             return Some(InterpreterAction::Return(InterpreterResult {
                 result: InstructionResult::Revert,
                 output: Default::default(),
