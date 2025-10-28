@@ -4,7 +4,6 @@ use crate::{
     block::{BlockExecutionError, OnStateHook},
     Evm,
 };
-use std::borrow::Cow;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
@@ -12,6 +11,7 @@ use alloy_eips::{
 use alloy_hardforks::EthereumHardforks;
 use alloy_primitives::{Bytes, B256};
 use revm::{state::EvmState, DatabaseCommit};
+use std::borrow::Cow;
 
 use super::{StateChangePostBlockSource, StateChangePreBlockSource, StateChangeSource};
 

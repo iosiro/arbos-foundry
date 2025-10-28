@@ -216,9 +216,7 @@ impl NodeArgs {
             if self.evm.no_rate_limit { Some(u64::MAX) } else { self.evm.compute_units_per_second };
 
         let hardfork = match &self.hardfork {
-            Some(hf) => {
-                Some(EthereumHardfork::from_str(hf)?.into())
-            }
+            Some(hf) => Some(EthereumHardfork::from_str(hf)?.into()),
             None => None,
         };
 

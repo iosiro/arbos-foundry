@@ -85,8 +85,14 @@ mod tests {
     /// Creates a new EVM instance with the custom precompile factory.
     fn create_eth_evm(
         spec: SpecId,
-    ) -> (foundry_evm::Env, EthEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap<EthEvmContext<EmptyDBTyped<Infallible>>, EthPrecompiles>>)
-    {
+    ) -> (
+        foundry_evm::Env,
+        EthEvm<
+            EmptyDBTyped<Infallible>,
+            NoOpInspector,
+            PrecompilesMap<EthEvmContext<EmptyDBTyped<Infallible>>, EthPrecompiles>,
+        >,
+    ) {
         let eth_env = foundry_evm::Env {
             evm_env: EvmEnv { block_env: Default::default(), cfg_env: CfgEnv::new_with_spec(spec) },
             tx: TxEnv {
@@ -110,7 +116,7 @@ mod tests {
             precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
             spec,
         };
-        
+
         let eth_evm = EthEvm::new(
             RevmEvm::new_with_inspector(
                 eth_evm_context,

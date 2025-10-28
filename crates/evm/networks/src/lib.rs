@@ -45,7 +45,10 @@ impl NetworkConfigs {
     }
 
     /// Inject precompiles for configured networks.
-    pub fn inject_precompiles<CTX: ContextTr, P: PrecompileProvider<CTX>>(self, precompiles: &mut PrecompilesMap<CTX, P>) {
+    pub fn inject_precompiles<CTX: ContextTr, P: PrecompileProvider<CTX>>(
+        self,
+        precompiles: &mut PrecompilesMap<CTX, P>,
+    ) {
         if self.celo {
             precompiles.apply_precompile(&CELO_TRANSFER_ADDRESS, move |_| {
                 Some(celo::transfer::precompile())

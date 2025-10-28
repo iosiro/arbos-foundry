@@ -174,15 +174,7 @@ impl<CTX: PrecompilesContextTr> ExtendedPrecompile<CTX> {
         is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<InterpreterResult>, String> {
-        (self.fn_)(
-            context,
-            input,
-            target_address,
-            caller_address,
-            call_value,
-            is_static,
-            gas_limit,
-        )
+        (self.fn_)(context, input, target_address, caller_address, call_value, is_static, gas_limit)
     }
 }
 

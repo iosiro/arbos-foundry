@@ -1,19 +1,27 @@
 #![allow(missing_docs)]
 
 use crate::{
-    chain::ArbitrumChainInfoTr, constants::{COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT}, precompiles::extension::ExtendedPrecompile, state::{program::{ProgramInfo, StylusParams}, ArbState, ArbStateGetter}, ArbitrumContextTr
+    ArbitrumContextTr,
+    chain::ArbitrumChainInfoTr,
+    constants::{
+        COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
+    },
+    precompiles::extension::ExtendedPrecompile,
+    state::{
+        ArbState, ArbStateGetter,
+        program::{ProgramInfo, StylusParams},
+    },
 };
-use alloy_sol_types::{sol, SolCall, SolError};
+use alloy_sol_types::{SolCall, SolError, SolInterface, sol};
 use arbutil::evm::ARBOS_VERSION_STYLUS_CHARGING_FIXES;
 use revm::{
     context::{Block, JournalTr},
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{address, Address, Bytes, B256, U256},
+    primitives::{Address, B256, Bytes, U256, address},
 };
 use std::fmt::Debug;
 use stylus::prover::programs::config::CompileConfig;
-use alloy_sol_types::SolInterface;
 
 sol! {
 #[derive(Debug)] // Keep this list small to avoid unnecessary bloat.
@@ -167,7 +175,6 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -182,7 +189,6 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
 
     let mut gas = Gas::new(gas_limit);
 
-
     let (params, _) = context.arb_state().programs().get_stylus_params();
 
     match selector {
@@ -196,25 +202,27 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                     gas,
                 }));
             }
-            
+
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(call.program) {
                 code_hash.data
             } else {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: IArbWasm::ProgramNotWasm{}.abi_encode().into(),
+                    output: IArbWasm::ProgramNotWasm {}.abi_encode().into(),
                 }));
             };
 
-            let cached = if let Some(program_info) =  context.arb_state().programs().program_info(&code_hash) {    
+            let cached = if let Some(program_info) =
+                context.arb_state().programs().program_info(&code_hash)
+            {
                 let expired = program_info.age > params.expiry_days as u32 * 24 * 60 * 60;
                 // program is already activated
                 if program_info.version == params.version && !expired {
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Revert,
                         gas: Gas::new(gas_limit),
-                        output: IArbWasm::ProgramUpToDate{}.abi_encode().into(),
+                        output: IArbWasm::ProgramUpToDate {}.abi_encode().into(),
                     }));
                 }
 
@@ -222,7 +230,6 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             } else {
                 false
             };
-
 
             let bytecode = context.journal_mut().code(call.program).ok().unwrap_or_default().data;
 
@@ -234,21 +241,20 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             }
 
-            let compile_config = CompileConfig::version(
-                params.version,
-                context.chain().debug_mode(),
-            );
+            let compile_config =
+                CompileConfig::version(params.version, context.chain().debug_mode());
 
-            let (_, module, stylus_data, gas_cost) = crate::stylus_executor::compile_stylus_bytecode(
-                &bytecode,
-                code_hash,
-                context.chain().arbos_version_or_default(),
-                params.version,
-                params.page_limit,
-                true,
-                gas.remaining()
-            )
-            .unwrap();
+            let (_, module, stylus_data, gas_cost) =
+                crate::stylus_executor::compile_stylus_bytecode(
+                    &bytecode,
+                    code_hash,
+                    context.chain().arbos_version_or_default(),
+                    params.version,
+                    params.page_limit,
+                    true,
+                    gas.remaining(),
+                )
+                .unwrap();
 
             if !gas.record_cost(gas_cost) {
                 return Ok(Some(InterpreterResult {
@@ -271,10 +277,14 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             let estimate_kb = (stylus_data.asm_estimate + 1023) / 1024;
 
             // TODO: dataFee calculation
-            let data_pricer =  context.arb_state().programs().get_data_pricer();
+            let data_pricer = context.arb_state().programs().get_data_pricer();
             println!("Data pricer: {:?}", data_pricer);
             let timestamp = context.block().timestamp();
-            let data_free =  context.arb_state().programs().update_data_pricer_model(data_pricer, stylus_data.asm_estimate, timestamp.saturating_to());
+            let data_free = context.arb_state().programs().update_data_pricer_model(
+                data_pricer,
+                stylus_data.asm_estimate,
+                timestamp.saturating_to(),
+            );
 
             let program_info = ProgramInfo {
                 version: compile_config.version,
@@ -313,12 +323,13 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
 
             // refund excess
             let refund = call_value.saturating_sub(data_fee);
-            if let Some(error) = context.journal_mut().transfer(*target_address, caller_address, refund).unwrap() {
-               
+            if let Some(error) =
+                context.journal_mut().transfer(*target_address, caller_address, refund).unwrap()
+            {
                 return Ok(Some(InterpreterResult {
                     result: error.into(),
                     gas: Gas::new(gas_limit),
-                    output: Bytes::default()
+                    output: Bytes::default(),
                 }));
             }
 
@@ -334,20 +345,20 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 gas, // Dummy gas usage
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::stylusVersionCall::SELECTOR => {
-            let output = IArbWasm::stylusVersionCall::abi_encode_returns( &params.version);
+            let output = IArbWasm::stylusVersionCall::abi_encode_returns(&params.version);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::codehashVersionCall::SELECTOR => {
             let call = IArbWasm::codehashVersionCall::abi_decode(&input).unwrap();
 
-            let program_info = match get_active_program(context, &call.codehash, &params)  {
+            let program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -358,18 +369,18 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }
             };
 
-            let output = IArbWasm::codehashVersionCall::abi_encode_returns( &program_info.version);
+            let output = IArbWasm::codehashVersionCall::abi_encode_returns(&program_info.version);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::codehashKeepaliveCall::SELECTOR => {
-            let call = IArbWasm::codehashKeepaliveCall::abi_decode(&input).unwrap();            
+            let call = IArbWasm::codehashKeepaliveCall::abi_decode(&input).unwrap();
 
-            let mut program_info = match get_active_program(context, &call.codehash, &params)  {
+            let mut program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -379,7 +390,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                     }));
                 }
             };
- 
+
             if program_info.age < params.keepalive_days as u32 * 24 * 60 * 60 {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
@@ -407,22 +418,26 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
 
             let data_pricer = context.arb_state().programs().get_data_pricer();
             let timestamp = context.block().timestamp();
-            let data_fee = context.arb_state().programs().update_data_pricer_model(data_pricer, program_info.asm_estimated_kb.saturating_mul(1024), timestamp.saturating_to());
+            let data_fee = context.arb_state().programs().update_data_pricer_model(
+                data_pricer,
+                program_info.asm_estimated_kb.saturating_mul(1024),
+                timestamp.saturating_to(),
+            );
 
             program_info.age = 0;
 
-             context.arb_state().programs().save_program_info(&call.codehash, &program_info);
+            context.arb_state().programs().save_program_info(&call.codehash, &program_info);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::default(),
             }))
-        },
+        }
         IArbWasm::codehashAsmSizeCall::SELECTOR => {
             let call = IArbWasm::codehashAsmSizeCall::abi_decode(&input).unwrap();
 
-            let program_info = match get_active_program(context, &call.codehash, &params)  {
+            let program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -433,14 +448,15 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }
             };
 
-            let output = IArbWasm::codehashAsmSizeCall::abi_encode_returns( &program_info.asm_estimated_kb);
+            let output =
+                IArbWasm::codehashAsmSizeCall::abi_encode_returns(&program_info.asm_estimated_kb);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::programVersionCall::SELECTOR => {
             let call = IArbWasm::programVersionCall::abi_decode(&input).unwrap();
 
@@ -450,11 +466,11 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: IArbWasm::ProgramNotWasm{}.abi_encode().into(),
+                    output: IArbWasm::ProgramNotWasm {}.abi_encode().into(),
                 }));
             };
 
-            let program_info = match get_active_program(context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -464,16 +480,15 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                     }));
                 }
             };
-           
 
-            let output = IArbWasm::programVersionCall::abi_encode_returns( &program_info.version);
+            let output = IArbWasm::programVersionCall::abi_encode_returns(&program_info.version);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::programInitGasCall::SELECTOR => {
             let call = IArbWasm::programInitGasCall::abi_decode(&input).unwrap();
 
@@ -483,11 +498,11 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: IArbWasm::ProgramNotWasm{}.abi_encode().into(),
+                    output: IArbWasm::ProgramNotWasm {}.abi_encode().into(),
                 }));
             };
 
-            let program_info = match get_active_program(context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -501,17 +516,18 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             let cached_gas = crate::stylus_executor::init_gas(&program_info, &params);
             let init_gas = crate::stylus_executor::init_gas(&program_info, &params);
 
-            let output = IArbWasm::programInitGasCall::abi_encode_returns( &IArbWasm::programInitGasReturn {
-                gas: init_gas,
-                gasWhenCached: cached_gas,
-            });
+            let output =
+                IArbWasm::programInitGasCall::abi_encode_returns(&IArbWasm::programInitGasReturn {
+                    gas: init_gas,
+                    gasWhenCached: cached_gas,
+                });
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::programMemoryFootprintCall::SELECTOR => {
             let call = IArbWasm::programMemoryFootprintCall::abi_decode(&input).unwrap();
 
@@ -521,11 +537,11 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: IArbWasm::ProgramNotWasm{}.abi_encode().into(),
+                    output: IArbWasm::ProgramNotWasm {}.abi_encode().into(),
                 }));
             };
 
-            let program_info = match get_active_program(context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -536,14 +552,15 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }
             };
 
-            let output = IArbWasm::programMemoryFootprintCall::abi_encode_returns( &program_info.footprint);
+            let output =
+                IArbWasm::programMemoryFootprintCall::abi_encode_returns(&program_info.footprint);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::programTimeLeftCall::SELECTOR => {
             let call = IArbWasm::programTimeLeftCall::abi_decode(&input).unwrap();
 
@@ -553,11 +570,11 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: IArbWasm::ProgramNotWasm{}.abi_encode().into(),
+                    output: IArbWasm::ProgramNotWasm {}.abi_encode().into(),
                 }));
             };
 
-            let program_info = match get_active_program(context, &code_hash, &params)  {
+            let program_info = match get_active_program(context, &code_hash, &params) {
                 Ok(res) => res,
                 Err(e) => {
                     return Ok(Some(InterpreterResult {
@@ -568,74 +585,75 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }
             };
 
-            let output = IArbWasm::programTimeLeftCall::abi_encode_returns( &(program_info.age as u64));
+            let output =
+                IArbWasm::programTimeLeftCall::abi_encode_returns(&(program_info.age as u64));
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::inkPriceCall::SELECTOR => {
-            let output = IArbWasm::inkPriceCall::abi_encode_returns( &params.ink_price);
+            let output = IArbWasm::inkPriceCall::abi_encode_returns(&params.ink_price);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::maxStackDepthCall::SELECTOR => {
-
-            let output = IArbWasm::maxStackDepthCall::abi_encode_returns( &params.max_stack_depth);
+            let output = IArbWasm::maxStackDepthCall::abi_encode_returns(&params.max_stack_depth);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::freePagesCall::SELECTOR => {
-            let output = IArbWasm::freePagesCall::abi_encode_returns( &params.free_pages);
+            let output = IArbWasm::freePagesCall::abi_encode_returns(&params.free_pages);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::pageGasCall::SELECTOR => {
-            let output = IArbWasm::pageGasCall::abi_encode_returns( &params.page_gas);
+            let output = IArbWasm::pageGasCall::abi_encode_returns(&params.page_gas);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::pageRampCall::SELECTOR => {
-            let output = IArbWasm::pageRampCall::abi_encode_returns( &params.page_ramp);
+            let output = IArbWasm::pageRampCall::abi_encode_returns(&params.page_ramp);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::pageLimitCall::SELECTOR => {
-            let output = IArbWasm::pageLimitCall::abi_encode_returns( &params.page_limit);
+            let output = IArbWasm::pageLimitCall::abi_encode_returns(&params.page_limit);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::minInitGasCall::SELECTOR => {
-            let output = IArbWasm::minInitGasCall::abi_encode_returns( &IArbWasm::minInitGasReturn {
-                gas: params.min_init_gas as u64 * MIN_INIT_GAS_UNITS,
-                cached: params.min_cached_init_gas as u64 * MIN_CACHED_GAS_UNITS,
-            });
+            let output =
+                IArbWasm::minInitGasCall::abi_encode_returns(&IArbWasm::minInitGasReturn {
+                    gas: params.min_init_gas as u64 * MIN_INIT_GAS_UNITS,
+                    cached: params.min_cached_init_gas as u64 * MIN_CACHED_GAS_UNITS,
+                });
 
             if params.version < ARBOS_VERSION_STYLUS_CHARGING_FIXES as u16 {
                 return Ok(Some(InterpreterResult {
@@ -650,43 +668,45 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::initCostScalarCall::SELECTOR => {
-            let output = IArbWasm::initCostScalarCall::abi_encode_returns( &(params.init_cost_scalar as u64 * COST_SCALAR_PERCENT));
+            let output = IArbWasm::initCostScalarCall::abi_encode_returns(
+                &(params.init_cost_scalar as u64 * COST_SCALAR_PERCENT),
+            );
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::expiryDaysCall::SELECTOR => {
-            let output = IArbWasm::expiryDaysCall::abi_encode_returns( &params.expiry_days);
+            let output = IArbWasm::expiryDaysCall::abi_encode_returns(&params.expiry_days);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::keepaliveDaysCall::SELECTOR => {
-            let output = IArbWasm::keepaliveDaysCall::abi_encode_returns( &params.keepalive_days);
+            let output = IArbWasm::keepaliveDaysCall::abi_encode_returns(&params.keepalive_days);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         IArbWasm::blockCacheSizeCall::SELECTOR => {
-            let output = IArbWasm::blockCacheSizeCall::abi_encode_returns( &params.block_cache_size);
+            let output = IArbWasm::blockCacheSizeCall::abi_encode_returns(&params.block_cache_size);
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }))
-        },
+        }
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
@@ -697,16 +717,24 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
     }
 }
 
-fn get_active_program<'a, CTX: ArbitrumContextTr>(context: &mut CTX, code_hash: &B256, params: &StylusParams) -> Result<ProgramInfo, IArbWasm::IArbWasmErrors> {
-
-    let program_info = if let Some(program_info) = context.arb_state().programs().program_info(code_hash) {
-        program_info
-    } else {
-        return Err(IArbWasm::IArbWasmErrors::ProgramNotActivated(IArbWasm::ProgramNotActivated{}));
-    };
+fn get_active_program<'a, CTX: ArbitrumContextTr>(
+    context: &mut CTX,
+    code_hash: &B256,
+    params: &StylusParams,
+) -> Result<ProgramInfo, IArbWasm::IArbWasmErrors> {
+    let program_info =
+        if let Some(program_info) = context.arb_state().programs().program_info(code_hash) {
+            program_info
+        } else {
+            return Err(IArbWasm::IArbWasmErrors::ProgramNotActivated(
+                IArbWasm::ProgramNotActivated {},
+            ));
+        };
 
     if program_info.version == 0 {
-        return Err(IArbWasm::IArbWasmErrors::ProgramNotActivated(IArbWasm::ProgramNotActivated{}));
+        return Err(IArbWasm::IArbWasmErrors::ProgramNotActivated(
+            IArbWasm::ProgramNotActivated {},
+        ));
     }
 
     if params.version != program_info.version {
@@ -721,7 +749,6 @@ fn get_active_program<'a, CTX: ArbitrumContextTr>(context: &mut CTX, code_hash: 
             ageInSeconds: program_info.age as u64,
         }));
     }
-    
+
     Ok(program_info)
 }
-    

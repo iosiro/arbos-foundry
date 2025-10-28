@@ -83,7 +83,10 @@ impl<DB: Database, I> EthEvmBuilder<DB, I> {
 
     /// Overrides the precompiles map. If not provided, it will be derived from the `SpecId` in
     /// `CfgEnv`.
-    pub fn precompiles(mut self, precompiles: PrecompilesMap<EthEvmContext<DB>, EthPrecompiles>) -> Self {
+    pub fn precompiles(
+        mut self,
+        precompiles: PrecompilesMap<EthEvmContext<DB>, EthPrecompiles>,
+    ) -> Self {
         self.precompiles = Some(precompiles);
         self
     }
@@ -97,7 +100,10 @@ impl<DB: Database, I> EthEvmBuilder<DB, I> {
             Some(p) => p,
             None => {
                 let mut precompiles = EthPrecompiles::default();
-                <EthPrecompiles as PrecompileProvider<EthEvmContext<DB>>>::set_spec(&mut precompiles, self.cfg_env.spec);
+                <EthPrecompiles as PrecompileProvider<EthEvmContext<DB>>>::set_spec(
+                    &mut precompiles,
+                    self.cfg_env.spec,
+                );
                 PrecompilesMap::<EthEvmContext<DB>, EthPrecompiles>::new(precompiles)
             }
         };
@@ -261,7 +267,8 @@ where
 pub struct EthEvmFactory;
 
 impl EvmFactory for EthEvmFactory {
-    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> = EthEvm<DB, I, PrecompilesMap<EthEvmContext<DB>, EthPrecompiles>>;
+    type Evm<DB: Database, I: Inspector<EthEvmContext<DB>>> =
+        EthEvm<DB, I, PrecompilesMap<EthEvmContext<DB>, EthPrecompiles>>;
     type Context<DB: Database> = Context<BlockEnv, TxEnv, CfgEnv, DB>;
     type Block = BlockEnv;
     type Config = CfgEnv;
@@ -270,7 +277,11 @@ impl EvmFactory for EthEvmFactory {
     type HaltReason = HaltReason;
     type Spec = SpecId;
 
-    fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv<Self::Block, Self::Config>) -> Self::Evm<DB, NoOpInspector> {
+    fn create_evm<DB: Database>(
+        &self,
+        db: DB,
+        input: EvmEnv<Self::Block, Self::Config>,
+    ) -> Self::Evm<DB, NoOpInspector> {
         EthEvmBuilder::new(db, input).build()
     }
 

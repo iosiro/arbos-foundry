@@ -528,7 +528,6 @@ impl EthApi {
         from: &Address,
         request: TypedTransactionRequest,
     ) -> Result<TypedTransaction> {
-      
         for signer in self.signers.iter() {
             if signer.accounts().contains(from) {
                 let signature = signer.sign_transaction(request.clone(), from)?;

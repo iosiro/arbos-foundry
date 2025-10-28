@@ -54,8 +54,7 @@ use alloy_evm::{
     precompiles::{DynPrecompile, Precompile, PrecompilesMap},
 };
 use alloy_network::{
-    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope,
-    EthereumWallet
+    AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
 };
 use alloy_primitives::{
     Address, B256, Bytes, TxHash, TxKind, U64, U256, address, hex, keccak256, logs_bloom,
@@ -87,8 +86,7 @@ use anvil_core::eth::{
     block::{Block, BlockInfo},
     transaction::{
         MaybeImpersonatedTransaction, PendingTransaction, ReceiptResponse, TransactionInfo,
-        TypedReceipt, TypedReceiptRpc, TypedTransaction,
-        transaction_request_to_typed,
+        TypedReceipt, TypedReceiptRpc, TypedTransaction, transaction_request_to_typed,
     },
     wallet::WalletCapabilities,
 };
@@ -111,10 +109,18 @@ use foundry_evm::{
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    context::{result::HaltReason, Block as RevmBlock, BlockEnv, Cfg, TxEnv}, context_interface::{
+    DatabaseCommit, Inspector,
+    context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv, result::HaltReason},
+    context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
-    }, database::{CacheDB, DbAccount, WrapDatabaseRef}, handler::EthPrecompiles, interpreter::InstructionResult, precompile::{PrecompileSpecId, Precompiles}, primitives::{hardfork::SpecId, KECCAK_EMPTY}, state::AccountInfo, DatabaseCommit, Inspector
+    },
+    database::{CacheDB, DbAccount, WrapDatabaseRef},
+    handler::EthPrecompiles,
+    interpreter::InstructionResult,
+    precompile::{PrecompileSpecId, Precompiles},
+    primitives::{KECCAK_EMPTY, hardfork::SpecId},
+    state::AccountInfo,
 };
 use std::{
     collections::BTreeMap,
@@ -1145,7 +1151,11 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>>
+    ) -> EitherEvm<
+        WrapDatabaseRef<&'db DB>,
+        &'db mut I,
+        PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>,
+    >
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -1194,9 +1204,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (reason.into(), gas_used, None, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None, None),
         };
 
         drop(evm);
@@ -1585,7 +1593,7 @@ impl Backend {
             // this is an edge case because the evm fails if `tx.effective_gas_price < base_fee`
             // 0 is only possible if it's manually set
             env.evm_env.cfg_env.disable_base_fee = true;
-        }       
+        }
 
         env
     }
@@ -1837,9 +1845,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (reason.into(), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         inspector.print_logs();
@@ -1976,9 +1982,7 @@ impl Backend {
                 ExecutionResult::Revert { gas_used, output } => {
                     (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
                 }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    (reason.into(), gas_used, None)
-                }
+                ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
             };
 
             drop(evm);
@@ -2017,9 +2021,7 @@ impl Backend {
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)))
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (reason.into(), gas_used, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None),
         };
         drop(evm);
         let access_list = inspector.access_list();
@@ -3023,14 +3025,14 @@ impl Backend {
 
         // Build a ReceiptWithBloom<rpc_types::Log> from the typed receipt, handling Deposit
         // specially
-        let (status, cumulative_gas_used, logs_source, logs_bloom) = {   
+        let (status, cumulative_gas_used, logs_source, logs_bloom) = {
             let receipt_ref = tx_receipt.as_receipt_with_bloom();
             (
                 receipt_ref.receipt.status,
                 receipt_ref.receipt.cumulative_gas_used,
                 receipt_ref.receipt.logs.to_vec(),
                 receipt_ref.logs_bloom,
-            )            
+            )
         };
 
         let receipt: alloy_consensus::Receipt<alloy_rpc_types::Log> = Receipt {
@@ -3505,7 +3507,7 @@ impl TransactionValidator for Backend {
         }
 
         let nonce = tx.nonce();
-        if nonce < account.nonce  {
+        if nonce < account.nonce {
             warn!(target: "backend", "[{:?}] nonce too low", tx.hash());
             return Err(InvalidTransactionError::NonceTooLow);
         }
@@ -3569,7 +3571,7 @@ impl TransactionValidator for Backend {
 
             // EIP-1559 fee validation (London hard fork and later).
             if env.evm_env.cfg_env.spec >= SpecId::LONDON {
-                if tx.gas_price() < env.evm_env.block_env.basefee.into()  {
+                if tx.gas_price() < env.evm_env.block_env.basefee.into() {
                     warn!(target: "backend", "max fee per gas={}, too low, block basefee={}",tx.gas_price(),  env.evm_env.block_env.basefee);
                     return Err(InvalidTransactionError::FeeCapTooLow);
                 }
@@ -3596,17 +3598,16 @@ impl TransactionValidator for Backend {
 
             let max_cost = tx.max_cost();
             let value = tx.value();
-               
+
             // check sufficient funds: `gas * price + value`
-            let req_funds =
-                max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
-                    warn!(target: "backend", "[{:?}] cost too high", tx.hash());
-                    InvalidTransactionError::InsufficientFunds
-                })?;
+            let req_funds = max_cost.checked_add(value.saturating_to()).ok_or_else(|| {
+                warn!(target: "backend", "[{:?}] cost too high", tx.hash());
+                InvalidTransactionError::InsufficientFunds
+            })?;
             if account.balance < U256::from(req_funds) {
                 warn!(target: "backend", "[{:?}] insufficient allowance={}, required={} account={:?}", tx.hash(), account.balance, req_funds, *pending.sender());
                 return Err(InvalidTransactionError::InsufficientFunds);
-            }      
+            }
         }
         Ok(())
     }

@@ -1,12 +1,16 @@
 use std::io::Read;
 
-use crate::ArbitrumContextTr;
-use crate::constants::ARBOS_STATE_ADDRESS;
-use crate::state::types::{map_address, substorage};
+use crate::{
+    ArbitrumContextTr,
+    constants::ARBOS_STATE_ADDRESS,
+    state::types::{map_address, substorage},
+};
 use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
-use revm::bytecode::bitvec::index;
-use revm::context::JournalTr;
-use revm::primitives::{Address, B256, Bytes, U256};
+use revm::{
+    bytecode::bitvec::index,
+    context::JournalTr,
+    primitives::{Address, B256, Bytes, U256},
+};
 
 #[derive(Debug, Clone)]
 enum RLPItem {
@@ -163,8 +167,9 @@ where
             |item| match item {
                 Some(RLPItem::Address(addr)) => Ok((addr, (data.len() - slice.len()) as u64)),
                 Some(RLPItem::Index(idx)) => {
-                    let addr =
-                        self.lookup_index(idx).ok_or_else(|| "invalid index in compressed address".to_string())?;
+                    let addr = self
+                        .lookup_index(idx)
+                        .ok_or_else(|| "invalid index in compressed address".to_string())?;
                     Ok((addr, (data.len() - slice.len()) as u64))
                 }
                 None => todo!("Implement RLP decoding for None"),
@@ -172,7 +177,6 @@ where
         )
     }
 }
-
 
 impl Encodable for RLPItem {
     fn encode(&self, out: &mut dyn BufMut) {
@@ -201,8 +205,8 @@ impl Decodable for RLPItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use revm::primitives::{hex::FromHex, Address, B256};
     use alloy_rlp::{Decodable, Encodable};
+    use revm::primitives::{Address, B256, hex::FromHex};
 
     #[test]
     fn encode_decode_address_roundtrip() {
@@ -222,10 +226,7 @@ mod tests {
             other => panic!("expected Address variant, got {:?}", other),
         }
 
-        assert!(
-            slice.is_empty(),
-            "after decoding there should be no leftover bytes"
-        );
+        assert!(slice.is_empty(), "after decoding there should be no leftover bytes");
     }
 
     #[test]
@@ -244,10 +245,7 @@ mod tests {
             other => panic!("expected Index variant, got {:?}", other),
         }
 
-        assert!(
-            slice.is_empty(),
-            "after decoding there should be no leftover bytes"
-        );
+        assert!(slice.is_empty(), "after decoding there should be no leftover bytes");
     }
 
     #[test]
@@ -256,9 +254,6 @@ mod tests {
         let bad_data = vec![0xff, 0x00, 0x11, 0x22];
         let mut slice: &[u8] = &bad_data;
         let res = RLPItem::decode(&mut slice);
-        assert!(
-            res.is_err(),
-            "decoding invalid bytes should return an error"
-        );
+        assert!(res.is_err(), "decoding invalid bytes should return an error");
     }
 }

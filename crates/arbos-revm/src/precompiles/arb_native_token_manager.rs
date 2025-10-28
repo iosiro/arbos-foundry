@@ -1,9 +1,17 @@
-use alloy_sol_types::{sol, SolCall};
-use revm::{context::JournalTr, interpreter::{gas, Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
-use crate::state::{ArbState, ArbStateGetter};
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{
+    ArbitrumContextTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
+use alloy_sol_types::{SolCall, sol};
+use revm::{
+    context::JournalTr,
+    interpreter::{Gas, InstructionResult, InterpreterResult, gas},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-sol!{
+sol! {
 /**
  * @title Enables minting and burning native tokens.
  * @notice Authorized callers are added/removed through ArbOwner precompile.
@@ -61,7 +69,6 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -95,15 +102,20 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
             }
 
             let call = ArbNativeTokenManager::mintNativeTokenCall::abi_decode(&input).unwrap();
-            context.journal_mut().balance_incr(caller_address, call.amount).expect("Failed to mint native token");
+            context
+                .journal_mut()
+                .balance_incr(caller_address, call.amount)
+                .expect("Failed to mint native token");
 
-            let output = ArbNativeTokenManager::mintNativeTokenCall::abi_encode_returns(&ArbNativeTokenManager::mintNativeTokenReturn{});
+            let output = ArbNativeTokenManager::mintNativeTokenCall::abi_encode_returns(
+                &ArbNativeTokenManager::mintNativeTokenReturn {},
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbNativeTokenManager::burnNativeTokenCall::SELECTOR => {
             if !has_access(context, caller_address) {
                 return Ok(Some(InterpreterResult {
@@ -113,7 +125,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 }));
             }
 
-             if !gas.record_cost(MINT_BURN_GAS_COST) {
+            if !gas.record_cost(MINT_BURN_GAS_COST) {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::OutOfGas,
                     gas: Gas::new(gas_limit),
@@ -131,29 +143,28 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                     output: Bytes::from("burn amount exceeds balance"),
                 }));
             };
-        
 
             match context.journal_mut().transfer(caller_address, *target_address, call.amount) {
                 Ok(None) => {
-                    let output = ArbNativeTokenManager::burnNativeTokenCall::abi_encode_returns(&ArbNativeTokenManager::burnNativeTokenReturn{});
+                    let output = ArbNativeTokenManager::burnNativeTokenCall::abi_encode_returns(
+                        &ArbNativeTokenManager::burnNativeTokenReturn {},
+                    );
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Return,
                         gas,
                         output: Bytes::from(output),
                     }));
-                },
+                }
                 Ok(Some(err)) => {
                     return Ok(Some(InterpreterResult {
                         result: err.into(),
                         gas: Gas::new(gas_limit),
                         output: Bytes::default(),
                     }));
-                },
-                Err(e) => {
-                    return Err(format!("transfer failed: {}", e))
                 }
+                Err(e) => return Err(format!("transfer failed: {}", e)),
             }
-        },
+        }
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
@@ -164,12 +175,6 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     }
 }
 
-fn has_access<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    caller: Address,
-) -> bool {
-    context
-        .arb_state()
-        .native_token_owners()
-        .contains(&caller)
+fn has_access<CTX: ArbitrumContextTr>(context: &mut CTX, caller: Address) -> bool {
+    context.arb_state().native_token_owners().contains(&caller)
 }

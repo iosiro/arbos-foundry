@@ -1,9 +1,13 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
 
-sol!{
+sol! {
 /**
  * @title System level functionality
  * @notice For use by contracts to interact with core L2-specific functionality.
@@ -169,7 +173,6 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {

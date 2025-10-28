@@ -1,9 +1,17 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, state::{ArbState, ArbStateGetter}, ArbitrumContextTr};
+use crate::{
+    ArbitrumContextTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
 
-sol!{
+sol! {
 
 /**
  * @title Methods for managing Stylus caches
@@ -73,7 +81,6 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -87,10 +94,9 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     let gas = Gas::new(gas_limit);
-    
+
     match selector {
         ArbWasmCache::isCacheManagerCall::SELECTOR => {
-
             let call = ArbWasmCache::isCacheManagerCall::abi_decode(&input).unwrap();
             let manager = call.manager;
 
@@ -103,8 +109,8 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
-        ArbWasmCache::allCacheManagersCall::SELECTOR => {            
+        }
+        ArbWasmCache::allCacheManagersCall::SELECTOR => {
             let _call = ArbWasmCache::allCacheManagersCall::abi_decode(&input).unwrap();
 
             let managers = context.arb_state().programs().cache_managers().all();
@@ -116,7 +122,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbWasmCache::cacheCodehashCall::SELECTOR => {
             if !has_access(context) {
                 return Ok(Some(InterpreterResult {
@@ -131,27 +137,33 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             let (params, _) = context.arb_state().programs().get_stylus_params();
 
-            let mut program_info = if let Some(program_info) = context.arb_state().programs().program_info(&codehash) {
+            let mut program_info = if let Some(program_info) =
+                context.arb_state().programs().program_info(&codehash)
+            {
                 program_info
             } else {
-                 return Ok(Some(InterpreterResult {
+                return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade{
+                    output: ArbWasmCache::ProgramNeedsUpgrade {
                         version: 0,
                         stylusVersion: params.version,
-                    }.abi_encode().into(),
+                    }
+                    .abi_encode()
+                    .into(),
                 }));
             };
 
-            let output = ArbWasmCache::cacheCodehashCall::abi_encode_returns(&ArbWasmCache::cacheCodehashReturn{});
+            let output = ArbWasmCache::cacheCodehashCall::abi_encode_returns(
+                &ArbWasmCache::cacheCodehashReturn {},
+            );
 
             if program_info.cached {
                 // already cached, no-op
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Return,
                     gas,
-                    output:  Bytes::from(output),
+                    output: Bytes::from(output),
                 }));
             }
 
@@ -161,12 +173,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             context.arb_state().programs().save_program_info(&codehash, &program_info);
 
             return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas,
-                    output:  Bytes::from(output),
+                result: InstructionResult::Return,
+                gas,
+                output: Bytes::from(output),
             }));
-
-        },
+        }
         ArbWasmCache::cacheProgramCall::SELECTOR => {
             if !has_access(context) {
                 return Ok(Some(InterpreterResult {
@@ -179,42 +190,50 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             let call = ArbWasmCache::cacheProgramCall::abi_decode(&input).unwrap();
             let addr = call.addr;
 
-             let (params, _) = context.arb_state().programs().get_stylus_params();
+            let (params, _) = context.arb_state().programs().get_stylus_params();
 
-             let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
+            let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
                 code_hash.data
             } else {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade{
+                    output: ArbWasmCache::ProgramNeedsUpgrade {
                         version: 0,
                         stylusVersion: params.version,
-                    }.abi_encode().into(),
+                    }
+                    .abi_encode()
+                    .into(),
                 }));
             };
 
-            let mut program_info = if let Some(program_info) = context.arb_state().programs().program_info(&code_hash) {
+            let mut program_info = if let Some(program_info) =
+                context.arb_state().programs().program_info(&code_hash)
+            {
                 program_info
             } else {
-                 return Ok(Some(InterpreterResult {
+                return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade{
+                    output: ArbWasmCache::ProgramNeedsUpgrade {
                         version: 0,
                         stylusVersion: params.version,
-                    }.abi_encode().into(),
+                    }
+                    .abi_encode()
+                    .into(),
                 }));
             };
 
-            let output = ArbWasmCache::cacheProgramCall::abi_encode_returns(&ArbWasmCache::cacheProgramReturn{});
+            let output = ArbWasmCache::cacheProgramCall::abi_encode_returns(
+                &ArbWasmCache::cacheProgramReturn {},
+            );
 
             if program_info.cached {
                 // already cached, no-op
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Return,
                     gas,
-                    output:  Bytes::from(output),
+                    output: Bytes::from(output),
                 }));
             }
 
@@ -225,11 +244,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             context.arb_state().programs().save_program_info(&code_hash, &program_info);
 
             return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas,
-                    output:  Bytes::from(output),
+                result: InstructionResult::Return,
+                gas,
+                output: Bytes::from(output),
             }));
-        },
+        }
         ArbWasmCache::evictCodehashCall::SELECTOR => {
             if !has_access(context) {
                 return Ok(Some(InterpreterResult {
@@ -242,29 +261,35 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             let call = ArbWasmCache::evictCodehashCall::abi_decode(&input).unwrap();
             let codehash = call.codehash;
 
-             let (params, _) = context.arb_state().programs().get_stylus_params();
+            let (params, _) = context.arb_state().programs().get_stylus_params();
 
-            let mut program_info = if let Some(program_info) = context.arb_state().programs().program_info(&codehash) {
+            let mut program_info = if let Some(program_info) =
+                context.arb_state().programs().program_info(&codehash)
+            {
                 program_info
             } else {
-                 return Ok(Some(InterpreterResult {
+                return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
                     gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade{
+                    output: ArbWasmCache::ProgramNeedsUpgrade {
                         version: 0,
                         stylusVersion: params.version,
-                    }.abi_encode().into(),
+                    }
+                    .abi_encode()
+                    .into(),
                 }));
             };
 
-            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(&ArbWasmCache::evictCodehashReturn{});
+            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(
+                &ArbWasmCache::evictCodehashReturn {},
+            );
 
             if !program_info.cached {
                 // already not cached, no-op
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Return,
                     gas,
-                    output:  Bytes::from(output),
+                    output: Bytes::from(output),
                 }));
             }
 
@@ -272,19 +297,23 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             context.arb_state().programs().save_program_info(&codehash, &program_info);
 
-            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(&ArbWasmCache::evictCodehashReturn{});
+            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(
+                &ArbWasmCache::evictCodehashReturn {},
+            );
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
-                output:  Bytes::from(output),
+                output: Bytes::from(output),
             }));
-        },
+        }
         ArbWasmCache::codehashIsCachedCall::SELECTOR => {
             let call = ArbWasmCache::codehashIsCachedCall::abi_decode(&input).unwrap();
             let codehash = call.codehash;
 
-            let is_cached = if let Some(program_info) = context.arb_state().programs().program_info(&codehash) {
+            let is_cached = if let Some(program_info) =
+                context.arb_state().programs().program_info(&codehash)
+            {
                 program_info.cached
             } else {
                 false
@@ -297,7 +326,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,

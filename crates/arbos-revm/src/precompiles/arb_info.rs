@@ -1,9 +1,13 @@
-use alloy_sol_types::{sol, SolCall};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
 
-sol!{
+sol! {
 /// @title Lookup for basic info about accounts and contracts.
 /// @notice Precompiled contract that exists in every Arbitrum chain at 0x0000000000000000000000000000000000000065.
 interface ArbInfo {
@@ -34,7 +38,6 @@ fn arb_info_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -60,7 +63,7 @@ fn arb_info_run<CTX: ArbitrumContextTr>(
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbInfo::getCodeCall::SELECTOR => {
             let call = ArbInfo::getCodeCall::abi_decode(&input).unwrap();
 
@@ -73,7 +76,7 @@ fn arb_info_run<CTX: ArbitrumContextTr>(
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
             }));
-        },
+        }
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,

@@ -42,10 +42,18 @@ use stylus::{
 };
 
 use crate::{
-    chain::ArbitrumChainInfoTr, constants::{
-        COST_SCALAR_PERCENT, INITIAL_FREE_PAGES,
-        MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    }, context::ArbitrumContextTr, state::{program::{ProgramInfo, StylusParams}, ArbState, ArbStateGetter}, stylus_api::StylusHandler, ArbitrumEvm
+    ArbitrumEvm,
+    chain::ArbitrumChainInfoTr,
+    constants::{
+        COST_SCALAR_PERCENT, INITIAL_FREE_PAGES, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
+        MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
+    },
+    context::ArbitrumContextTr,
+    state::{
+        ArbState, ArbStateGetter,
+        program::{ProgramInfo, StylusParams},
+    },
+    stylus_api::StylusHandler,
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -282,8 +290,10 @@ where
                     return None;
                 }
 
-                // pageLimit := arbmath.SaturatingUSub(params.PageLimit, statedb.GetStylusPagesOpen())
-                // let page_limit = stylus_params.page_limit.saturating_sub(context.statedb().get_stylus_pages_open());
+                // pageLimit := arbmath.SaturatingUSub(params.PageLimit,
+                // statedb.GetStylusPagesOpen()) let page_limit =
+                // stylus_params.page_limit.saturating_sub(context.statedb().
+                // get_stylus_pages_open());
 
                 if let Ok((serialized, module, stylus_data, gas_cost)) = compile_stylus_bytecode(
                     &bytecode,
@@ -322,12 +332,12 @@ where
 
         let mut cached = false;
 
-        let program_info = if let Some(program_info) = context.arb_state().programs().program_info(&code_hash) {
-            cached = program_info.cached;
+        let program_info =
+            if let Some(program_info) = context.arb_state().programs().program_info(&code_hash) {
+                cached = program_info.cached;
 
-            if !context.chain().enforce_activate_stylus() {
-                
-                let program_info = ProgramInfo {
+                if !context.chain().enforce_activate_stylus() {
+                    let program_info = ProgramInfo {
                         version: stylus_config.version,
                         init_cost: stylus_data.init_cost,
                         cached_cost: stylus_data.cached_init_cost,
@@ -335,52 +345,48 @@ where
                         cached: program_info.cached,
                         asm_estimated_kb: stylus_data.asm_estimate,
                         age: 0,
-                };
-                    
-                context.arb_state().programs().save_program_info(&code_hash, &program_info);
+                    };
 
-                program_info
-                
+                    context.arb_state().programs().save_program_info(&code_hash, &program_info);
+
+                    program_info
+                } else {
+                    // if not auto-activate, require match
+                    if program_info.version != stylus_config.version
+                        || program_info.init_cost != stylus_data.init_cost
+                        || program_info.cached_cost != stylus_data.cached_init_cost
+                        || program_info.footprint != stylus_data.footprint
+                    {
+                        return Some(InterpreterAction::Return(InterpreterResult {
+                            result: InstructionResult::Revert,
+                            output: Default::default(),
+                            gas: Default::default(),
+                        }));
+                    }
+
+                    program_info
+                }
+            } else if context.chain().enforce_activate_stylus() {
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    output: Default::default(),
+                    gas: Default::default(),
+                }));
             } else {
-                // if not auto-activate, require match
-                if program_info.version != stylus_config.version
-                    || program_info.init_cost != stylus_data.init_cost
-                    || program_info.cached_cost != stylus_data.cached_init_cost
-                    || program_info.footprint != stylus_data.footprint
-                {
-                    return Some(InterpreterAction::Return(InterpreterResult {
-                        result: InstructionResult::Revert,
-                        output: Default::default(),
-                        gas: Default::default(),
-                    }));
-                } 
-                
+                let program_info = ProgramInfo {
+                    version: stylus_config.version,
+                    init_cost: stylus_data.init_cost,
+                    cached_cost: stylus_data.cached_init_cost,
+                    footprint: stylus_data.footprint,
+                    cached: !context.chain().enforce_cache_stylus(),
+                    asm_estimated_kb: stylus_data.asm_estimate,
+                    age: 0,
+                };
+
+                let _ = context.arb_state().programs().save_program_info(&code_hash, &program_info);
+
                 program_info
-            }
-        } else if context.chain().enforce_activate_stylus() {
-            return Some(InterpreterAction::Return(InterpreterResult {
-                result: InstructionResult::Revert,
-                output: Default::default(),
-                gas: Default::default(),
-            }));
-        } else {
-            let program_info = ProgramInfo {
-                version: stylus_config.version,
-                init_cost: stylus_data.init_cost,
-                cached_cost: stylus_data.cached_init_cost,
-                footprint: stylus_data.footprint,
-                cached: !context.chain().enforce_cache_stylus(),
-                asm_estimated_kb: stylus_data.asm_estimate,
-                age: 0,
             };
-
-            let _ = context.arb_state().programs().save_program_info(
-                &code_hash,
-                &program_info,
-            );
-
-            program_info
-        };
 
         // TODO: should we have a mode that only auto-caches newly deployed programs, but keep
         // existing programs as non-cached unless explicitly cached?
@@ -394,11 +400,10 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-    
+        // Store or update program info in ArbOS state
 
-         // Store or update program info in ArbOS state
-
-        let mut call_cost = stylus_call_cost(&stylus_params, stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16);
+        let mut call_cost =
+            stylus_call_cost(&stylus_params, stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16);
 
         if cached {
             call_cost += cached_gas(&program_info, &stylus_params);
@@ -406,7 +411,6 @@ where
             call_cost += init_gas(&program_info, &stylus_params);
         }
 
-        
         if !gas.record_cost(call_cost) {
             return Some(InterpreterAction::Return(InterpreterResult {
                 result: InstructionResult::OutOfGas,

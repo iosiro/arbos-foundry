@@ -59,7 +59,7 @@ where
     /// `Some(number)`.
     ///
     /// This is intended for block overrides.
-    pub  fn with_block_number_opt(mut self, number: Option<U256>) -> Self {
+    pub fn with_block_number_opt(mut self, number: Option<U256>) -> Self {
         if let Some(number) = number {
             self.block_env.set_number(number);
         }

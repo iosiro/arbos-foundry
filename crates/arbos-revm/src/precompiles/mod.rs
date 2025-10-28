@@ -3,13 +3,16 @@ use revm::{
     handler::PrecompileProvider,
     interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
     precompile::PrecompileSpecId,
-    primitives::{hardfork::SpecId, Address, Bytes},
+    primitives::{Address, Bytes, hardfork::SpecId},
 };
 
 use crate::{
+    ArbitrumContextTr,
     precompiles::{
-        arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile, extension::{ExtendedPrecompile, Precompile, Precompiles, PrecompilesContextTr}
-    }, ArbitrumContextTr
+        arb_wasm::arb_wasm_precompile,
+        arb_wasm_cache::arb_wasm_cache_precompile,
+        extension::{ExtendedPrecompile, Precompile, Precompiles, PrecompilesContextTr},
+    },
 };
 use std::sync::Arc;
 
@@ -28,7 +31,6 @@ mod arb_wasm;
 mod arb_wasm_cache;
 
 mod extension;
-
 
 pub struct ArbitrumPrecompiles<CTX: PrecompilesContextTr> {
     /// Contains precompiles for the current spec.
@@ -100,8 +102,15 @@ impl<CTX: PrecompilesContextTr> PrecompileProvider<CTX> for ArbitrumPrecompiles<
             return Ok(None);
         };
 
-        if !is_static && inputs.target_address != inputs.bytecode_address.expect("bytecode address has to be set") {
-            return Ok(Some(InterpreterResult { result: InstructionResult::Revert, output: Bytes::default(), gas: Gas::new(gas_limit) }))
+        if !is_static
+            && inputs.target_address
+                != inputs.bytecode_address.expect("bytecode address has to be set")
+        {
+            return Ok(Some(InterpreterResult {
+                result: InstructionResult::Revert,
+                output: Bytes::default(),
+                gas: Gas::new(gas_limit),
+            }));
         }
 
         // Execute the precompile

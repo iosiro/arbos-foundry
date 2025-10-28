@@ -4,12 +4,9 @@ use revm::{
     handler::PrecompileProvider,
     interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
     precompile::{PrecompileError, PrecompileFn, PrecompileId, PrecompileResult},
-    primitives::Address,
-};
-use revm::{
     primitives::{
-        Bytes, U256,
         map::{HashMap, HashSet},
+        Address, Bytes, U256,
     },
 };
 use std::sync::Arc;
@@ -276,7 +273,6 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX>> PrecompilesMap<CTX, P> {
     }
 }
 
-
 impl<CTX: ContextTr, P: PrecompileProvider<CTX> + Debug> From<P> for PrecompilesMap<CTX, P> {
     fn from(value: P) -> Self {
         Self::new(value)
@@ -339,7 +335,7 @@ where
                 }
                 CallInput::Bytes(bytes) => bytes.to_vec(),
             };
-            
+
             let precompile_result = precompile.call(PrecompileInput {
                 data: &input_bytes,
                 gas: gas_limit,
