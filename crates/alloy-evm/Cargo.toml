@@ -2,13 +2,13 @@
 name = "alloy-evm"
 description = "EVM abstraction for Alloy"
 
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-authors.workspace = true
-license.workspace = true
-homepage.workspace = true
-repository.workspace = true
+version = "0.21.1"
+edition = "2021"
+rust-version = "1.88"
+authors = ["Alloy Contributors"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/alloy-rs/alloy-evm"
+repository = "https://github.com/alloy-rs/alloy-evm"
 
 [lints]
 workspace = true
