@@ -1,7 +1,7 @@
 //! Transaction related types
 use alloy_consensus::{
-    Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, TxEip1559, TxEip2930,
-    TxEnvelope, TxLegacy, TxReceipt, Typed2718,
+    Receipt, ReceiptEnvelope, ReceiptWithBloom, Signed, TxEip1559, TxEip2930, TxEnvelope, TxLegacy,
+    TxReceipt, Typed2718,
     transaction::{
         Recovered, TxEip7702,
         eip4844::{TxEip4844, TxEip4844Variant, TxEip4844WithSidecar},
@@ -558,9 +558,7 @@ impl TryFrom<AnyRpcTransaction> for TypedTransaction {
                 TxEnvelope::Eip4844(tx) => Ok(Self::EIP4844(tx)),
                 TxEnvelope::Eip7702(tx) => Ok(Self::EIP7702(tx)),
             },
-            AnyTxEnvelope::Unknown(_) => {
-                Err(ConversionError::Custom("UnknownTxType".to_string()))
-            }
+            AnyTxEnvelope::Unknown(_) => Err(ConversionError::Custom("UnknownTxType".to_string())),
         }
     }
 }
@@ -1045,7 +1043,6 @@ impl TypedReceipt {
 
     pub fn cumulative_gas_used(&self) -> u64 {
         self.as_receipt_with_bloom().cumulative_gas_used()
-        
     }
 }
 

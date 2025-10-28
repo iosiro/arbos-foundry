@@ -1,10 +1,17 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, state::ArbStateGetter, ArbitrumContextTr};
-use crate::state::ArbState;
+use crate::{
+    ArbitrumContextTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
 
-sol!{
+sol! {
 
 /// @title Provides non-owners with info about the current chain owners.
 /// @notice Precompiled contract that exists in every Arbitrum chain at 0x000000000000000000000000000000000000006b.
@@ -64,7 +71,6 @@ interface ArbOwnerPublic {
 
 }
 
-
 pub fn arb_owner_public_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbOwnerPublic")),
@@ -83,7 +89,6 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -98,7 +103,6 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
 
     let gas = Gas::new(gas_limit);
 
-
     match selector {
         ArbOwnerPublic::isChainOwnerCall::SELECTOR => {
             let call = ArbOwnerPublic::isChainOwnerCall::abi_decode(&input).unwrap();
@@ -112,10 +116,9 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::isNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwnerPublic::isNativeTokenOwnerCall::abi_decode(&input).unwrap();
-            
 
             let is_owner = context.arb_state().native_token_owners().contains(&call.addr);
 
@@ -126,7 +129,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getAllChainOwnersCall::SELECTOR => {
             let _ = ArbOwnerPublic::getAllChainOwnersCall::abi_decode(&input).unwrap();
             let chains_owners = context.arb_state().chain_owners().all();
@@ -138,74 +141,80 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getAllNativeTokenOwnersCall::SELECTOR => {
             let _ = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_decode(&input).unwrap();
             let native_token_owners = context.arb_state().native_token_owners().all();
 
-            let output = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
+            let output = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_encode_returns(
+                &native_token_owners,
+            );
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getNetworkFeeAccountCall::SELECTOR => {
             let _ = ArbOwnerPublic::getNetworkFeeAccountCall::abi_decode(&input).unwrap();
             let network_fee_account = context.arb_state().network_fee_account().get();
 
-            let output = ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(&network_fee_account);
+            let output =
+                ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(&network_fee_account);
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getInfraFeeAccountCall::SELECTOR => {
             let _ = ArbOwnerPublic::getInfraFeeAccountCall::abi_decode(&input).unwrap();
-            let infra_fee_account = context.arb_state().infra_fee_account().get();    
-            let output = ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
+            let infra_fee_account = context.arb_state().infra_fee_account().get();
+            let output =
+                ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getBrotliCompressionLevelCall::SELECTOR => {
             let _ = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_decode(&input).unwrap();
             let compression_level = context.arb_state().brotli_compression_level().get();
-            let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(&compression_level);
+            let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(
+                &compression_level,
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwnerPublic::getScheduledUpgradeCall::SELECTOR => {
             let _ = ArbOwnerPublic::getScheduledUpgradeCall::abi_decode(&input).unwrap();
             let upgrade_version = context.arb_state().upgrade_version().get();
-            let upgrade_timestamp = context.arb_state().upgrade_timestamp().get();    
-            let output = ArbOwnerPublic::getScheduledUpgradeCall::abi_encode_returns(&ArbOwnerPublic::getScheduledUpgradeReturn{
-                arbosVersion: upgrade_version,
-                scheduledForTimestamp: upgrade_timestamp,
-            });
+            let upgrade_timestamp = context.arb_state().upgrade_timestamp().get();
+            let output = ArbOwnerPublic::getScheduledUpgradeCall::abi_encode_returns(
+                &ArbOwnerPublic::getScheduledUpgradeReturn {
+                    arbosVersion: upgrade_version,
+                    scheduledForTimestamp: upgrade_timestamp,
+                },
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
-        ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::SELECTOR => {
-           todo!()
-        },
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas,
-                output: Bytes::from("Unknown selector"),
-            }))
         }
+        ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::SELECTOR => {
+            todo!()
+        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas,
+            output: Bytes::from("Unknown selector"),
+        })),
     }
 }

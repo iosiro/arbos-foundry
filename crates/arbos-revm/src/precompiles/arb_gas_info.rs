@@ -1,9 +1,13 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
 
-sol!{
+sol! {
 /// @title Provides insight into the cost of using the chain.
 /// @notice These methods have been adjusted to account for Nitro's heavy use of calldata compression.
 /// Of note to end-users, we no longer make a distinction between non-zero and zero-valued calldata bytes.
@@ -119,7 +123,6 @@ interface ArbGasInfo {
 
 }
 
-
 pub fn arb_gas_info_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbGasInfo")),
@@ -138,7 +141,6 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -152,28 +154,28 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     match selector {
-        ArbGasInfo::getAmortizedCostCapBipsCall::SELECTOR => {},
-        ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {},
-        ArbGasInfo::getGasBacklogCall::SELECTOR => {},
-        ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {},
-        ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {},
-        ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {},
-        ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {},
-        ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {},
-        ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {},
-        ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {},
-        ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {},
-        ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {},
-        ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {},
-        ArbGasInfo::getPricesInArbGasCall::SELECTOR => {},
-        ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {},
-        ArbGasInfo::getPricesInWeiCall::SELECTOR => {},
-        ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {},
-        ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {},
-        ArbGasInfo::getPricingInertiaCall::SELECTOR => {},
-        ArbGasInfo::getL1RewardRateCall::SELECTOR => {},
-        ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {},
-        ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {},        
+        ArbGasInfo::getAmortizedCostCapBipsCall::SELECTOR => {}
+        ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {}
+        ArbGasInfo::getGasBacklogCall::SELECTOR => {}
+        ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {}
+        ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {}
+        ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {}
+        ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {}
+        ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {}
+        ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {}
+        ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {}
+        ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {}
+        ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {}
+        ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {}
+        ArbGasInfo::getPricesInArbGasCall::SELECTOR => {}
+        ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {}
+        ArbGasInfo::getPricesInWeiCall::SELECTOR => {}
+        ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {}
+        ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {}
+        ArbGasInfo::getPricingInertiaCall::SELECTOR => {}
+        ArbGasInfo::getL1RewardRateCall::SELECTOR => {}
+        ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {}
+        ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {}
         _ => {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,

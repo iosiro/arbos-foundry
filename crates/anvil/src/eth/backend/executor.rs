@@ -396,9 +396,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
             ExecutionResult::Revert { gas_used, output } => {
                 (InstructionResult::Revert, gas_used, Some(Output::Call(output)), None)
             }
-            ExecutionResult::Halt { reason, gas_used } => {
-                (reason.into(), gas_used, None, None)
-            }
+            ExecutionResult::Halt { reason, gas_used } => (reason.into(), gas_used, None, None),
         };
 
         if exit_reason == InstructionResult::OutOfGas {
@@ -443,11 +441,7 @@ fn build_logs_bloom(logs: Vec<Log>, bloom: &mut Bloom) {
 }
 
 /// Creates a database with given database and inspector.
-pub fn new_evm_with_inspector<DB, I>(
-    db: DB,
-    env: &Env,
-    inspector: I,
-) -> EitherEvm<DB, I>
+pub fn new_evm_with_inspector<DB, I>(db: DB, env: &Env, inspector: I) -> EitherEvm<DB, I>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -489,7 +483,11 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>>
+) -> EitherEvm<
+    WrapDatabaseRef<&'db DB>,
+    &'db mut I,
+    PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>,
+>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

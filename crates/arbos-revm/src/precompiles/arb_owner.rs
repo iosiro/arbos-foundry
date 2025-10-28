@@ -1,10 +1,17 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, state::ArbStateGetter, ArbitrumContextTr};
-use crate::state::ArbState;
+use crate::{
+    ArbitrumContextTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
 
-sol!{
+sol! {
 /**
  * @title Provides owners with tools for managing the rollup.
  * @notice Calls by non-owners will always revert.
@@ -249,7 +256,6 @@ interface ArbOwner {
 }
 }
 
-
 pub fn arb_owner_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbOwner")),
@@ -267,7 +273,6 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
@@ -287,38 +292,43 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let call = ArbOwner::addChainOwnerCall::abi_decode(&input).unwrap();
             context.arb_state().chain_owners().add(&call.newOwner);
 
-            let output = ArbOwner::addChainOwnerCall::abi_encode_returns(&ArbOwner::addChainOwnerReturn{});
+            let output =
+                ArbOwner::addChainOwnerCall::abi_encode_returns(&ArbOwner::addChainOwnerReturn {});
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::addNativeTokenOwnerCall::abi_decode(&input).unwrap();
             context.arb_state().native_token_owners().add(&call.newOwner);
 
-            let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(&ArbOwner::addNativeTokenOwnerReturn{});
+            let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(
+                &ArbOwner::addNativeTokenOwnerReturn {},
+            );
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::addWasmCacheManagerCall::SELECTOR => {
             let call = ArbOwner::addWasmCacheManagerCall::abi_decode(&input).unwrap();
             context.arb_state().programs().cache_managers().add(&call.manager);
 
-            let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(&ArbOwner::addWasmCacheManagerReturn{});
+            let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(
+                &ArbOwner::addWasmCacheManagerReturn {},
+            );
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::isChainOwnerCall::SELECTOR => {
             let call = ArbOwner::isChainOwnerCall::abi_decode(&input).unwrap();
 
@@ -331,10 +341,9 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::isNativeTokenOwnerCall::abi_decode(&input).unwrap();
-            
 
             let is_owner = context.arb_state().native_token_owners().contains(&call.addr);
 
@@ -345,40 +354,46 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::removeChainOwnerCall::SELECTOR => {
             let call = ArbOwner::removeChainOwnerCall::abi_decode(&input).unwrap();
             context.arb_state().chain_owners().remove(&call.ownerToRemove);
 
-            let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(&ArbOwner::removeChainOwnerReturn{});
+            let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
+                &ArbOwner::removeChainOwnerReturn {},
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::removeNativeTokenOwnerCall::abi_decode(&input).unwrap();
             context.arb_state().native_token_owners().remove(&call.ownerToRemove);
 
-            let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(&ArbOwner::removeNativeTokenOwnerReturn{});
+            let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
+                &ArbOwner::removeNativeTokenOwnerReturn {},
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
             let call = ArbOwner::removeWasmCacheManagerCall::abi_decode(&input).unwrap();
             context.arb_state().programs().cache_managers().remove(&call.manager);
 
-            let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(&ArbOwner::removeWasmCacheManagerReturn{});
+            let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
+                &ArbOwner::removeWasmCacheManagerReturn {},
+            );
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::getAllChainOwnersCall::SELECTOR => {
             let _ = ArbOwner::getAllChainOwnersCall::abi_decode(&input).unwrap();
             let chains_owners = context.arb_state().chain_owners().all();
@@ -390,25 +405,24 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
                 gas,
                 output: Bytes::from(output),
             }));
-        },
+        }
         ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
             let _ = ArbOwner::getAllNativeTokenOwnersCall::abi_decode(&input).unwrap();
             let native_token_owners = context.arb_state().native_token_owners().all();
 
-            let output = ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
+            let output =
+                ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
 
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
             }));
-        },
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas,
-                output: Bytes::from("Unknown selector"),
-            }))
         }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas,
+            output: Bytes::from("Unknown selector"),
+        })),
     }
 }

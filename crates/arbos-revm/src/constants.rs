@@ -1,4 +1,4 @@
-use revm::primitives::{address, Address};
+use revm::primitives::{Address, address};
 
 const STYLUS_EOF_MAGIC: u8 = 0xEF;
 const STYLUS_EOF_MAGIC_SUFFIX: u8 = 0xF0;
@@ -8,7 +8,7 @@ pub const STYLUS_DISCRIMINANT: &[u8] =
     &[STYLUS_EOF_MAGIC, STYLUS_EOF_MAGIC_SUFFIX, STYLUS_EOF_VERSION];
 
 pub const INITIAL_ARBOS_VERSION: u16 = 42;
-pub const INITIAL_STYLUS_VERSION: u16 = 1; 
+pub const INITIAL_STYLUS_VERSION: u16 = 1;
 pub const INITIAL_MAX_WASM_SIZE: u32 = 128 * 1024; // max decompressed wasm size (programs are also bounded by compressed size)
 pub const INITIAL_MAX_STACK_DEPTH: u32 = 4 * 65536; // 4 page stack.
 pub const INITIAL_FREE_PAGES: u16 = 2; // 2 pages come free
@@ -58,9 +58,10 @@ pub const ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY: &[u8] = &[2];
 pub const ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY: &[u8] = &[3];
 pub const ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY: &[u8] = &[4];
 
-
 pub const ARBOS_STATE_ADDRESS: Address = address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
-pub const ARBOS_BATCH_POSTER_ADDRESS: Address = address!("0xA4B000000000000000000073657175656e636572");
-pub const ARBOS_L1_PRICER_FUNDS_ADDRESS: Address = address!("0xA4B00000000000000000000000000000000000f6");
+pub const ARBOS_BATCH_POSTER_ADDRESS: Address =
+    address!("0xA4B000000000000000000073657175656e636572");
+pub const ARBOS_L1_PRICER_FUNDS_ADDRESS: Address =
+    address!("0xA4B00000000000000000000000000000000000f6");
 
 pub const ARBOS_GENESIS_TIMESTAMP: u32 = 1672531200; // January 1, 2023 00:00:00 GMT

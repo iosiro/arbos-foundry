@@ -1,10 +1,13 @@
 use alloy_sol_types::sol;
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
 
-
-sol!{
+sol! {
     /// @title Provides aggregators and their users methods for configuring how they participate in L1 aggregation.
 /// @notice Precompiled contract that exists in every Arbitrum chain at 0x000000000000000000000000000000000000006d
 interface ArbAggregator {
@@ -79,7 +82,7 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-        // decode selector
+    // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
             result: InstructionResult::Revert,

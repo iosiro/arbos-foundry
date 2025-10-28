@@ -5,8 +5,11 @@ use revm::{
     primitives::{Address, B256, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
-use crate::state::ArbState;
-use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile, state::ArbStateGetter};
+use crate::{
+    ArbitrumContextTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
 
 sol! {
 /**
@@ -117,14 +120,7 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
         ArbDebug::eventsViewCall::SELECTOR => {
             let _ = ArbDebug::eventsViewCall::abi_decode(&input).unwrap();
 
-            events(
-                context,
-                caller_address,
-                is_static,
-                gas_limit,
-                true,
-                B256::ZERO,
-            )
+            events(context, caller_address, is_static, gas_limit, true, B256::ZERO)
         }
         ArbDebug::legacyErrorCall::SELECTOR => {
             let _ = ArbDebug::legacyErrorCall::abi_decode(&input).unwrap();

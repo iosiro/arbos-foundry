@@ -57,8 +57,8 @@ where
     }
 }
 
-
-/// Storage-backed address set implemented as array-with-length at index 0. Values are left-padded B256.
+/// Storage-backed address set implemented as array-with-length at index 0. Values are left-padded
+/// B256.
 pub struct StorageBackedAddressSet<'a, CTX>(&'a mut CTX, B256)
 where
     CTX: ArbitrumContextTr;
@@ -172,7 +172,6 @@ where
     }
 }
 
-
 pub struct StorageBackedU256<'a, CTX>(&'a mut CTX, B256)
 where
     CTX: ArbitrumContextTr;
@@ -215,6 +214,10 @@ where
     }
 
     pub fn set(&mut self, value: &Address) {
-        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, self.1.into(), B256::left_padding_from(value.as_slice()).into());
+        let _ = self.0.sstore(
+            ARBOS_STATE_ADDRESS,
+            self.1.into(),
+            B256::left_padding_from(value.as_slice()).into(),
+        );
     }
 }

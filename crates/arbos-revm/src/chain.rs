@@ -1,9 +1,8 @@
 use crate::constants::{
-    INITIAL_ARBOS_VERSION, INITIAL_CACHED_COST_SCALAR, INITIAL_EXPIRY_DAYS,
-    INITIAL_FREE_PAGES, INITIAL_INIT_COST_SCALAR, INITIAL_INK_PRICE, INITIAL_KEEPALIVE_DAYS,
-    INITIAL_MAX_STACK_DEPTH, INITIAL_MAX_WASM_SIZE, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS,
-    INITIAL_PAGE_GAS, INITIAL_PAGE_LIMIT, INITIAL_PAGE_RAMP, INITIAL_RECENT_CACHE_SIZE,
-    INITIAL_STYLUS_VERSION,
+    INITIAL_ARBOS_VERSION, INITIAL_CACHED_COST_SCALAR, INITIAL_EXPIRY_DAYS, INITIAL_FREE_PAGES,
+    INITIAL_INIT_COST_SCALAR, INITIAL_INK_PRICE, INITIAL_KEEPALIVE_DAYS, INITIAL_MAX_STACK_DEPTH,
+    INITIAL_MAX_WASM_SIZE, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS, INITIAL_PAGE_GAS,
+    INITIAL_PAGE_LIMIT, INITIAL_PAGE_RAMP, INITIAL_RECENT_CACHE_SIZE, INITIAL_STYLUS_VERSION,
 };
 
 pub trait ArbitrumChainInfoTr {
@@ -24,7 +23,6 @@ pub trait ArbitrumChainInfoTr {
     fn block_cache_size(&self) -> Option<u16>;
     fn max_wasm_size(&self) -> Option<u32>;
 
-
     fn arbos_version_or_default(&self) -> u16;
     fn stylus_version_or_default(&self) -> u16;
     fn ink_price_or_default(&self) -> u32;
@@ -40,7 +38,7 @@ pub trait ArbitrumChainInfoTr {
     fn expiry_days_or_default(&self) -> u16;
     fn keepalive_days_or_default(&self) -> u16;
     fn block_cache_size_or_default(&self) -> u16;
-    fn max_wasm_size_or_default(&self) -> u32; 
+    fn max_wasm_size_or_default(&self) -> u32;
 
     fn debug_mode(&self) -> bool;
     fn enforce_activate_stylus(&self) -> bool;
@@ -135,7 +133,7 @@ impl ArbitrumChainInfoTr for ArbitrumChainInfo {
     fn max_wasm_size(&self) -> Option<u32> {
         self.max_wasm_size
     }
- 
+
     fn arbos_version_or_default(&self) -> u16 {
         self.arbos_version.unwrap_or(INITIAL_ARBOS_VERSION)
     }
@@ -210,5 +208,5 @@ impl ArbitrumChainInfoTr for ArbitrumChainInfo {
 
     fn enforce_cache_stylus(&self) -> bool {
         self.enforce_cache_stylus
-    }      
+    }
 }

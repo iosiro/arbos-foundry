@@ -11,16 +11,27 @@ use alloy_evm::{Evm, EvmEnv, precompiles::PrecompilesMap};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
+    Context, Journal,
     context::{
-        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState}, BlockEnv, CfgEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv
-    }, handler::{
-        instructions::EthInstructions, EthFrame, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult
-    }, inspector::{InspectorEvmTr, InspectorHandler}, interpreter::{
-        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok, CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome, FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory
-    }, primitives::hardfork::SpecId, Context, Journal
+        BlockEnv, CfgEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
+        result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
+    },
+    handler::{
+        EthFrame, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult, instructions::EthInstructions,
+    },
+    inspector::{InspectorEvmTr, InspectorHandler},
+    interpreter::{
+        CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome,
+        FrameInput, Gas, InstructionResult, InterpreterResult, SharedMemory,
+        interpreter::EthInterpreter, interpreter_action::FrameInit, return_ok,
+    },
+    primitives::hardfork::SpecId,
 };
 
-use arbos_revm::{chain::ArbitrumChainInfo, precompiles::ArbitrumPrecompiles, ArbitrumContext, ArbitrumEvm as RevmEvm};
+use arbos_revm::{
+    ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo,
+    precompiles::ArbitrumPrecompiles,
+};
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
@@ -50,9 +61,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
             ctx,
             inspector,
             EthInstructions::default(),
-                PrecompilesMap::new(
-        ArbitrumPrecompiles::default()
-    ),
+            PrecompilesMap::new(ArbitrumPrecompiles::default()),
         ),
     };
 
@@ -71,9 +80,7 @@ pub fn new_evm_with_existing_context<'a>(
             ctx,
             inspector,
             EthInstructions::default(),
-                PrecompilesMap::new(
-        ArbitrumPrecompiles::default()
-),
+            PrecompilesMap::new(ArbitrumPrecompiles::default()),
         ),
     };
 
@@ -106,7 +113,10 @@ pub struct FoundryEvm<'db, I: InspectorExt> {
     pub inner: RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>,
+        PrecompilesMap<
+            EthEvmContext<&'db mut dyn DatabaseExt>,
+            ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+        >,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >,
@@ -134,7 +144,10 @@ impl<I: InspectorExt> FoundryEvm<'_, I> {
 }
 
 impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
-    type Precompiles = PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>;
+    type Precompiles = PrecompilesMap<
+        EthEvmContext<&'db mut dyn DatabaseExt>,
+        ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+    >;
     type Inspector = I;
     type DB = &'db mut dyn DatabaseExt;
     type Error = EVMError<DatabaseError>;
@@ -254,7 +267,10 @@ impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
     type Evm = RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        PrecompilesMap<EthEvmContext<&'db mut dyn DatabaseExt>, ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>>,
+        PrecompilesMap<
+            EthEvmContext<&'db mut dyn DatabaseExt>,
+            ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+        >,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >;

@@ -3,6 +3,7 @@
 //! This module provides helper functions for RPC implementations, including:
 //! - Block and state overrides
 
+use crate::BlockSetter;
 use alloc::collections::BTreeMap;
 use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use alloy_rpc_types_eth::{
@@ -15,7 +16,6 @@ use revm::{
     state::{Account, AccountStatus, Bytecode, EvmStorageSlot},
     Database, DatabaseCommit,
 };
-use crate::BlockSetter;
 
 /// Errors that can occur when applying state overrides.
 #[derive(Debug, thiserror::Error)]
@@ -39,8 +39,11 @@ pub trait OverrideBlockHashes {
     fn override_block_hashes(&mut self, block_hashes: BTreeMap<u64, B256>);
 
     /// Applies the given block overrides to the env and updates overridden block hashes.
-    fn apply_block_overrides<BLOCK: BlockSetter>(&mut self, overrides: BlockOverrides, env: &mut BLOCK)
-    where
+    fn apply_block_overrides<BLOCK: BlockSetter>(
+        &mut self,
+        overrides: BlockOverrides,
+        env: &mut BLOCK,
+    ) where
         Self: Sized,
     {
         apply_block_overrides(overrides, self, env);

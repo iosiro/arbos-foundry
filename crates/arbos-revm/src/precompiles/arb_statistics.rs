@@ -1,10 +1,13 @@
-use alloy_sol_types::{sol, SolCall, SolError};
-use revm::{interpreter::{Gas, InstructionResult, InterpreterResult}, precompile::PrecompileId, primitives::{address, Address, Bytes, U256}};
+use alloy_sol_types::{SolCall, SolError, sol};
+use revm::{
+    interpreter::{Gas, InstructionResult, InterpreterResult},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
 
-use crate::{precompiles::extension::ExtendedPrecompile, ArbitrumContextTr};
+use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
 
-
-sol!{
+sol! {
 
 /// @title Deprecated - Info about the rollup just prior to the Nitro upgrade
 /// @notice Precompiled contract in every Arbitrum chain for retryable transaction related data retrieval and interactions. Exists at 0x000000000000000000000000000000000000006f
@@ -32,7 +35,6 @@ interface ArbStatistics {
 
 }
 
-
 pub fn arb_statistics_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbStatistics")),
@@ -51,7 +53,6 @@ fn arb_statistics_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {

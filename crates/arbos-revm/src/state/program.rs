@@ -1,8 +1,22 @@
-use revm::{context::{Cfg, JournalTr}, interpreter::gas::{sload_cost, sstore_cost}, primitives::{B256, U256}};
+use revm::{
+    context::{Cfg, JournalTr},
+    interpreter::gas::{sload_cost, sstore_cost},
+    primitives::{B256, U256},
+};
 
-use crate::{buffer, chain::ArbitrumChainInfoTr, constants::INITIAL_MAX_WASM_SIZE, state::types::{map_address, substorage, StorageBackedAddressSet, StorageBackedU32, StorageBackedU64}, constants::{ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY, ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY, ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_PROGRAMS_KEY}, ArbitrumContextTr};
-
-
+use crate::{
+    ArbitrumContextTr, buffer,
+    chain::ArbitrumChainInfoTr,
+    constants::{
+        ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
+        ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
+        ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY,
+        ARBOS_STATE_ADDRESS, ARBOS_STATE_PROGRAMS_KEY, INITIAL_MAX_WASM_SIZE,
+    },
+    state::types::{
+        StorageBackedAddressSet, StorageBackedU32, StorageBackedU64, map_address, substorage,
+    },
+};
 
 // stylus params type
 #[derive(Debug, Clone)]
@@ -26,7 +40,23 @@ pub struct StylusParams {
 
 impl StylusParams {
     fn zero() -> Self {
-        Self { version: 0, ink_price: 0, max_stack_depth: 0, free_pages: 0, page_gas: 0, page_ramp: 0, page_limit: 0, min_init_gas: 0, min_cached_init_gas: 0, init_cost_scalar: 0, cached_cost_scalar: 0, expiry_days: 0, keepalive_days: 0, block_cache_size: 0, max_wasm_size: 0 }
+        Self {
+            version: 0,
+            ink_price: 0,
+            max_stack_depth: 0,
+            free_pages: 0,
+            page_gas: 0,
+            page_ramp: 0,
+            page_limit: 0,
+            min_init_gas: 0,
+            min_cached_init_gas: 0,
+            init_cost_scalar: 0,
+            cached_cost_scalar: 0,
+            expiry_days: 0,
+            keepalive_days: 0,
+            block_cache_size: 0,
+            max_wasm_size: 0,
+        }
     }
 }
 
@@ -57,7 +87,6 @@ pub struct ProgramInfo {
     pub cached: bool,
 }
 
-
 pub struct Programs<'a, CTX>(&'a mut CTX, B256)
 where
     CTX: ArbitrumContextTr;
@@ -72,11 +101,21 @@ where
         Self(context, subkey)
     }
 
-    fn params_subkey(&self) -> B256 { substorage(&self.1, ARBOS_PROGRAMS_STATE_PARAMS_KEY) }
-    fn program_data_subkey(&self) -> B256 { substorage(&self.1, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY) }
-    fn module_hashes_subkey(&self) -> B256 { substorage(&self.1, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY) }
-    fn data_pricer_subkey(&self) -> B256 { substorage(&self.1, ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY) }
-    fn cache_managers_subkey(&self) -> B256 { substorage(&self.1, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY) }
+    fn params_subkey(&self) -> B256 {
+        substorage(&self.1, ARBOS_PROGRAMS_STATE_PARAMS_KEY)
+    }
+    fn program_data_subkey(&self) -> B256 {
+        substorage(&self.1, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY)
+    }
+    fn module_hashes_subkey(&self) -> B256 {
+        substorage(&self.1, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY)
+    }
+    fn data_pricer_subkey(&self) -> B256 {
+        substorage(&self.1, ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY)
+    }
+    fn cache_managers_subkey(&self) -> B256 {
+        substorage(&self.1, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY)
+    }
 
     pub fn get_module_hash(&mut self, code_hash: &B256) -> Option<B256> {
         let slot = map_address(&self.module_hashes_subkey(), code_hash);
@@ -97,9 +136,13 @@ where
         // warm account where useful
         let _ = self.0.journal_mut().warm_account(ARBOS_STATE_ADDRESS);
 
-        if let Ok(state) = self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into()) && !state.is_zero() {
+        if let Ok(state) = self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into())
+            && !state.is_zero()
+        {
             let data = state.data.to_be_bytes_vec();
-            if data.len() < 15 { return None; }
+            if data.len() < 15 {
+                return None;
+            }
             let version = u16::from_be_bytes([data[0], data[1]]);
             let init_cost = u16::from_be_bytes([data[2], data[3]]);
             let cached_cost = u16::from_be_bytes([data[4], data[5]]);
@@ -114,7 +157,11 @@ where
                 cached_cost,
                 footprint,
                 asm_estimated_kb,
-                age: self.0.timestamp().to::<u32>().saturating_sub(activated_at.saturating_sub(ARBOS_GENESIS_TIMESTAMP) * 3600),
+                age: self
+                    .0
+                    .timestamp()
+                    .to::<u32>()
+                    .saturating_sub(activated_at.saturating_sub(ARBOS_GENESIS_TIMESTAMP) * 3600),
                 cached,
             });
         }
@@ -227,23 +274,62 @@ where
 
     // data pricer
     pub fn get_data_pricer(&mut self) -> DataPricer {
-
-        let demand =  StorageBackedU32::new(self.0, map_address(&self.data_pricer_subkey(), &B256::from(U256::from(DATA_PRICER_DEMAND_OFFSET as u64)))).get();
-        let bytes_per_second = StorageBackedU32::new(self.0, map_address(&self.data_pricer_subkey(), &B256::from(U256::from(DATA_PRICER_BYTES_PER_SECOND_OFFSET as u64)))).get();
-        let last_update_time = StorageBackedU64::new(self.0, map_address(&self.data_pricer_subkey(), &B256::from(U256::from(DATA_PRICER_LAST_UPDATE_TIME_OFFSET as u64)))).get();
-        let min_price = StorageBackedU32::new(self.0, map_address(&self.data_pricer_subkey(), &B256::from(U256::from(DATA_PRICER_MIN_PRICE_OFFSET as u64)))).get();
-        let inertia = StorageBackedU32::new(self.0, map_address(&self.data_pricer_subkey(), &B256::from(U256::from(DATA_PRICER_INERTIA_OFFSET as u64)))).get();
+        let demand = StorageBackedU32::new(
+            self.0,
+            map_address(
+                &self.data_pricer_subkey(),
+                &B256::from(U256::from(DATA_PRICER_DEMAND_OFFSET as u64)),
+            ),
+        )
+        .get();
+        let bytes_per_second = StorageBackedU32::new(
+            self.0,
+            map_address(
+                &self.data_pricer_subkey(),
+                &B256::from(U256::from(DATA_PRICER_BYTES_PER_SECOND_OFFSET as u64)),
+            ),
+        )
+        .get();
+        let last_update_time = StorageBackedU64::new(
+            self.0,
+            map_address(
+                &self.data_pricer_subkey(),
+                &B256::from(U256::from(DATA_PRICER_LAST_UPDATE_TIME_OFFSET as u64)),
+            ),
+        )
+        .get();
+        let min_price = StorageBackedU32::new(
+            self.0,
+            map_address(
+                &self.data_pricer_subkey(),
+                &B256::from(U256::from(DATA_PRICER_MIN_PRICE_OFFSET as u64)),
+            ),
+        )
+        .get();
+        let inertia = StorageBackedU32::new(
+            self.0,
+            map_address(
+                &self.data_pricer_subkey(),
+                &B256::from(U256::from(DATA_PRICER_INERTIA_OFFSET as u64)),
+            ),
+        )
+        .get();
 
         DataPricer {
             demand: demand as u32,
             bytes_per_second: bytes_per_second as u32,
-            last_update_time: last_update_time,
+            last_update_time,
             min_price: min_price as u32,
             inertia: inertia as u32,
         }
     }
 
-    pub fn update_data_pricer_model(&mut self, data_price: DataPricer, temp_bytes: u32, time: u64) -> u64 {
+    pub fn update_data_pricer_model(
+        &mut self,
+        data_price: DataPricer,
+        temp_bytes: u32,
+        time: u64,
+    ) -> u64 {
         let subkey = self.data_pricer_subkey();
 
         let mut demand = data_price.demand;
@@ -258,11 +344,37 @@ where
         demand = demand.saturating_add(temp_bytes);
 
         // store updated values
-        StorageBackedU32::new(self.0, map_address(&subkey, &B256::from(U256::from(DATA_PRICER_DEMAND_OFFSET as u64)))).set(demand);
-        StorageBackedU32::new(self.0, map_address(&subkey, &B256::from(U256::from(DATA_PRICER_BYTES_PER_SECOND_OFFSET as u64)))).set(bytes_per_second);
-        StorageBackedU64::new(self.0, map_address(&subkey, &B256::from(U256::from(DATA_PRICER_LAST_UPDATE_TIME_OFFSET as u64)))).set(time);
-        StorageBackedU32::new(self.0, map_address(&subkey, &B256::from(U256::from(DATA_PRICER_MIN_PRICE_OFFSET as u64)))).set(min_price);
-        StorageBackedU32::new(self.0, map_address(&subkey, &B256::from(U256::from(DATA_PRICER_INERTIA_OFFSET as u64)))).set(inertia);
+        StorageBackedU32::new(
+            self.0,
+            map_address(&subkey, &B256::from(U256::from(DATA_PRICER_DEMAND_OFFSET as u64))),
+        )
+        .set(demand);
+        StorageBackedU32::new(
+            self.0,
+            map_address(
+                &subkey,
+                &B256::from(U256::from(DATA_PRICER_BYTES_PER_SECOND_OFFSET as u64)),
+            ),
+        )
+        .set(bytes_per_second);
+        StorageBackedU64::new(
+            self.0,
+            map_address(
+                &subkey,
+                &B256::from(U256::from(DATA_PRICER_LAST_UPDATE_TIME_OFFSET as u64)),
+            ),
+        )
+        .set(time);
+        StorageBackedU32::new(
+            self.0,
+            map_address(&subkey, &B256::from(U256::from(DATA_PRICER_MIN_PRICE_OFFSET as u64))),
+        )
+        .set(min_price);
+        StorageBackedU32::new(
+            self.0,
+            map_address(&subkey, &B256::from(U256::from(DATA_PRICER_INERTIA_OFFSET as u64))),
+        )
+        .set(inertia);
 
         let exponent = (demand as f64) / (inertia as f64);
         let multiplier = f64::exp(exponent);
@@ -273,5 +385,7 @@ where
     }
 
     // cache managers address set
-    pub fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> { StorageBackedAddressSet::new(self.0, self.cache_managers_subkey()) }
+    pub fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
+        StorageBackedAddressSet::new(self.0, self.cache_managers_subkey())
+    }
 }

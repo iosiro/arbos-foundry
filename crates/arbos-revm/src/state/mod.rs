@@ -1,6 +1,23 @@
-use revm::{context::{Host, JournalTr}, primitives::{B256, U256}};
+use revm::{
+    context::{Host, JournalTr},
+    primitives::{B256, U256},
+};
 
-use crate::{constants::{ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY}, state::{address_table::AddressTable, program::Programs, types::{map_address, substorage, StorageBackedAddress, StorageBackedAddressSet, StorageBackedU256, StorageBackedU64}}, ArbitrumContextTr};
+use crate::{
+    ArbitrumContextTr,
+    constants::{
+        ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY,
+        ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
+    },
+    state::{
+        address_table::AddressTable,
+        program::Programs,
+        types::{
+            StorageBackedAddress, StorageBackedAddressSet, StorageBackedU64, StorageBackedU256,
+            map_address, substorage,
+        },
+    },
+};
 
 pub mod address_table;
 pub mod program;
@@ -20,20 +37,20 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn programs(&mut self) -> Programs<'_, CTX>;
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
     fn native_token_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
-    fn upgrade_timestamp(&mut self) ->  StorageBackedU64<'_, CTX>;
-    fn upgrade_version(&mut self) ->  StorageBackedU64<'_, CTX>;
-    fn network_fee_account(&mut self) ->  StorageBackedAddress<'_, CTX>;
-    fn infra_fee_account(&mut self) ->  StorageBackedAddress<'_, CTX>;
-    fn chain_id(&mut self) ->  StorageBackedU256<'_, CTX>;
-    fn genesis_block_num(&mut self) ->  StorageBackedU64<'_, CTX>;
-    fn brotli_compression_level(&mut self) ->  StorageBackedU64<'_, CTX>;
-    fn native_token_enabled_time(&mut self) ->  StorageBackedU64<'_, CTX>;
+    fn upgrade_timestamp(&mut self) -> StorageBackedU64<'_, CTX>;
+    fn upgrade_version(&mut self) -> StorageBackedU64<'_, CTX>;
+    fn network_fee_account(&mut self) -> StorageBackedAddress<'_, CTX>;
+    fn infra_fee_account(&mut self) -> StorageBackedAddress<'_, CTX>;
+    fn chain_id(&mut self) -> StorageBackedU256<'_, CTX>;
+    fn genesis_block_num(&mut self) -> StorageBackedU64<'_, CTX>;
+    fn brotli_compression_level(&mut self) -> StorageBackedU64<'_, CTX>;
+    fn native_token_enabled_time(&mut self) -> StorageBackedU64<'_, CTX>;
     fn address_table(&mut self) -> AddressTable<'_, CTX>;
 }
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
     type ArbStateGetterType: ArbStateGetter<CTX>;
-    fn arb_state(&'a mut self) ->  Self::ArbStateGetterType;
+    fn arb_state(&'a mut self) -> Self::ArbStateGetterType;
 }
 
 impl<'a, CTX: ArbitrumContextTr + 'a> ArbState<'a, CTX> for CTX {
@@ -57,8 +74,11 @@ impl<'a, CTX> ArbStateGetter<CTX> for ArbStateWrapper<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    fn programs(&mut self) -> Programs<'_, CTX> { 
-        self.context.journal_mut().warm_account(ARBOS_STATE_ADDRESS).expect("arbos state must exist");
+    fn programs(&mut self) -> Programs<'_, CTX> {
+        self.context
+            .journal_mut()
+            .warm_account(ARBOS_STATE_ADDRESS)
+            .expect("arbos state must exist");
         Programs::new(self.context)
     }
 
@@ -72,62 +92,83 @@ where
         StorageBackedAddressSet::new(self.context, subkey)
     }
 
-    fn upgrade_timestamp(&mut self) ->  StorageBackedU64<'_, CTX> {
+    fn upgrade_timestamp(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_UPGRADE_TIMESTAMP_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_UPGRADE_TIMESTAMP_OFFSET as u64)),
+            ),
         )
     }
 
-    fn upgrade_version(&mut self) ->  StorageBackedU64<'_, CTX> {
+    fn upgrade_version(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_UPGRADE_VERSION_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_UPGRADE_VERSION_OFFSET as u64)),
+            ),
         )
     }
 
-    fn network_fee_account(&mut self) ->  StorageBackedAddress<'_, CTX> {
+    fn network_fee_account(&mut self) -> StorageBackedAddress<'_, CTX> {
         StorageBackedAddress::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_NETWORK_FEE_ACCOUNT_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_NETWORK_FEE_ACCOUNT_OFFSET as u64)),
+            ),
         )
     }
 
-    fn infra_fee_account(&mut self) ->  StorageBackedAddress<'_, CTX> {
+    fn infra_fee_account(&mut self) -> StorageBackedAddress<'_, CTX> {
         StorageBackedAddress::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_INFRA_FEE_ACCOUNT_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_INFRA_FEE_ACCOUNT_OFFSET as u64)),
+            ),
         )
     }
 
-    fn chain_id(&mut self) ->  StorageBackedU256<'_, CTX> {
+    fn chain_id(&mut self) -> StorageBackedU256<'_, CTX> {
         StorageBackedU256::new(
             self.context,
             map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_CHAIN_ID_OFFSET as u64))),
         )
     }
 
-    fn genesis_block_num(&mut self) ->  StorageBackedU64<'_, CTX> {
+    fn genesis_block_num(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_GENESIS_BLOCK_NUM_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_GENESIS_BLOCK_NUM_OFFSET as u64)),
+            ),
         )
     }
 
-    fn brotli_compression_level(&mut self) ->  StorageBackedU64<'_, CTX> {
+    fn brotli_compression_level(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_BROTLI_COMPRESSION_LEVEL_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_BROTLI_COMPRESSION_LEVEL_OFFSET as u64)),
+            ),
         )
     }
 
-    fn native_token_enabled_time(&mut self) ->  StorageBackedU64<'_, CTX> {
+    fn native_token_enabled_time(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
-            map_address(&B256::ZERO, &B256::from(U256::from(ARBOS_STATE_NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET as u64))),
+            map_address(
+                &B256::ZERO,
+                &B256::from(U256::from(ARBOS_STATE_NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET as u64)),
+            ),
         )
     }
-    
+
     fn address_table(&mut self) -> AddressTable<'_, CTX> {
         let subkey = substorage(&B256::ZERO, ARBOS_STATE_ADDRESS_TABLE_KEY);
         AddressTable::new(self.context, subkey)
