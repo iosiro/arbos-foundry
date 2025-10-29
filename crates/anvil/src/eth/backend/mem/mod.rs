@@ -51,7 +51,7 @@ use alloy_evm::{
     Database, Evm,
     eth::EthEvmContext,
     overrides::{OverrideBlockHashes, apply_state_overrides},
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile},
 };
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
@@ -116,7 +116,6 @@ use revm::{
         result::{ExecutionResult, Output, ResultAndState},
     },
     database::{CacheDB, DbAccount, WrapDatabaseRef},
-    handler::EthPrecompiles,
     interpreter::InstructionResult,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{KECCAK_EMPTY, hardfork::SpecId},
@@ -1151,11 +1150,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<
-        WrapDatabaseRef<&'db DB>,
-        &'db mut I,
-        PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>,
-    >
+    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -2715,7 +2710,7 @@ impl Backend {
                 .transact(tx_env.clone())
                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
-            Ok(f(result.into(), cache_db, inspector, tx_env, env))
+            Ok(f(result, cache_db, inspector, tx_env, env))
         };
 
         let read_guard = self.states.upgradable_read();

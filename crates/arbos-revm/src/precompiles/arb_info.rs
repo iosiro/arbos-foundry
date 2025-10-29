@@ -52,37 +52,37 @@ fn arb_info_run<CTX: ArbitrumContextTr>(
 
     match selector {
         ArbInfo::getBalanceCall::SELECTOR => {
-            let call = ArbInfo::getBalanceCall::abi_decode(&input).unwrap();
+            let call = ArbInfo::getBalanceCall::abi_decode(input).unwrap();
 
             let balance = context.balance(call.account).unwrap_or_default().data;
 
             let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
-            }));
+            }))
         }
         ArbInfo::getCodeCall::SELECTOR => {
-            let call = ArbInfo::getCodeCall::abi_decode(&input).unwrap();
+            let call = ArbInfo::getCodeCall::abi_decode(input).unwrap();
 
             let code = context.load_account_code(call.account).unwrap_or_default().data;
 
             let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
-            }));
+            }))
         }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }

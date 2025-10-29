@@ -101,7 +101,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 }));
             }
 
-            let call = ArbNativeTokenManager::mintNativeTokenCall::abi_decode(&input).unwrap();
+            let call = ArbNativeTokenManager::mintNativeTokenCall::abi_decode(input).unwrap();
             context
                 .journal_mut()
                 .balance_incr(caller_address, call.amount)
@@ -110,11 +110,12 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
             let output = ArbNativeTokenManager::mintNativeTokenCall::abi_encode_returns(
                 &ArbNativeTokenManager::mintNativeTokenReturn {},
             );
-            return Ok(Some(InterpreterResult {
+            
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
                 output: Bytes::from(output),
-            }));
+            }))
         }
         ArbNativeTokenManager::burnNativeTokenCall::SELECTOR => {
             if !has_access(context, caller_address) {
@@ -133,7 +134,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 }));
             }
 
-            let call = ArbNativeTokenManager::burnNativeTokenCall::abi_decode(&input).unwrap();
+            let call = ArbNativeTokenManager::burnNativeTokenCall::abi_decode(input).unwrap();
             let balance = context.balance(caller_address).unwrap_or_default().data;
 
             if balance.checked_sub(call.amount).is_none() {
@@ -149,28 +150,28 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                     let output = ArbNativeTokenManager::burnNativeTokenCall::abi_encode_returns(
                         &ArbNativeTokenManager::burnNativeTokenReturn {},
                     );
-                    return Ok(Some(InterpreterResult {
+                    Ok(Some(InterpreterResult {
                         result: InstructionResult::Return,
                         gas,
                         output: Bytes::from(output),
-                    }));
+                    }))
                 }
                 Ok(Some(err)) => {
-                    return Ok(Some(InterpreterResult {
+                    Ok(Some(InterpreterResult {
                         result: err.into(),
                         gas: Gas::new(gas_limit),
                         output: Bytes::default(),
-                    }));
+                    }))
                 }
-                Err(e) => return Err(format!("transfer failed: {}", e)),
+                Err(e) => Err(format!("transfer failed: {e}")),
             }
         }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }

@@ -54,7 +54,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         error: Ok(()),
     };
     ctx.cfg.tx_chain_id_check = true;
-    let spec = ctx.cfg.spec;
+    //let spec = ctx.cfg.spec;
 
     let mut evm = FoundryEvm {
         inner: RevmEvm::new_with_inspector(
@@ -73,7 +73,7 @@ pub fn new_evm_with_existing_context<'a>(
     ctx: EthEvmContext<&'a mut dyn DatabaseExt>,
     inspector: &'a mut dyn InspectorExt,
 ) -> FoundryEvm<'a, &'a mut dyn InspectorExt> {
-    let spec = ctx.cfg.spec;
+    // let spec = ctx.cfg.spec;
 
     let mut evm = FoundryEvm {
         inner: RevmEvm::new_with_inspector(

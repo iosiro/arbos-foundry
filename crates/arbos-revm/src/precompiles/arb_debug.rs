@@ -1,4 +1,4 @@
-use alloy_sol_types::{SolCall, SolError, SolEvent, sol};
+use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
@@ -82,18 +82,18 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
 
     match selector {
         ArbDebug::becomeChainOwnerCall::SELECTOR => {
-            let _ = ArbDebug::becomeChainOwnerCall::abi_decode(&input).unwrap();
+            let _ = ArbDebug::becomeChainOwnerCall::abi_decode(input).unwrap();
 
             context.arb_state().chain_owners().add(&caller_address);
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::new(),
-            }));
+            }))
         }
         ArbDebug::eventsCall::SELECTOR => {
-            let call = ArbDebug::eventsCall::abi_decode(&input).unwrap();
+            let call = ArbDebug::eventsCall::abi_decode(input).unwrap();
 
             // TODO handle inspector mode
 
@@ -107,7 +107,7 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
                 B256::from(call.value),
             )?;
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: ArbDebug::eventsCall::abi_encode_returns(&ArbDebug::eventsReturn {
@@ -115,45 +115,45 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
                     _1: U256::from(gas_limit),
                 })
                 .into(),
-            }));
+            }))
         }
         ArbDebug::eventsViewCall::SELECTOR => {
-            let _ = ArbDebug::eventsViewCall::abi_decode(&input).unwrap();
+            let _ = ArbDebug::eventsViewCall::abi_decode(input).unwrap();
 
             events(context, caller_address, is_static, gas_limit, true, B256::ZERO)
         }
         ArbDebug::legacyErrorCall::SELECTOR => {
-            let _ = ArbDebug::legacyErrorCall::abi_decode(&input).unwrap();
+            let _ = ArbDebug::legacyErrorCall::abi_decode(input).unwrap();
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("example legacy error"),
-            }));
+            }))
         }
         ArbDebug::panicCall::SELECTOR => {
-            let _ = ArbDebug::panicCall::abi_decode(&input).unwrap();
+            let _ = ArbDebug::panicCall::abi_decode(input).unwrap();
 
             panic!("called ArbDebug's debug-only Panic method");
         }
         ArbDebug::customRevertCall::SELECTOR => {
-            let call = ArbDebug::customRevertCall::abi_decode(&input).unwrap();
+            let call = ArbDebug::customRevertCall::abi_decode(input).unwrap();
 
             let error =
                 ArbDebug::Custom::new((call.number, "example custom revert".to_string(), true));
 
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(error.abi_encode()),
-            }));
+            }))
         }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }
@@ -178,16 +178,14 @@ fn events<CTX: ArbitrumContextTr>(
 
     let log_data = ArbDebug::Basic { flag, value }.to_log_data();
     if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
-    {
-        if !gas.record_cost(gas_cost) {
+        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64) &&  !gas.record_cost(gas_cost) {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::OutOfGas,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Out of gas"),
             }));
         }
-    }
+    
 
     context.log(
         Log::new(
@@ -208,15 +206,13 @@ fn events<CTX: ArbitrumContextTr>(
     .to_log_data();
 
     if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
-    {
-        if !gas.record_cost(gas_cost) {
+        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64) && 
+        !gas.record_cost(gas_cost) {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::OutOfGas,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Out of gas"),
-            }));
-        }
+            }));        
     }
 
     context.log(
@@ -228,9 +224,9 @@ fn events<CTX: ArbitrumContextTr>(
         .unwrap(),
     );
 
-    return Ok(Some(InterpreterResult {
+    Ok(Some(InterpreterResult {
         result: InstructionResult::Return,
         gas: Gas::new(gas_limit),
         output: Bytes::default(),
-    }));
+    }))
 }

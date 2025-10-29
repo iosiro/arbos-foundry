@@ -89,8 +89,8 @@ pub enum Precompile<CTX: PrecompilesContextTr> {
 impl<CTX: PrecompilesContextTr> Clone for Precompile<CTX> {
     fn clone(&self) -> Self {
         match self {
-            Precompile::Simple(p) => Precompile::Simple(p.clone()),
-            Precompile::Extended(p) => Precompile::Extended(p.clone()),
+            Self::Simple(p) => Self::Simple(p.clone()),
+            Self::Extended(p) => Self::Extended(p.clone()),
         }
     }
 }
@@ -100,13 +100,14 @@ impl<CTX: PrecompilesContextTr> Precompile<CTX> {
     #[inline]
     pub fn address(&self) -> &Address {
         match self {
-            Precompile::Simple(p) => p.address(),
-            Precompile::Extended(p) => &p.address,
+            Self::Simple(p) => p.address(),
+            Self::Extended(p) => &p.address,
         }
     }
 
     /// Calls the precompile.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn call(
         &self,
         context: &mut CTX,
@@ -118,7 +119,7 @@ impl<CTX: PrecompilesContextTr> Precompile<CTX> {
         gas_limit: u64,
     ) -> Result<Option<InterpreterResult>, String> {
         match self {
-            Precompile::Simple(p) => {
+            Self::Simple(p) => {
                 let precompile_result = p.execute(input, gas_limit);
 
                 let mut result = InterpreterResult {
@@ -150,7 +151,7 @@ impl<CTX: PrecompilesContextTr> Precompile<CTX> {
 
                 Ok(Some(result))
             }
-            Precompile::Extended(p) => p.execute(
+            Self::Extended(p) => p.execute(
                 context,
                 input,
                 target_address,
@@ -164,6 +165,7 @@ impl<CTX: PrecompilesContextTr> Precompile<CTX> {
 }
 
 impl<CTX: PrecompilesContextTr> ExtendedPrecompile<CTX> {
+    #[allow(clippy::too_many_arguments)]
     pub fn execute(
         &self,
         context: &mut CTX,
@@ -282,7 +284,7 @@ impl<CTX: PrecompilesContextTr> Precompiles<CTX> {
     #[inline]
     pub fn extend(&mut self, other: impl IntoIterator<Item = Precompile<CTX>>) {
         let items: Vec<Precompile<CTX>> = other.into_iter().collect::<Vec<_>>();
-        for item in items.iter() {
+        for item in &items {
             if let Some(short_address) = short_address(item.address()) {
                 self.optimized_access[short_address] = Some(item.clone());
             } else {

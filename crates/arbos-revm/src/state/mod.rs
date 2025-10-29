@@ -1,5 +1,5 @@
 use revm::{
-    context::{Host, JournalTr},
+    context::JournalTr,
     primitives::{B256, U256},
 };
 
@@ -7,10 +7,13 @@ use crate::{
     ArbitrumContextTr,
     constants::{
         ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY,
-        ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
+        ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
+        ARBOS_STATE_PROGRAMS_KEY,
     },
     state::{
         address_table::AddressTable,
+        l1_pricing::L1Pricing,
+        l2_pricing::L2Pricing,
         program::Programs,
         types::{
             StorageBackedAddress, StorageBackedAddressSet, StorageBackedU64, StorageBackedU256,
@@ -20,6 +23,8 @@ use crate::{
 };
 
 pub mod address_table;
+pub mod l1_pricing;
+pub mod l2_pricing;
 pub mod program;
 mod types;
 
@@ -46,6 +51,8 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn brotli_compression_level(&mut self) -> StorageBackedU64<'_, CTX>;
     fn native_token_enabled_time(&mut self) -> StorageBackedU64<'_, CTX>;
     fn address_table(&mut self) -> AddressTable<'_, CTX>;
+    fn l1_pricing(&mut self) -> L1Pricing<'_, CTX>;
+    fn l2_pricing(&mut self) -> L2Pricing<'_, CTX>;
 }
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
@@ -79,7 +86,7 @@ where
             .journal_mut()
             .warm_account(ARBOS_STATE_ADDRESS)
             .expect("arbos state must exist");
-        Programs::new(self.context)
+        Programs::new(self.context, substorage(&B256::ZERO, ARBOS_STATE_PROGRAMS_KEY))
     }
 
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
@@ -172,5 +179,15 @@ where
     fn address_table(&mut self) -> AddressTable<'_, CTX> {
         let subkey = substorage(&B256::ZERO, ARBOS_STATE_ADDRESS_TABLE_KEY);
         AddressTable::new(self.context, subkey)
+    }
+
+    fn l1_pricing(&mut self) -> L1Pricing<'_, CTX> {
+        let subkey = substorage(&B256::ZERO, ARBOS_STATE_L1_PRICING_KEY);
+        L1Pricing::new(self.context, subkey)
+    }
+
+    fn l2_pricing(&mut self) -> L2Pricing<'_, CTX> {
+        let subkey = substorage(&B256::ZERO, ARBOS_STATE_L2_PRICING_KEY);
+        L2Pricing::new(self.context, subkey)
     }
 }

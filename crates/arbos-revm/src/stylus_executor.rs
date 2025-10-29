@@ -118,11 +118,11 @@ pub fn stylus_call_cost(stylus_params: &StylusParams, new: u16, open: u16, ever:
     let new_open = open.saturating_add(new);
     let new_ever = max(ever, new_open);
 
-    if new_ever < stylus_params.free_pages as u16 {
+    if new_ever < stylus_params.free_pages {
         return 0;
     }
 
-    let adding = new_open.saturating_sub(open).saturating_sub(stylus_params.free_pages as u16);
+    let adding = new_open.saturating_sub(open).saturating_sub(stylus_params.free_pages);
     let linear = (adding as u64).saturating_mul(stylus_params.page_gas as u64);
     let exp = |x: u16| -> u64 {
         if x < MEMORY_EXPONENTS.len() as u16 {
@@ -403,7 +403,7 @@ where
         // Store or update program info in ArbOS state
 
         let mut call_cost =
-            stylus_call_cost(&stylus_params, stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16);
+            stylus_call_cost(&stylus_params, stylus_data.footprint, 0, INITIAL_FREE_PAGES);
 
         if cached {
             call_cost += cached_gas(&program_info, &stylus_params);
@@ -476,6 +476,7 @@ where
 }
 
 /// Compile Stylus bytecode
+#[allow(clippy::too_many_arguments)]
 pub fn compile_stylus_bytecode(
     bytecode: &Bytes,
     code_hash: B256,
