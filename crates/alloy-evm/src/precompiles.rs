@@ -381,7 +381,7 @@ where
     }
 
     fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        Box::new(self.inner.warm_addresses().chain(self.dyn_precompiles.addresses.iter().cloned()))
+        Box::new(self.inner.warm_addresses().chain(self.dyn_precompiles.addresses.iter().copied()))
     }
 
     fn contains(&self, address: &Address) -> bool {

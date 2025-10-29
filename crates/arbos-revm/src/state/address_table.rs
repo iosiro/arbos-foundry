@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use crate::{
     ArbitrumContextTr,
     constants::ARBOS_STATE_ADDRESS,
@@ -7,7 +5,6 @@ use crate::{
 };
 use alloy_rlp::{BufMut, Decodable, Encodable, Error, Header};
 use revm::{
-    bytecode::bitvec::index,
     context::JournalTr,
     primitives::{Address, B256, Bytes, U256},
 };
@@ -51,9 +48,8 @@ where
         let by_addr = self.by_address_substorage();
         let key = B256::left_padding_from(address.as_slice());
         let slot = map_address(&by_addr, &key);
-        let v =
-            self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into()).unwrap_or_default().data;
-        v
+   
+        self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into()).unwrap_or_default().data
     }
 
     /// Register `address` if not present and return zero-based index.
@@ -149,21 +145,21 @@ where
             let item = RLPItem::Index(index); // stored as 1-based
             let mut out = Vec::new();
             item.encode(&mut out);
-            return Bytes::from(out);
+            Bytes::from(out)
         } else {
             // encode as address
             let item = RLPItem::Address(*address);
             let mut out = Vec::new();
             item.encode(&mut out);
-            return Bytes::from(out);
+            Bytes::from(out)
         }
     }
 
     pub fn decompress(&mut self, data: &[u8]) -> Result<(Address, u64), String> {
-        let mut slice = data;
+        let slice = data;
         let mut stream =
-            alloy_rlp::Rlp::new(&mut slice).map_err(|e| format!("Invalid RLP: {:?}", e))?;
-        stream.get_next::<RLPItem>().map_err(|e| format!("RLP decode error: {:?}", e)).and_then(
+            alloy_rlp::Rlp::new(slice).map_err(|e| format!("Invalid RLP: {e:?}"))?;
+        stream.get_next::<RLPItem>().map_err(|e| format!("RLP decode error: {e:?}")).and_then(
             |item| match item {
                 Some(RLPItem::Address(addr)) => Ok((addr, (data.len() - slice.len()) as u64)),
                 Some(RLPItem::Index(idx)) => {
@@ -181,10 +177,10 @@ where
 impl Encodable for RLPItem {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
-            RLPItem::Address(addr) => {
-                out.put_slice(&addr.as_slice());
+            Self::Address(addr) => {
+                out.put_slice(addr.as_slice());
             }
-            RLPItem::Index(idx) => {
+            Self::Index(idx) => {
                 out.put_u64(*idx);
             }
         }
@@ -205,8 +201,7 @@ impl Decodable for RLPItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_rlp::{Decodable, Encodable};
-    use revm::primitives::{Address, B256, hex::FromHex};
+    use revm::primitives::hex::FromHex;
 
     #[test]
     fn encode_decode_address_roundtrip() {

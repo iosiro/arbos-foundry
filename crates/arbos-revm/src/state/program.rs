@@ -11,7 +11,7 @@ use crate::{
         ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
         ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
         ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY,
-        ARBOS_STATE_ADDRESS, ARBOS_STATE_PROGRAMS_KEY, INITIAL_MAX_WASM_SIZE,
+        ARBOS_STATE_ADDRESS, INITIAL_MAX_WASM_SIZE,
     },
     state::types::{
         StorageBackedAddressSet, StorageBackedU32, StorageBackedU64, map_address, substorage,
@@ -95,9 +95,7 @@ impl<'a, CTX> Programs<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX) -> Self {
-        let root = B256::ZERO;
-        let subkey = substorage(&root, ARBOS_STATE_PROGRAMS_KEY);
+    pub fn new(context: &'a mut CTX, subkey: B256) -> Self {
         Self(context, subkey)
     }
 
@@ -195,36 +193,35 @@ where
 
         let mut params = StylusParams::zero();
 
-        if let Some(state) = self.0.sload(ARBOS_STATE_ADDRESS, slot.into()) {
-            if !state.data.is_zero() {
-                let mut data = state.data.to_be_bytes_vec();
-                params.version = buffer::take_u16(&mut data);
-                params.ink_price = buffer::take_u32(&mut data);
-                params.max_stack_depth = buffer::take_u32(&mut data);
-                params.free_pages = buffer::take_u16(&mut data);
-                params.page_gas = buffer::take_u16(&mut data);
-                params.page_limit = buffer::take_u16(&mut data);
-                params.min_init_gas = buffer::take_u8(&mut data);
-                params.min_cached_init_gas = buffer::take_u8(&mut data);
-                params.init_cost_scalar = buffer::take_u8(&mut data);
-                params.cached_cost_scalar = buffer::take_u8(&mut data);
-                params.expiry_days = buffer::take_u16(&mut data);
-                params.keepalive_days = buffer::take_u16(&mut data);
-                params.block_cache_size = buffer::take_u16(&mut data);
+        if let Some(state) = self.0.sload(ARBOS_STATE_ADDRESS, slot.into()) && !state.data.is_zero() {
+            let mut data = state.data.to_be_bytes_vec();
+            params.version = buffer::take_u16(&mut data);
+            params.ink_price = buffer::take_u32(&mut data);
+            params.max_stack_depth = buffer::take_u32(&mut data);
+            params.free_pages = buffer::take_u16(&mut data);
+            params.page_gas = buffer::take_u16(&mut data);
+            params.page_limit = buffer::take_u16(&mut data);
+            params.min_init_gas = buffer::take_u8(&mut data);
+            params.min_cached_init_gas = buffer::take_u8(&mut data);
+            params.init_cost_scalar = buffer::take_u8(&mut data);
+            params.cached_cost_scalar = buffer::take_u8(&mut data);
+            params.expiry_days = buffer::take_u16(&mut data);
+            params.keepalive_days = buffer::take_u16(&mut data);
+            params.block_cache_size = buffer::take_u16(&mut data);
 
-                if self.0.chain().arbos_version_or_default() >= 40 {
-                    params.max_wasm_size = buffer::take_u32(&mut data);
-                }
-
-                params.page_ramp = self.0.chain().page_ramp_or_default();
-
-                if params.max_wasm_size == 0 {
-                    params.max_wasm_size = INITIAL_MAX_WASM_SIZE;
-                }
-
-                return (params, gas_cost);
+            if self.0.chain().arbos_version_or_default() >= 40 {
+                params.max_wasm_size = buffer::take_u32(&mut data);
             }
+
+            params.page_ramp = self.0.chain().page_ramp_or_default();
+
+            if params.max_wasm_size == 0 {
+                params.max_wasm_size = INITIAL_MAX_WASM_SIZE;
+            }
+
+            return (params, gas_cost);
         }
+        
 
         // Load defaults
         params.version = self.0.chain().stylus_version_or_default();
@@ -379,9 +376,7 @@ where
         let exponent = (demand as f64) / (inertia as f64);
         let multiplier = f64::exp(exponent);
         let cost_per_byte = (min_price as f64 * multiplier).floor() as u64;
-        let cost_in_wei = cost_per_byte.saturating_mul(temp_bytes as u64);
-
-        cost_in_wei
+        cost_per_byte.saturating_mul(temp_bytes as u64)
     }
 
     // cache managers address set

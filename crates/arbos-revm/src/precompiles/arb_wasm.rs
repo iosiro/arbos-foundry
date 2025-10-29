@@ -18,7 +18,7 @@ use revm::{
     context::{Block, JournalTr},
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, B256, Bytes, U256, address},
+    primitives::{Address, B256, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 use std::fmt::Debug;
 use stylus::prover::programs::config::CompileConfig;
@@ -193,7 +193,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
 
     match selector {
         IArbWasm::activateProgramCall::SELECTOR => {
-            let call = IArbWasm::activateProgramCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::activateProgramCall::abi_decode(input).unwrap();
 
             if !gas.record_cost(STYLUS_ACTIVATION_FIXED_COST) {
                 return Ok(Some(InterpreterResult {
@@ -213,7 +213,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 }));
             };
 
-            let cached = if let Some(program_info) =
+            let _cached = if let Some(program_info) =
                 context.arb_state().programs().program_info(&code_hash)
             {
                 let expired = program_info.age > params.expiry_days as u32 * 24 * 60 * 60;
@@ -267,18 +267,17 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             // transfer dataFee to network account
             // refund excess to caller
 
-            if cached {
-                println!("Program was cached");
-            }
+            // if cached {
+            //     //println!("Program was cached");
+            // }
 
             let module_hash = B256::from_slice(module.hash().as_slice());
 
             // arbmath.IntToUint24(arbmath.DivCeil(info.asmEstimate, 1024))
-            let estimate_kb = (stylus_data.asm_estimate + 1023) / 1024;
+            let estimate_kb = stylus_data.asm_estimate.div_ceil(1024);
 
-            // TODO: dataFee calculation
             let data_pricer = context.arb_state().programs().get_data_pricer();
-            println!("Data pricer: {:?}", data_pricer);
+
             let timestamp = context.block().timestamp();
             let data_free = context.arb_state().programs().update_data_pricer_model(
                 data_pricer,
@@ -356,7 +355,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::codehashVersionCall::SELECTOR => {
-            let call = IArbWasm::codehashVersionCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::codehashVersionCall::abi_decode(input).unwrap();
 
             let program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
@@ -378,7 +377,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::codehashKeepaliveCall::SELECTOR => {
-            let call = IArbWasm::codehashKeepaliveCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::codehashKeepaliveCall::abi_decode(input).unwrap();
 
             let mut program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
@@ -424,9 +423,58 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 timestamp.saturating_to(),
             );
 
+            if call_value < U256::from(data_fee) {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: IArbWasm::ProgramInsufficientValue {
+                        have: call_value,
+                        want: U256::from(data_fee),
+                    }
+                    .abi_encode()
+                    .into(),
+                }));
+            }
+
+            let fee_recipient = context.arb_state().network_fee_account().get();
+
+            if let Some(error) = context
+                .journal_mut()
+                .transfer(*target_address, fee_recipient, U256::from(data_fee))
+                .unwrap()
+            {
+                return Ok(Some(InterpreterResult {
+                    result: error.into(),
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::default(),
+                }));
+            }
+
+            // refund excess
+            let refund = call_value.saturating_sub(U256::from(data_fee));
+            if let Some(error) =
+                context.journal_mut().transfer(*target_address, caller_address, refund).unwrap()
+                && !refund.is_zero()
+            {
+                return Ok(Some(InterpreterResult {
+                    result: error.into(),
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::default(),
+                }));
+            }
+
             program_info.age = 0;
 
             context.arb_state().programs().save_program_info(&call.codehash, &program_info);
+
+            let log = IArbWasm::ProgramLifetimeExtended {
+                codehash: call.codehash,
+                dataFee: U256::from(data_fee),
+            }
+            .into_log_data();
+
+            // emit ProgramLifetimeExtended
+            context.journal_mut().log(Log { address: *target_address, data: log });
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
@@ -435,7 +483,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::codehashAsmSizeCall::SELECTOR => {
-            let call = IArbWasm::codehashAsmSizeCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::codehashAsmSizeCall::abi_decode(input).unwrap();
 
             let program_info = match get_active_program(context, &call.codehash, &params) {
                 Ok(res) => res,
@@ -458,7 +506,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::programVersionCall::SELECTOR => {
-            let call = IArbWasm::programVersionCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::programVersionCall::abi_decode(input).unwrap();
 
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(call.program) {
                 code_hash.data
@@ -490,7 +538,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::programInitGasCall::SELECTOR => {
-            let call = IArbWasm::programInitGasCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::programInitGasCall::abi_decode(input).unwrap();
 
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(call.program) {
                 code_hash.data
@@ -529,7 +577,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::programMemoryFootprintCall::SELECTOR => {
-            let call = IArbWasm::programMemoryFootprintCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::programMemoryFootprintCall::abi_decode(input).unwrap();
 
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(call.program) {
                 code_hash.data
@@ -562,7 +610,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         IArbWasm::programTimeLeftCall::SELECTOR => {
-            let call = IArbWasm::programTimeLeftCall::abi_decode(&input).unwrap();
+            let call = IArbWasm::programTimeLeftCall::abi_decode(input).unwrap();
 
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(call.program) {
                 code_hash.data
@@ -708,16 +756,16 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }))
         }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }
 
-fn get_active_program<'a, CTX: ArbitrumContextTr>(
+fn get_active_program<CTX: ArbitrumContextTr>(
     context: &mut CTX,
     code_hash: &B256,
     params: &StylusParams,

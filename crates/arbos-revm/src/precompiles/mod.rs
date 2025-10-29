@@ -11,7 +11,7 @@ use crate::{
     precompiles::{
         arb_wasm::arb_wasm_precompile,
         arb_wasm_cache::arb_wasm_cache_precompile,
-        extension::{ExtendedPrecompile, Precompile, Precompiles, PrecompilesContextTr},
+        extension::{Precompile, Precompiles, PrecompilesContextTr},
     },
 };
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub struct ArbitrumPrecompiles<CTX: PrecompilesContextTr> {
 impl<CTX: PrecompilesContextTr> ArbitrumPrecompiles<CTX> {
     /// Returns addresses of the precompiles.
     pub fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
-        Box::new(self.precompiles.addresses().cloned())
+        Box::new(self.precompiles.addresses().copied())
     }
 
     /// Returns whether the address is a precompile.
@@ -65,11 +65,20 @@ impl<CTX: ArbitrumContextTr> Default for ArbitrumPrecompiles<CTX> {
         precompiles.extend([
             // Arbitrum specific precompiles can be added here
             Precompile::Extended(arb_address_table::arb_address_table_precompile::<CTX>()),
+            Precompile::Extended(arb_aggregator::arb_aggregator_precompile::<CTX>()),
+            Precompile::Extended(arb_debug::arb_debug_precompile::<CTX>()),
+            Precompile::Extended(arb_gas_info::arb_gas_info_precompile::<CTX>()),
             Precompile::Extended(arb_info::arb_info_precompile::<CTX>()),
+            Precompile::Extended(arb_native_token_manager::arb_native_token_manager_precompile::<
+                CTX,
+            >()),
+            Precompile::Extended(arb_owner_public::arb_owner_public_precompile::<CTX>()),
+            Precompile::Extended(arb_owner::arb_owner_precompile::<CTX>()),
+            Precompile::Extended(arb_retryable_tx::arb_retryable_tx_precompile::<CTX>()),
+            Precompile::Extended(arb_statistics::arb_statistics_precompile::<CTX>()),
+            Precompile::Extended(arb_sys::arb_sys_precompile::<CTX>()),
             Precompile::Extended(arb_wasm_precompile::<CTX>()),
             Precompile::Extended(arb_wasm_cache_precompile::<CTX>()),
-            Precompile::Extended(arb_owner::arb_owner_precompile::<CTX>()),
-            Precompile::Extended(arb_owner_public::arb_owner_public_precompile::<CTX>()),
         ]);
         Self { precompiles: Arc::new(precompiles), spec }
     }

@@ -1,4 +1,4 @@
-use alloy_sol_types::{SolCall, SolError, sol};
+use alloy_sol_types::sol;
 use revm::{
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
@@ -126,7 +126,7 @@ pub fn arb_retryable_tx_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompi
 /// Run the precompile with the given context and input data.
 /// Run the arb_retryable_tx precompile with the given context and input data.
 fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
+    _context: &mut CTX,
     input: &[u8],
     _target_address: &Address,
     _caller_address: Address,
@@ -148,11 +148,11 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
     match selector {
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }

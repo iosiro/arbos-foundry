@@ -1,14 +1,19 @@
-use alloy_sol_types::sol;
+use alloy_sol_types::{SolCall, sol};
 use revm::{
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
 
-use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
+use crate::{
+    ArbitrumContextTr,
+    constants::ARBOS_BATCH_POSTER_ADDRESS,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter},
+};
 
 sol! {
-    /// @title Provides aggregators and their users methods for configuring how they participate in L1 aggregation.
+/// @title Provides aggregators and their users methods for configuring how they participate in L1 aggregation.
 /// @notice Precompiled contract that exists in every Arbitrum chain at 0x000000000000000000000000000000000000006d
 interface ArbAggregator {
     /// @notice Deprecated, customization of preferred aggregator is no longer supported
@@ -74,10 +79,10 @@ pub fn arb_aggregator_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile
 /// Run the precompile with the given context and input data.
 /// Run the arb_aggregator precompile with the given context and input data.
 fn arb_aggregator_run<CTX: ArbitrumContextTr>(
-    _context: &mut CTX,
+    context: &mut CTX,
     input: &[u8],
     _target_address: &Address,
-    _caller_address: Address,
+    caller_address: Address,
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
@@ -95,12 +100,147 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     match selector {
+        ArbAggregator::addBatchPosterCall::SELECTOR => {
+            if !context.arb_state().chain_owners().contains(&caller_address) {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("must be called by chain owner"),
+                }));
+            }
+
+            let call = ArbAggregator::addBatchPosterCall::abi_decode(input).unwrap();
+
+            if context.arb_state().l1_pricing().batch_poster_table().contains(&call.newBatchPoster)
+            {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Return,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::default(),
+                }));
+            }
+
+            context
+                .arb_state()
+                .l1_pricing()
+                .batch_poster_table()
+                .add(&call.newBatchPoster, &call.newBatchPoster);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::new(),
+            }))
+        }
+        ArbAggregator::getBatchPostersCall::SELECTOR => {
+            let posters = context.arb_state().l1_pricing().batch_poster_table().all();
+
+            let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&posters);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbAggregator::getDefaultAggregatorCall::SELECTOR => {
+            let output = ArbAggregator::getDefaultAggregatorCall::abi_encode_returns(
+                &ARBOS_BATCH_POSTER_ADDRESS,
+            );
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbAggregator::getFeeCollectorCall::SELECTOR => {
+            let call = ArbAggregator::getFeeCollectorCall::abi_decode(input).unwrap();
+
+            let mut arb_state = context.arb_state();
+            let mut l1_pricing = arb_state.l1_pricing();
+            let mut batch_poster_table = l1_pricing.batch_poster_table();
+            let mut batch_poster_state = batch_poster_table.get(&call.batchPoster);
+
+            let fee_collector = batch_poster_state.pay_recipient().get();
+
+            let output = ArbAggregator::getFeeCollectorCall::abi_encode_returns(&fee_collector);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbAggregator::getPreferredAggregatorCall::SELECTOR => {
+            let output = ArbAggregator::getPreferredAggregatorCall::abi_encode_returns(
+                &ArbAggregator::getPreferredAggregatorReturn {
+                    _0: ARBOS_BATCH_POSTER_ADDRESS,
+                    _1: true,
+                },
+            );
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbAggregator::setFeeCollectorCall::SELECTOR => {
+            let call = ArbAggregator::setFeeCollectorCall::abi_decode(input).unwrap();
+
+            let is_chain_owner = { context.arb_state().chain_owners().contains(&caller_address) };
+
+            let mut arb_state = context.arb_state();
+            let mut l1_pricing = arb_state.l1_pricing();
+            let mut batch_poster_table = l1_pricing.batch_poster_table();
+            let mut batch_poster_state = batch_poster_table.get(&call.batchPoster);
+
+            let current_fee_collector = batch_poster_state.pay_recipient().get();
+
+            if caller_address != call.batchPoster
+                && caller_address != current_fee_collector
+                && !is_chain_owner
+            {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from(
+                        "only a batch poster (or its fee collector / chain owner) may change its fee collector",
+                    ),
+                }));
+            }
+
+            batch_poster_state.pay_recipient().set(&call.newFeeCollector);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::new(),
+            }))
+        }
+        ArbAggregator::getTxBaseFeeCall::SELECTOR => {
+            let output = ArbAggregator::getTxBaseFeeCall::abi_encode_returns(&U256::ZERO);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbAggregator::setTxBaseFeeCall::SELECTOR => {
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::new(),
+            }))
+        }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Function not implemented"),
-            }));
+            }))
         }
     }
 }

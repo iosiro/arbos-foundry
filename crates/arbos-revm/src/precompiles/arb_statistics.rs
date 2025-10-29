@@ -1,4 +1,4 @@
-use alloy_sol_types::{SolCall, SolError, sol};
+use alloy_sol_types::{SolCall, sol};
 use revm::{
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
@@ -66,12 +66,29 @@ fn arb_statistics_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     match selector {
+        ArbStatistics::getStatsCall::SELECTOR => {
+            let output =
+                ArbStatistics::getStatsCall::abi_encode_returns(&ArbStatistics::getStatsReturn {
+                    _0: context.block_number(),
+                    _1: U256::ZERO,
+                    _2: U256::ZERO,
+                    _3: U256::ZERO,
+                    _4: U256::ZERO,
+                    _5: U256::ZERO,
+                });
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
         _ => {
-            return Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from("Unknown function selector"),
-            }));
+            }))
         }
     }
 }

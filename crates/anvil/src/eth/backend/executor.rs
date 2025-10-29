@@ -473,9 +473,7 @@ where
         PrecompilesMap::new(eth_precompiles),
     );
 
-    let eth = EthEvm::new(eth_evm, true);
-
-    eth
+    EthEvm::new(eth_evm, true)
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -483,11 +481,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<
-    WrapDatabaseRef<&'db DB>,
-    &'db mut I,
-    PrecompilesMap<EthEvmContext<WrapDatabaseRef<&'db DB>>, EthPrecompiles>,
->
+) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

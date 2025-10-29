@@ -1,6 +1,6 @@
 use revm::{
     context::JournalTr,
-    primitives::{Address, B256, U256, keccak256},
+    primitives::{Address, B256, I256, U256, keccak256},
 };
 
 use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS};
@@ -48,7 +48,6 @@ where
     pub fn get(&mut self) -> u64 {
         let v =
             self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, self.1.into()).unwrap_or_default().data;
-        println!("StorageBackedU64 get: slot={:?} value={}", self.1, v);
         v.saturating_to()
     }
 
@@ -192,6 +191,29 @@ where
 
     pub fn set(&mut self, value: U256) {
         let _ = self.0.sstore(ARBOS_STATE_ADDRESS, self.1.into(), value);
+    }
+}
+
+pub struct StorageBackedI256<'a, CTX>(&'a mut CTX, B256)
+where
+    CTX: ArbitrumContextTr;
+
+impl<'a, CTX> StorageBackedI256<'a, CTX>
+where
+    CTX: ArbitrumContextTr,
+{
+    pub fn new(context: &'a mut CTX, slot: B256) -> Self {
+        Self(context, slot)
+    }
+
+    pub fn get(&mut self) -> I256 {
+        let v =
+            self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, self.1.into()).unwrap_or_default().data;
+        I256::from_raw(v)
+    }
+
+    pub fn set(&mut self, value: I256) {
+        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, self.1.into(), U256::from(value));
     }
 }
 
