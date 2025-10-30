@@ -755,13 +755,11 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
                 output: Bytes::from(output),
             }))
         }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown function selector"),
-            }))
-        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown function selector"),
+        })),
     }
 }
 

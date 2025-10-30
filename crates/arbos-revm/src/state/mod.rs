@@ -15,6 +15,7 @@ use crate::{
         l1_pricing::L1Pricing,
         l2_pricing::L2Pricing,
         program::Programs,
+        retryable::RetryableState,
         types::{
             StorageBackedAddress, StorageBackedAddressSet, StorageBackedU64, StorageBackedU256,
             map_address, substorage,
@@ -26,6 +27,7 @@ pub mod address_table;
 pub mod l1_pricing;
 pub mod l2_pricing;
 pub mod program;
+pub mod retryable;
 mod types;
 
 const ARBOS_STATE_VERSION_OFFSET: u8 = 0;
@@ -53,6 +55,7 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn address_table(&mut self) -> AddressTable<'_, CTX>;
     fn l1_pricing(&mut self) -> L1Pricing<'_, CTX>;
     fn l2_pricing(&mut self) -> L2Pricing<'_, CTX>;
+    fn retryable_state(&mut self) -> RetryableState<'_, CTX>;
 }
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
@@ -189,5 +192,10 @@ where
     fn l2_pricing(&mut self) -> L2Pricing<'_, CTX> {
         let subkey = substorage(&B256::ZERO, ARBOS_STATE_L2_PRICING_KEY);
         L2Pricing::new(self.context, subkey)
+    }
+
+    fn retryable_state(&mut self) -> RetryableState<'_, CTX> {
+        let subkey = substorage(&B256::ZERO, ARBOS_STATE_RETRYABLES_KEY);
+        RetryableState::new(self.context, subkey)
     }
 }

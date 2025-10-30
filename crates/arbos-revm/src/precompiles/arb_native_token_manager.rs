@@ -110,7 +110,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
             let output = ArbNativeTokenManager::mintNativeTokenCall::abi_encode_returns(
                 &ArbNativeTokenManager::mintNativeTokenReturn {},
             );
-            
+
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas,
@@ -156,23 +156,19 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                         output: Bytes::from(output),
                     }))
                 }
-                Ok(Some(err)) => {
-                    Ok(Some(InterpreterResult {
-                        result: err.into(),
-                        gas: Gas::new(gas_limit),
-                        output: Bytes::default(),
-                    }))
-                }
+                Ok(Some(err)) => Ok(Some(InterpreterResult {
+                    result: err.into(),
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::default(),
+                })),
                 Err(e) => Err(format!("transfer failed: {e}")),
             }
         }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown function selector"),
-            }))
-        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown function selector"),
+        })),
     }
 }
 

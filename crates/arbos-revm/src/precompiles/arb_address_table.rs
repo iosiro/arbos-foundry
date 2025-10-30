@@ -117,7 +117,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
 
             let output = ArbAddressTable::addressExistsCall::abi_encode_returns(&exists);
 
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -130,7 +130,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
 
             let output = ArbAddressTable::compressCall::abi_encode_returns(&compressed);
 
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -156,7 +156,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
             let output = ArbAddressTable::decompressCall::abi_encode_returns(
                 &ArbAddressTable::decompressReturn { _0: decompressed, _1: U256::from(new_offset) },
             );
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -176,7 +176,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
             };
 
             let output = ArbAddressTable::lookupCall::abi_encode_returns(&U256::from(index));
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -205,7 +205,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
             };
 
             let output = ArbAddressTable::lookupIndexCall::abi_encode_returns(&addr);
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -215,7 +215,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
             let call = ArbAddressTable::registerCall::abi_decode(input).unwrap();
             let index = context.arb_state().address_table().register(&call.addr);
             let output = ArbAddressTable::registerCall::abi_encode_returns(&U256::from(index));
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
@@ -225,18 +225,16 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
             let _ = ArbAddressTable::sizeCall::abi_decode(input).unwrap();
             let size = context.arb_state().address_table().size();
             let output = ArbAddressTable::sizeCall::abi_encode_returns(&U256::from(size));
-           Ok(Some(InterpreterResult {
+            Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
                 gas: Gas::new(gas_limit),
                 output: Bytes::from(output),
             }))
         }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown function selector"),
-            }))
-        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown function selector"),
+        })),
     }
 }

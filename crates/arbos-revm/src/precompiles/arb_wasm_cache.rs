@@ -327,13 +327,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
                 output: Bytes::from(output),
             }))
         }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown selector"),
-            }))
-        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown selector"),
+        })),
     }
 }
 

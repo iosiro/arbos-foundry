@@ -243,3 +243,186 @@ where
         );
     }
 }
+
+pub struct StorageBackedBytes<'a, CTX>(&'a mut CTX, B256)
+where
+    CTX: ArbitrumContextTr;
+
+impl<'a, CTX> StorageBackedBytes<'a, CTX>
+where
+    CTX: ArbitrumContextTr,
+{
+    pub fn new(context: &'a mut CTX, slot: B256) -> Self {
+        Self(context, slot)
+    }
+
+    pub fn get(&mut self) -> Vec<u8> {
+        let size_slot = map_address(&self.1, &B256::from(U256::from(0u64)));
+        let size = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, size_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        let mut out = Vec::with_capacity(size as usize);
+        let mut offset = 0u64;
+        while offset < size {
+            let chunk_slot = map_address(&self.1, &B256::from(U256::from(offset + 1)));
+            let chunk = self
+                .0
+                .journal_mut()
+                .sload(ARBOS_STATE_ADDRESS, chunk_slot.into())
+                .unwrap_or_default()
+                .data;
+            let chunk_bytes = chunk.to_be_bytes_vec();
+            let to_copy = std::cmp::min(size - offset, 32);
+            out.extend_from_slice(&chunk_bytes[..to_copy as usize]);
+            offset += to_copy;
+        }
+        out
+    }
+
+    pub fn set(&mut self, value: &[u8]) {
+        let size_slot = map_address(&self.1, &B256::from(U256::from(0u64)));
+        let _ =
+            self.0.sstore(ARBOS_STATE_ADDRESS, size_slot.into(), U256::from(value.len() as u64));
+        let mut offset = 0u64;
+        while offset < value.len() as u64 {
+            let chunk_slot = map_address(&self.1, &B256::from(U256::from(offset + 1)));
+            let to_copy = std::cmp::min(value.len() as u64 - offset, 32);
+            let mut chunk_bytes = [0u8; 32];
+            chunk_bytes[..to_copy as usize]
+                .copy_from_slice(&value[offset as usize..(offset + to_copy) as usize]);
+            let chunk = B256::from_slice(&chunk_bytes);
+            let _ = self.0.sstore(ARBOS_STATE_ADDRESS, chunk_slot.into(), chunk.into());
+            offset += to_copy;
+        }
+    }
+}
+
+pub struct StorageBackedQueue<'a, CTX>(&'a mut CTX, B256)
+where
+    CTX: ArbitrumContextTr;
+
+impl<'a, CTX> StorageBackedQueue<'a, CTX>
+where
+    CTX: ArbitrumContextTr,
+{
+    pub fn new(context: &'a mut CTX, slot: B256) -> Self {
+        Self(context, slot)
+    }
+
+    fn head_slot(&self) -> B256 {
+        map_address(&self.1, &B256::from(U256::from(0u64)))
+    }
+
+    fn tail_slot(&self) -> B256 {
+        map_address(&self.1, &B256::from(U256::from(1u64)))
+    }
+
+    pub fn size(&mut self) -> u64 {
+        let head = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, self.head_slot().into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        let tail = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, self.tail_slot().into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        tail.saturating_sub(head)
+    }
+
+    pub fn peek(&mut self) -> Option<U256> {
+        let head_slot = { self.head_slot() };
+
+        let tail_slot = { self.tail_slot() };
+
+        let head = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, head_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        let tail = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, tail_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        if head >= tail {
+            return None;
+        }
+        let elem_slot = map_address(&self.1, &B256::from(U256::from(head)));
+        let v = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, elem_slot.into())
+            .unwrap_or_default()
+            .data;
+        Some(v)
+    }
+
+    pub fn pop(&mut self) -> Option<U256> {
+        let head_slot = { self.head_slot() };
+
+        let tail_slot = { self.tail_slot() };
+
+        let head = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, head_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        let tail = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, tail_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        if head >= tail {
+            return None;
+        }
+        let elem_slot = map_address(&self.1, &B256::from(U256::from(head)));
+        let v = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, elem_slot.into())
+            .unwrap_or_default()
+            .data;
+
+        // increment head
+        let new_head = head.saturating_add(1);
+        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, head_slot.into(), U256::from(new_head));
+
+        Some(v)
+    }
+
+    pub fn push(&mut self, value: U256) {
+        let tail_slot = { self.tail_slot() };
+
+        let tail = self
+            .0
+            .journal_mut()
+            .sload(ARBOS_STATE_ADDRESS, tail_slot.into())
+            .unwrap_or_default()
+            .data
+            .saturating_to::<u64>();
+        let elem_slot = map_address(&self.1, &B256::from(U256::from(tail)));
+        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, elem_slot.into(), value);
+
+        // increment tail
+        let new_tail = tail.saturating_add(1);
+        let _ = self.0.sstore(ARBOS_STATE_ADDRESS, tail_slot.into(), U256::from(new_tail));
+    }
+}
