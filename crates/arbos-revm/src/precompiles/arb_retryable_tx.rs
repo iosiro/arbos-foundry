@@ -1,11 +1,24 @@
-use alloy_sol_types::sol;
+use std::ops::Div;
+
+use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
+    context::{Block, JournalTr},
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, Bytes, U256, address},
+    primitives::{
+        Address, B256, Bytes, Log, U256, address, alloy_primitives::IntoLogData, keccak256,
+    },
 };
 
-use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
+use crate::{
+    ArbitrumContextTr,
+    chain::ArbitrumChainInfoTr,
+    precompiles::extension::ExtendedPrecompile,
+    state::{ArbState, ArbStateGetter, retryable},
+};
+
+const ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60; // 1 week
+const ARBOS_STATE_RETRYABLE_REAP_PRICE: u64 = 58000;
 
 sol! {
 /**
@@ -126,10 +139,10 @@ pub fn arb_retryable_tx_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompi
 /// Run the precompile with the given context and input data.
 /// Run the arb_retryable_tx precompile with the given context and input data.
 fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
-    _context: &mut CTX,
+    context: &mut CTX,
     input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
+    target_address: &Address,
+    caller_address: Address,
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
@@ -147,12 +160,313 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
     match selector {
-        _ => {
+        ArbRetryableTx::cancelCall::SELECTOR => {
+            let call = ArbRetryableTx::cancelCall::abi_decode(input).unwrap();
+
+            let beneficiary = {
+                context.arb_state().retryable_state().retryable(call.ticketId).beneficiary().get()
+            };
+
+            if caller_address != beneficiary {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("only the beneficiary may cancel a retryable"),
+                }));
+            }
+
+            // move any funds in escrow to the beneficiary (should be none if the retry succeeded --
+            // see EndTxHook)
+            let escrow_address = { retryable_escrow_address(call.ticketId) };
+
+            let escrow_balance = context.balance(escrow_address).unwrap_or_default().data;
+
+            if !escrow_balance.is_zero() {
+                if let Some(error) = context
+                    .journal_mut()
+                    .transfer(escrow_address, beneficiary, escrow_balance)
+                    .unwrap()
+                {
+                    return Ok(Some(InterpreterResult {
+                        result: error.into(),
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::default(),
+                    }));
+                }
+            }
+
+            context.arb_state().retryable_state().retryable(call.ticketId).num_tries().set(0);
+            context.arb_state().retryable_state().retryable(call.ticketId).timeout().set(0);
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .callvalue()
+                .set(U256::ZERO);
+            context.arb_state().retryable_state().retryable(call.ticketId).to().set(&Address::ZERO);
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .from()
+                .set(&Address::ZERO);
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .calldata()
+                .set(&Bytes::new());
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .beneficiary()
+                .set(&Address::ZERO);
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .timeout_windows_left()
+                .set(0);
+
+            let output =
+                ArbRetryableTx::cancelCall::abi_encode_returns(&ArbRetryableTx::cancelReturn {});
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::getBeneficiaryCall::SELECTOR => {
+            let call = ArbRetryableTx::getBeneficiaryCall::abi_decode(input).unwrap();
+
+            let beneficiary = {
+                context.arb_state().retryable_state().retryable(call.ticketId).beneficiary().get()
+            };
+
+            if beneficiary == Address::ZERO {
+                if context.chain().arbos_version_or_default() >= 3 {
+                    let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+
+                    return Ok(Some(InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::from(output),
+                    }));
+                }
+
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("ticketId not found"),
+                }));
+            }
+
+            let output = ArbRetryableTx::getBeneficiaryCall::abi_encode_returns(&beneficiary);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::getCurrentRedeemerCall::SELECTOR => {
+            let output = ArbRetryableTx::getCurrentRedeemerCall::abi_encode_returns(&Address::ZERO);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::getLifetimeCall::SELECTOR => {
+            let output = ArbRetryableTx::getLifetimeCall::abi_encode_returns(&U256::from(
+                ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS,
+            ));
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::getTimeoutCall::SELECTOR => {
+            let call = ArbRetryableTx::getTimeoutCall::abi_decode(input).unwrap();
+
+            let timeout =
+                { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
+
+            if timeout == 0 {
+                if context.chain().arbos_version_or_default() >= 3 {
+                    let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+
+                    return Ok(Some(InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::from(output),
+                    }));
+                }
+
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("ticketId not found"),
+                }));
+            }
+
+            let output = ArbRetryableTx::getTimeoutCall::abi_encode_returns(&U256::from(timeout));
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::keepaliveCall::SELECTOR => {
+            let call = ArbRetryableTx::keepaliveCall::abi_decode(input).unwrap();
+
+            let timeout =
+                { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
+
+            if timeout == 0 {
+                if context.chain().arbos_version_or_default() >= 3 {
+                    let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+
+                    return Ok(Some(InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::from(output),
+                    }));
+                }
+
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("ticketId not found"),
+                }));
+            }
+
+            let nbytes = {
+                context
+                    .arb_state()
+                    .retryable_state()
+                    .retryable(call.ticketId)
+                    .calldata()
+                    .get()
+                    .len()
+                    .div(32)
+            };
+
+            let current_time = context.block().timestamp().saturating_to::<u64>();
+            let window = current_time + ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;
+            let windows_left = {
+                context
+                    .arb_state()
+                    .retryable_state()
+                    .retryable(call.ticketId)
+                    .timeout_windows_left()
+                    .get()
+            };
+
+            let new_timeout = timeout + windows_left * ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;
+
+            if timeout > window {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("timeout too far into the future"),
+                }));
+            }
+
+            context
+                .arb_state()
+                .retryable_state()
+                .timeout_queue()
+                .push(U256::from_be_slice(call.ticketId.as_slice()));
+
+            context
+                .arb_state()
+                .retryable_state()
+                .retryable(call.ticketId)
+                .timeout_windows_left()
+                .set(windows_left.saturating_add(1));
+
+            let log = ArbRetryableTx::LifetimeExtended {
+                ticketId: call.ticketId,
+                newTimeout: U256::from(new_timeout),
+            }
+            .into_log_data();
+
+            context.journal_mut().log(Log { address: *target_address, data: log });
+
+            let output =
+                ArbRetryableTx::keepaliveCall::abi_encode_returns(&U256::from(new_timeout));
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::redeemCall::SELECTOR => {
+            let call = ArbRetryableTx::redeemCall::abi_decode(input).unwrap();
+
+            let timeout =
+                { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
+
+            if timeout == 0 {
+                if context.chain().arbos_version_or_default() >= 3 {
+                    let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+
+                    return Ok(Some(InterpreterResult {
+                        result: InstructionResult::Revert,
+                        gas: Gas::new(gas_limit),
+                        output: Bytes::from(output),
+                    }));
+                }
+
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::from("ticketId not found"),
+                }));
+            }
+
+            // For simplicity, we do not implement redeem logic here.
+
+            let output = ArbRetryableTx::redeemCall::abi_encode_returns(&call.ticketId);
+
+            Ok(Some(InterpreterResult {
+                result: InstructionResult::Return,
+                gas: Gas::new(gas_limit),
+                output: Bytes::from(output),
+            }))
+        }
+        ArbRetryableTx::submitRetryableCall::SELECTOR => {
+            let _ = ArbRetryableTx::submitRetryableCall::abi_decode(input).unwrap();
+
+            let output = ArbRetryableTx::NotCallable {}.abi_encode();
+
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown function selector"),
+                output: Bytes::from(output),
             }))
         }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown function selector"),
+        })),
     }
+}
+
+fn retryable_escrow_address(ticket_id: B256) -> Address {
+    let mut hasher_input = Vec::with_capacity(32 + "retryable escrow".len());
+    hasher_input.extend_from_slice(b"retryable escrow");
+    hasher_input.extend_from_slice(ticket_id.as_ref());
+
+    let hash = keccak256(&hasher_input);
+    Address::from_slice(&hash[12..32])
 }

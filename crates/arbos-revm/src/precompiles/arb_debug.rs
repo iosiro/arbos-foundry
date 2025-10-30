@@ -148,13 +148,11 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
                 output: Bytes::from(error.abi_encode()),
             }))
         }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Unknown function selector"),
-            }))
-        }
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Unknown function selector"),
+        })),
     }
 }
 
@@ -178,14 +176,15 @@ fn events<CTX: ArbitrumContextTr>(
 
     let log_data = ArbDebug::Basic { flag, value }.to_log_data();
     if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64) &&  !gas.record_cost(gas_cost) {
-            return Ok(Some(InterpreterResult {
-                result: InstructionResult::OutOfGas,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Out of gas"),
-            }));
-        }
-    
+        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
+        && !gas.record_cost(gas_cost)
+    {
+        return Ok(Some(InterpreterResult {
+            result: InstructionResult::OutOfGas,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Out of gas"),
+        }));
+    }
 
     context.log(
         Log::new(
@@ -206,13 +205,14 @@ fn events<CTX: ArbitrumContextTr>(
     .to_log_data();
 
     if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64) && 
-        !gas.record_cost(gas_cost) {
-            return Ok(Some(InterpreterResult {
-                result: InstructionResult::OutOfGas,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Out of gas"),
-            }));        
+        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
+        && !gas.record_cost(gas_cost)
+    {
+        return Ok(Some(InterpreterResult {
+            result: InstructionResult::OutOfGas,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Out of gas"),
+        }));
     }
 
     context.log(

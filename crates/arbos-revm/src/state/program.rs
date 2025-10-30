@@ -193,7 +193,9 @@ where
 
         let mut params = StylusParams::zero();
 
-        if let Some(state) = self.0.sload(ARBOS_STATE_ADDRESS, slot.into()) && !state.data.is_zero() {
+        if let Some(state) = self.0.sload(ARBOS_STATE_ADDRESS, slot.into())
+            && !state.data.is_zero()
+        {
             let mut data = state.data.to_be_bytes_vec();
             params.version = buffer::take_u16(&mut data);
             params.ink_price = buffer::take_u32(&mut data);
@@ -221,7 +223,6 @@ where
 
             return (params, gas_cost);
         }
-        
 
         // Load defaults
         params.version = self.0.chain().stylus_version_or_default();

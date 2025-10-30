@@ -48,7 +48,7 @@ where
         let by_addr = self.by_address_substorage();
         let key = B256::left_padding_from(address.as_slice());
         let slot = map_address(&by_addr, &key);
-   
+
         self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into()).unwrap_or_default().data
     }
 
@@ -157,8 +157,7 @@ where
 
     pub fn decompress(&mut self, data: &[u8]) -> Result<(Address, u64), String> {
         let slice = data;
-        let mut stream =
-            alloy_rlp::Rlp::new(slice).map_err(|e| format!("Invalid RLP: {e:?}"))?;
+        let mut stream = alloy_rlp::Rlp::new(slice).map_err(|e| format!("Invalid RLP: {e:?}"))?;
         stream.get_next::<RLPItem>().map_err(|e| format!("RLP decode error: {e:?}")).and_then(
             |item| match item {
                 Some(RLPItem::Address(addr)) => Ok((addr, (data.len() - slice.len()) as u64)),

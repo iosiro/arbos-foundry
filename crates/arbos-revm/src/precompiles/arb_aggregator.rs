@@ -228,19 +228,15 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
                 output: Bytes::from(output),
             }))
         }
-        ArbAggregator::setTxBaseFeeCall::SELECTOR => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::new(),
-            }))
-        }
-        _ => {
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from("Function not implemented"),
-            }))
-        }
+        ArbAggregator::setTxBaseFeeCall::SELECTOR => Ok(Some(InterpreterResult {
+            result: InstructionResult::Return,
+            gas: Gas::new(gas_limit),
+            output: Bytes::new(),
+        })),
+        _ => Ok(Some(InterpreterResult {
+            result: InstructionResult::Revert,
+            gas: Gas::new(gas_limit),
+            output: Bytes::from("Function not implemented"),
+        })),
     }
 }
