@@ -1,13 +1,16 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
 
 use crate::{
     ArbitrumContextTr,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 
@@ -273,19 +276,14 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
-
-    let gas = Gas::new(gas_limit);
 
     match selector {
         ArbOwner::addChainOwnerCall::SELECTOR => {
@@ -295,11 +293,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbOwner::addChainOwnerCall::abi_encode_returns(&ArbOwner::addChainOwnerReturn {});
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::addNativeTokenOwnerCall::abi_decode(input).unwrap();
@@ -309,11 +303,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
                 &ArbOwner::addNativeTokenOwnerReturn {},
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::addWasmCacheManagerCall::SELECTOR => {
             let call = ArbOwner::addWasmCacheManagerCall::abi_decode(input).unwrap();
@@ -323,11 +313,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
                 &ArbOwner::addWasmCacheManagerReturn {},
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::isChainOwnerCall::SELECTOR => {
             let call = ArbOwner::isChainOwnerCall::abi_decode(input).unwrap();
@@ -336,11 +322,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwner::isChainOwnerCall::abi_encode_returns(&is_owner);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::isNativeTokenOwnerCall::abi_decode(input).unwrap();
@@ -349,11 +331,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwner::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::removeChainOwnerCall::SELECTOR => {
             let call = ArbOwner::removeChainOwnerCall::abi_decode(input).unwrap();
@@ -362,11 +340,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
                 &ArbOwner::removeChainOwnerReturn {},
             );
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwner::removeNativeTokenOwnerCall::abi_decode(input).unwrap();
@@ -375,11 +349,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
                 &ArbOwner::removeNativeTokenOwnerReturn {},
             );
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
             let call = ArbOwner::removeWasmCacheManagerCall::abi_decode(input).unwrap();
@@ -388,11 +358,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
                 &ArbOwner::removeWasmCacheManagerReturn {},
             );
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::getAllChainOwnersCall::SELECTOR => {
             let _ = ArbOwner::getAllChainOwnersCall::abi_decode(input).unwrap();
@@ -400,11 +366,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwner::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
             let _ = ArbOwner::getAllNativeTokenOwnersCall::abi_decode(input).unwrap();
@@ -413,16 +375,8 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas,
-            output: Bytes::from("Unknown selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }

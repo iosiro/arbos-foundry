@@ -37,8 +37,9 @@ mod tests {
     use std::{borrow::Cow, convert::Infallible};
 
     use crate::{PrecompileFactory, inject_custom_precompiles};
-    use alloy_evm::{EthEvm, Evm, EvmEnv, eth::EthEvmContext, precompiles::PrecompilesMap};
+    use alloy_evm::{EthEvm, Evm, EvmEnv, eth::EthEvmContext};
     use alloy_primitives::{Address, Bytes, TxKind, address};
+    use foundry_evm::core::precompiles_map::PrecompilesMap;
     use revm::{
         Journal,
         context::{CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv},

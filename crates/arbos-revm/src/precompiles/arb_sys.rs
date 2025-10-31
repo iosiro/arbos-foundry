@@ -1,12 +1,17 @@
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, B256, Bytes, FixedBytes, U256, address, fixed_bytes},
 };
 
 use crate::{
-    ArbitrumContextTr, chain::ArbitrumChainInfoTr, precompiles::extension::ExtendedPrecompile,
+    ArbitrumContextTr,
+    chain::ArbitrumChainInfoTr,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
 };
 
 sol! {
@@ -175,13 +180,10 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
@@ -191,31 +193,19 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
         ArbSys::arbBlockNumberCall::SELECTOR => {
             let output = ArbSys::arbBlockNumberCall::abi_encode_returns(&context.block_number());
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::arbChainIDCall::SELECTOR => {
             let output = ArbSys::arbChainIDCall::abi_encode_returns(&context.chain_id());
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::arbOSVersionCall::SELECTOR => {
             let output = ArbSys::arbOSVersionCall::abi_encode_returns(&U256::from(
                 context.chain().arbos_version_or_default() + 55,
             ));
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::arbBlockHashCall::SELECTOR => {
             let call = ArbSys::arbBlockHashCall::abi_decode(input).unwrap();
@@ -225,53 +215,34 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
 
             if requested_block >= current_block || requested_block + 256 < current_block {
                 if context.chain().arbos_version_or_default() >= 33 {
-                    return Ok(Some(InterpreterResult {
-                        result: InstructionResult::Revert,
-                        gas: Gas::new(gas_limit),
-                        output: Bytes::from(
-                            ArbSys::InvalidBlockNumber {
-                                requested: call.arbBlockNum,
-                                current: U256::from(current_block),
-                            }
-                            .abi_encode(),
-                        ),
-                    }));
+                    return_revert!(
+                        gas,
+                        ArbSys::InvalidBlockNumber {
+                            requested: call.arbBlockNum,
+                            current: U256::from(current_block),
+                        }
+                        .abi_encode()
+                    );
                 }
 
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from("invalid block number for ArbBlockHAsh"),
-                }));
+                return_success!(gas, Bytes::from("invalid block number for ArbBlockHAsh"));
             }
 
             let hash = context.block_hash(requested_block).unwrap_or_default();
 
             let output = ArbSys::arbBlockHashCall::abi_encode_returns(&hash);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::getStorageGasAvailableCall::SELECTOR => {
             let output = ArbSys::getStorageGasAvailableCall::abi_encode_returns(&U256::ZERO);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::isTopLevelCallCall::SELECTOR => {
             let output = ArbSys::isTopLevelCallCall::abi_encode_returns(&false);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::mapL1SenderContractAddressToL2AliasCall::SELECTOR => {
             let call = ArbSys::mapL1SenderContractAddressToL2AliasCall::abi_decode(input).unwrap();
@@ -282,36 +253,20 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
                 &aliased_address,
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::wasMyCallersAddressAliasedCall::SELECTOR => {
             let output = ArbSys::wasMyCallersAddressAliasedCall::abi_encode_returns(&false);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbSys::myCallersAddressWithoutAliasingCall::SELECTOR => {
             let address = Address::ZERO;
             let output = ArbSys::myCallersAddressWithoutAliasingCall::abi_encode_returns(&address);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Unknown function selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }
 
@@ -324,12 +279,4 @@ fn remap_l1_address(l1_addr: &Address) -> Address {
     let sum_bytes: [u8; 32] = sum.to_be_bytes();
     let aliased_bytes = &sum_bytes[12..32];
     Address::from_slice(aliased_bytes)
-}
-
-fn inverse_remap_l1_address(aliased_addr: &Address) -> Address {
-    let mut diff: U256 = U256::from_be_bytes(B256::left_padding_from(aliased_addr.as_slice()).0);
-    diff = diff.saturating_sub(U256::from_be_bytes(ADDRESS_ALIAS_OFFSET.0));
-    let diff_bytes: [u8; 32] = diff.to_be_bytes();
-    let original_bytes = &diff_bytes[12..32];
-    Address::from_slice(original_bytes)
 }
