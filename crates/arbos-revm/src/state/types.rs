@@ -322,17 +322,23 @@ where
     }
 
     pub fn size(&mut self) -> u64 {
+        let head_slot = {
+            self.head_slot()
+        };
         let head = self
             .0
             .journal_mut()
-            .sload(ARBOS_STATE_ADDRESS, self.head_slot().into())
+            .sload(ARBOS_STATE_ADDRESS, head_slot.into())
             .unwrap_or_default()
             .data
             .saturating_to::<u64>();
+        let tail_slot = {
+            self.tail_slot()
+        };
         let tail = self
             .0
             .journal_mut()
-            .sload(ARBOS_STATE_ADDRESS, self.tail_slot().into())
+            .sload(ARBOS_STATE_ADDRESS, tail_slot.into())
             .unwrap_or_default()
             .data
             .saturating_to::<u64>();
