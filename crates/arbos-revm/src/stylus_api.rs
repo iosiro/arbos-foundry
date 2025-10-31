@@ -268,7 +268,6 @@ where
                     );
                 }
 
-                gas.erase_cost(create_outcome.gas().remaining());
                 if let Some(address) = create_outcome.address {
                     gas.erase_cost(create_outcome.gas().remaining() + gas_stipend);
 
