@@ -18,18 +18,17 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
 use alloy_evm::{
-    EthEvm, Evm,
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    Evm, eth::{self, EthEvmContext}, precompiles::{DynPrecompile, Precompile, PrecompilesMap}
 };
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
+use arbos_revm::{ArbitrumEvm, config::ArbitrumConfig, local_context::ArbitrumLocalContext, precompiles::ArbitrumPrecompiles};
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{either_evm::{EitherEvm, EitherEvmContext}, precompiles::EC_RECOVER},
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
@@ -106,7 +105,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
-    pub cfg_env: CfgEnv,
+    pub cfg_env: ArbitrumConfig,
     pub parent_hash: B256,
     /// Cumulative gas used by all executed transactions
     pub gas_used: u64,
@@ -444,10 +443,10 @@ fn build_logs_bloom(logs: Vec<Log>, bloom: &mut Bloom) {
 pub fn new_evm_with_inspector<DB, I>(db: DB, env: &Env, inspector: I) -> EitherEvm<DB, I>
 where
     DB: Database<Error = DatabaseError> + Debug,
-    I: Inspector<EthEvmContext<DB>>,
+    I: Inspector<EitherEvmContext<DB>>,
 {
     let spec = env.evm_env.cfg_env.spec;
-    let eth_context = EthEvmContext {
+    let eth_context = EitherEvmContext {
         journaled_state: {
             let mut journal = Journal::new(db);
             journal.set_spec_id(spec);
@@ -457,23 +456,23 @@ where
         cfg: env.evm_env.cfg_env.clone(),
         tx: env.tx.clone(),
         chain: (),
-        local: LocalContext::default(),
+        local: ArbitrumLocalContext::default(),
         error: Ok(()),
     };
 
-    let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
-    };
+    let eth_precompiles = ArbitrumPrecompiles::default();
 
-    let eth_evm = RevmEvm::new_with_inspector(
+    let eth_evm = ArbitrumEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
         PrecompilesMap::new(eth_precompiles),
     );
 
-    EthEvm::new(eth_evm, true)
+    EitherEvm {
+        inner: eth_evm,
+        inspect: true,
+    }
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -484,7 +483,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
 ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
-    I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
+    I: Inspector<EitherEvmContext<WrapDatabaseRef<&'db DB>>>,
     WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
 {
     new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)

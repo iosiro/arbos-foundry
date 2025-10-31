@@ -14,7 +14,6 @@ use crate::{
     },
     hardfork::{ChainHardfork, ethereum_hardfork_from_block_tag, spec_id_from_ethereum_hardfork},
     mem::{self, in_memory_db::MemDb},
-    stylus::StylusConfig,
 };
 use alloy_chains::Chain;
 use alloy_consensus::BlockHeader;
@@ -30,6 +29,7 @@ use alloy_signer_local::{
 };
 use alloy_transport::TransportError;
 use anvil_server::ServerConfig;
+use arbos_revm::config::ArbitrumConfig;
 use eyre::{Context, Result};
 use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
@@ -200,8 +200,6 @@ pub struct NodeConfig {
     pub silent: bool,
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
-    /// Whether to treat stylus programs as non-cached unless explicitly cached.
-    pub stylus_config: StylusConfig,
 }
 
 impl NodeConfig {
@@ -495,7 +493,6 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
-            stylus_config: Default::default(),
         }
     }
 }
@@ -1053,13 +1050,6 @@ impl NodeConfig {
         self
     }
 
-    /// Sets whether to disable auto activation of stylus programs
-    #[must_use]
-    pub fn with_stylus_config(mut self, config: StylusConfig) -> Self {
-        self.stylus_config = config;
-        self
-    }
-
     /// Configures everything related to env, backend and database and returns the
     /// [Backend](mem::Backend)
     ///
@@ -1067,7 +1057,7 @@ impl NodeConfig {
     pub(crate) async fn setup(&mut self) -> Result<mem::Backend> {
         // configure the revm environment
 
-        let mut cfg = CfgEnv::default();
+        let mut cfg = ArbitrumConfig::default();
         cfg.spec = self.get_hardfork().into();
 
         cfg.chain_id = self.get_chain_id();

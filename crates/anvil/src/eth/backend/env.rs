@@ -1,7 +1,9 @@
 use alloy_evm::EvmEnv;
 use foundry_evm::{EnvMut, core::AsEnvMut};
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::context::{BlockEnv, TxEnv};
+
+type CfgEnv = arbos_revm::config::ArbitrumConfig;
 
 /// Helper container type for [`EvmEnv`] and [`TxEnd`].
 #[derive(Clone, Debug, Default)]

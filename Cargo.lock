@@ -1085,6 +1085,7 @@ dependencies = [
  "anvil-core",
  "anvil-rpc",
  "anvil-server",
+ "arbos-revm",
  "async-trait",
  "axum",
  "chrono",

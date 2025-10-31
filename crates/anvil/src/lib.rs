@@ -69,8 +69,6 @@ pub mod server;
 mod shutdown;
 /// additional task management
 mod tasks;
-/// stylus config
-mod stylus;
 
 /// contains cli command
 #[cfg(feature = "cmd")]
