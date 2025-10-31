@@ -124,9 +124,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
 
             let compressed = context.arb_state().address_table().compress(&call.addr);
 
-            let output = ArbAddressTable::compressCall::abi_encode_returns(&compressed);
-
-            return_success!(gas, Bytes::from(output));
+            return_success!(gas, Bytes::from(ArbAddressTable::compressCall::abi_encode_returns(&compressed)));
         }
         ArbAddressTable::decompressCall::SELECTOR => {
             let call = ArbAddressTable::decompressCall::abi_decode(input).unwrap();
@@ -145,6 +143,7 @@ fn arb_address_table_run<CTX: ArbitrumContextTr>(
 
             let (decompressed, new_offset) =
                 context.arb_state().address_table().decompress(data)?;
+                
             let output = ArbAddressTable::decompressCall::abi_encode_returns(
                 &ArbAddressTable::decompressReturn::from((decompressed, U256::from(new_offset))),
             );

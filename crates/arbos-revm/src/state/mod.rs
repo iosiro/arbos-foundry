@@ -83,6 +83,7 @@ pub struct ArbStateWrapper<'a, CTX: ArbitrumContextTr> {
 
 impl<'a, CTX: ArbitrumContextTr> ArbStateWrapper<'a, CTX> {
     pub fn new(context: &'a mut CTX) -> Self {
+        context.journal_mut().warm_account(ARBOS_STATE_ADDRESS).expect("arbos state must exist");
         ArbStateWrapper { context }
     }
 

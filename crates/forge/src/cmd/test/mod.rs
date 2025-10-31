@@ -31,7 +31,11 @@ use foundry_compilers::{
     utils::source_files_iter,
 };
 use foundry_config::{
-    Config, figment::{self, Metadata, Profile, Provider, value::{Dict, Map}},
+    Config,
+    figment::{
+        self, Metadata, Profile, Provider,
+        value::{Dict, Map},
+    },
     filter::GlobMatcher,
 };
 use foundry_debugger::Debugger;

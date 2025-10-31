@@ -49,7 +49,6 @@ use alloy_eips::{
 };
 use alloy_evm::{
     Database, Evm,
-    eth::EthEvmContext,
     overrides::{OverrideBlockHashes, apply_state_overrides},
     precompiles::{DynPrecompile, Precompile},
 };
@@ -97,7 +96,7 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{either_evm::{EitherEvm, EitherEvmContext}, precompiles::EC_RECOVER},
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -1153,7 +1152,7 @@ impl Backend {
     ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
     where
         DB: DatabaseRef + ?Sized,
-        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
+        I: Inspector<EitherEvmContext<WrapDatabaseRef<&'db DB>>>,
         WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
     {
         let mut evm = new_evm_with_inspector_ref(db, env, inspector);
@@ -2627,7 +2626,7 @@ impl Backend {
         f: F,
     ) -> Result<T, BlockchainError>
     where
-        for<'a> I: Inspector<EthEvmContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>> + 'a,
+        for<'a> I: Inspector<EitherEvmContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>> + 'a,
         for<'a> F:
             FnOnce(ResultAndState<HaltReason>, CacheDB<Box<&'a StateDb>>, I, TxEnv, Env) -> T,
     {

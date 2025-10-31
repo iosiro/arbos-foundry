@@ -1,10 +1,9 @@
 use alloy_evm::{
     Database, Evm,
-    eth::EthEvmContext,
     precompiles::{DynPrecompile, PrecompileInput},
 };
 
-use foundry_evm::core::either_evm::EitherEvm;
+use foundry_evm::core::either_evm::{EitherEvm, EitherEvmContext};
 use revm::{Inspector, precompile::Precompile};
 use std::fmt::Debug;
 
@@ -21,7 +20,7 @@ pub fn inject_custom_precompiles<DB, I>(
     precompiles: Vec<(Precompile, u64)>,
 ) where
     DB: Database,
-    I: Inspector<EthEvmContext<DB>>,
+    I: Inspector<EitherEvmContext<DB>>,
 {
     for (precompile, gas) in precompiles {
         let addr = *precompile.address();
