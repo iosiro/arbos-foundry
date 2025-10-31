@@ -14,6 +14,7 @@ use crate::{
     },
     hardfork::{ChainHardfork, ethereum_hardfork_from_block_tag, spec_id_from_ethereum_hardfork},
     mem::{self, in_memory_db::MemDb},
+    stylus::StylusConfig,
 };
 use alloy_chains::Chain;
 use alloy_consensus::BlockHeader;
@@ -199,6 +200,8 @@ pub struct NodeConfig {
     pub silent: bool,
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
+    /// Whether to treat stylus programs as non-cached unless explicitly cached.
+    pub stylus_config: StylusConfig,
 }
 
 impl NodeConfig {
@@ -492,6 +495,7 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
+            stylus_config: Default::default(),
         }
     }
 }
@@ -1046,6 +1050,13 @@ impl NodeConfig {
     #[must_use]
     pub fn with_cache_path(mut self, cache_path: Option<PathBuf>) -> Self {
         self.cache_path = cache_path;
+        self
+    }
+
+    /// Sets whether to disable auto activation of stylus programs
+    #[must_use]
+    pub fn with_stylus_config(mut self, config: StylusConfig) -> Self {
+        self.stylus_config = config;
         self
     }
 

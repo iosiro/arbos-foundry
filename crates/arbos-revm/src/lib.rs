@@ -5,11 +5,12 @@
 mod buffer;
 
 // pub mod api;
-pub mod chain;
+pub mod config;
 pub mod constants;
 pub mod context;
 pub mod evm;
 pub mod handler;
+pub mod local_context;
 pub mod inspector;
 pub mod params;
 pub mod precompiles;

@@ -180,7 +180,7 @@ trezor-client.opt-level = "z"
 
 [workspace.dependencies]
 anvil = { path = "crates/anvil" }
-arbos-revm = { path = "crates/arbos-revm" }
+arbos-revm = { path = "crates/arbos-revm", features = ["serde"] }
 alloy-evm = { path = "crates/alloy-evm" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }

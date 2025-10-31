@@ -13,7 +13,7 @@ use foundry_fork_db::DatabaseError;
 use revm::{
     Context, Journal,
     context::{
-        BlockEnv, CfgEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
+        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContextTr, TxEnv,
         result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
     },
     handler::{
@@ -29,9 +29,10 @@ use revm::{
 };
 
 use arbos_revm::{
-    ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo,
-    precompiles::ArbitrumPrecompiles,
+    ArbitrumContext, ArbitrumEvm as RevmEvm, local_context::ArbitrumLocalContext, precompiles::ArbitrumPrecompiles
 };
+
+type CfgEnv = arbos_revm::config::ArbitrumConfig;
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 
@@ -49,11 +50,11 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         block: env.evm_env.block_env,
         cfg: env.evm_env.cfg_env,
         tx: env.tx,
-        chain: ArbitrumChainInfo::default(),
-        local: LocalContext::default(),
+        chain: (),
+        local: ArbitrumLocalContext::default(),
         error: Ok(()),
     };
-    ctx.cfg.tx_chain_id_check = true;
+    ctx.cfg.inner.tx_chain_id_check = true;
     //let spec = ctx.cfg.spec;
 
     let mut evm = FoundryEvm {

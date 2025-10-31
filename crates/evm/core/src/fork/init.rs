@@ -5,7 +5,9 @@ use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::WrapErr;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::context::{BlockEnv, TxEnv};
+use arbos_revm::config::StylusConfig;
+type CfgEnv = arbos_revm::config::ArbitrumConfig;
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.
@@ -19,6 +21,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     origin: Address,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus_config: &StylusConfig,
 ) -> eyre::Result<(Env, N::BlockResponse)> {
     let block_number = if let Some(pin_block) = pin_block {
         pin_block
@@ -53,8 +56,9 @@ pub async fn environment<N: Network, P: Provider<N>>(
         memory_limit,
         disable_block_gas_limit,
         enable_tx_gas_limit,
+        stylus_config,
     );
-
+    
     let mut env = Env {
         evm_env: EvmEnv {
             cfg_env: cfg,
@@ -89,6 +93,7 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus_config: &StylusConfig,
 ) -> CfgEnv {
     let mut cfg = CfgEnv::default();
     cfg.chain_id = chain_id;
@@ -106,5 +111,6 @@ pub fn configure_env(
     if !enable_tx_gas_limit {
         cfg.tx_gas_limit_cap = Some(u64::MAX);
     }
+    cfg.stylus = stylus_config.clone();
     cfg
 }

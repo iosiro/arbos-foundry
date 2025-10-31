@@ -2,6 +2,7 @@ use crate::{
     AccountGenerator, CHAIN_ID, EthereumHardfork, NodeConfig,
     config::{DEFAULT_MNEMONIC, ForkChoice},
     eth::{EthApi, backend::db::SerializableState, pool::transactions::TransactionOrder},
+    stylus::StylusConfig,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256, utils::Unit};
@@ -196,6 +197,9 @@ pub struct NodeArgs {
     /// Path to the cache directory where states are stored.    
     #[arg(long, value_name = "PATH")]
     pub cache_path: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub stylus_config: StylusConfig,
 }
 
 #[cfg(windows)]
@@ -276,6 +280,7 @@ impl NodeArgs {
             .with_disable_pool_balance_checks(self.evm.disable_pool_balance_checks)
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
+            .with_stylus_config(self.stylus_config)
             .with_cache_path(self.cache_path))
     }
 

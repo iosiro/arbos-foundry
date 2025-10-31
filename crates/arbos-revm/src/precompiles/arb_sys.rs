@@ -6,12 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
-    chain::ArbitrumChainInfoTr,
-    precompiles::{
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, precompiles::{
         extension::ExtendedPrecompile,
         macros::{return_revert, return_success},
-    },
+    }
 };
 
 sol! {
@@ -202,7 +200,7 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
         }
         ArbSys::arbOSVersionCall::SELECTOR => {
             let output = ArbSys::arbOSVersionCall::abi_encode_returns(&U256::from(
-                context.chain().arbos_version_or_default() + 55,
+                context.cfg().stylus().arbos_version_or_default() + 55,
             ));
 
             return_success!(gas, Bytes::from(output));
@@ -214,7 +212,7 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
             let requested_block: u64 = call.arbBlockNum.saturating_to();
 
             if requested_block >= current_block || requested_block + 256 < current_block {
-                if context.chain().arbos_version_or_default() >= 33 {
+                if context.cfg().stylus().arbos_version_or_default() >= 33 {
                     return_revert!(
                         gas,
                         ArbSys::InvalidBlockNumber {
