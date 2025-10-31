@@ -1,4 +1,4 @@
-use revm::primitives::{Address, B256, U256};
+use revm::primitives::{B256, U256};
 
 use crate::{
     ArbitrumContextTr,

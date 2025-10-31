@@ -1,13 +1,16 @@
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
 
 use crate::{
     ArbitrumContextTr,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 
@@ -81,19 +84,14 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
-
-    let gas = Gas::new(gas_limit);
 
     match selector {
         ArbWasmCache::isCacheManagerCall::SELECTOR => {
@@ -104,11 +102,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             let output = ArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbWasmCache::allCacheManagersCall::SELECTOR => {
             let _call = ArbWasmCache::allCacheManagersCall::abi_decode(input).unwrap();
@@ -117,19 +111,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             let output = ArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbWasmCache::cacheCodehashCall::SELECTOR => {
             if !has_access(context) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_revert!(gas);
             }
 
             let call = ArbWasmCache::cacheCodehashCall::abi_decode(input).unwrap();
@@ -142,16 +128,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             {
                 program_info
             } else {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade {
-                        version: 0,
-                        stylusVersion: params.version,
-                    }
-                    .abi_encode()
-                    .into(),
-                }));
+                return_revert!(
+                    gas,
+                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
+                        .abi_encode()
+                );
             };
 
             let output = ArbWasmCache::cacheCodehashCall::abi_encode_returns(
@@ -160,11 +141,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             if program_info.cached {
                 // already cached, no-op
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas,
-                    output: Bytes::from(output),
-                }));
+                return_success!(gas, Bytes::from(output));
             }
 
             // TODO: burn cache cost
@@ -172,19 +149,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             context.arb_state().programs().save_program_info(&codehash, &program_info);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbWasmCache::cacheProgramCall::SELECTOR => {
             if !has_access(context) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_revert!(gas);
             }
 
             let call = ArbWasmCache::cacheProgramCall::abi_decode(input).unwrap();
@@ -195,16 +164,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
                 code_hash.data
             } else {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade {
-                        version: 0,
-                        stylusVersion: params.version,
-                    }
-                    .abi_encode()
-                    .into(),
-                }));
+                return_revert!(
+                    gas,
+                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
+                        .abi_encode()
+                );
             };
 
             let mut program_info = if let Some(program_info) =
@@ -212,16 +176,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             {
                 program_info
             } else {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade {
-                        version: 0,
-                        stylusVersion: params.version,
-                    }
-                    .abi_encode()
-                    .into(),
-                }));
+                return_revert!(
+                    gas,
+                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
+                        .abi_encode()
+                );
             };
 
             let output = ArbWasmCache::cacheProgramCall::abi_encode_returns(
@@ -230,11 +189,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             if program_info.cached {
                 // already cached, no-op
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas,
-                    output: Bytes::from(output),
-                }));
+                return_success!(gas, Bytes::from(output));
             }
 
             // TODO: burn cache cost
@@ -243,19 +198,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             context.arb_state().programs().save_program_info(&code_hash, &program_info);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbWasmCache::evictCodehashCall::SELECTOR => {
             if !has_access(context) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_revert!(gas);
             }
 
             let call = ArbWasmCache::evictCodehashCall::abi_decode(input).unwrap();
@@ -268,16 +215,11 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
             {
                 program_info
             } else {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: ArbWasmCache::ProgramNeedsUpgrade {
-                        version: 0,
-                        stylusVersion: params.version,
-                    }
-                    .abi_encode()
-                    .into(),
-                }));
+                return_revert!(
+                    gas,
+                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
+                        .abi_encode()
+                );
             };
 
             let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(
@@ -286,11 +228,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             if !program_info.cached {
                 // already not cached, no-op
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas,
-                    output: Bytes::from(output),
-                }));
+                return_success!(gas, Bytes::from(output));
             }
 
             program_info.cached = false;
@@ -301,11 +239,7 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
                 &ArbWasmCache::evictCodehashReturn {},
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbWasmCache::codehashIsCachedCall::SELECTOR => {
             let call = ArbWasmCache::codehashIsCachedCall::abi_decode(input).unwrap();
@@ -321,17 +255,9 @@ fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
 
             let output = ArbWasmCache::codehashIsCachedCall::abi_encode_returns(&is_cached);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Unknown selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }
 

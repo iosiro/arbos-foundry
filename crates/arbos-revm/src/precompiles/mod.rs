@@ -31,6 +31,7 @@ mod arb_wasm;
 mod arb_wasm_cache;
 
 mod extension;
+mod macros;
 
 pub struct ArbitrumPrecompiles<CTX: PrecompilesContextTr> {
     /// Contains precompiles for the current spec.

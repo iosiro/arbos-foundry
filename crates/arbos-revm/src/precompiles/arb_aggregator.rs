@@ -1,6 +1,6 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
@@ -8,7 +8,10 @@ use revm::{
 use crate::{
     ArbitrumContextTr,
     constants::ARBOS_BATCH_POSTER_ADDRESS,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 
@@ -87,13 +90,10 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
@@ -102,22 +102,14 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
     match selector {
         ArbAggregator::addBatchPosterCall::SELECTOR => {
             if !context.arb_state().chain_owners().contains(&caller_address) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from("must be called by chain owner"),
-                }));
+                return_revert!(gas, Bytes::from("must be called by chain owner"));
             }
 
             let call = ArbAggregator::addBatchPosterCall::abi_decode(input).unwrap();
 
             if context.arb_state().l1_pricing().batch_poster_table().contains(&call.newBatchPoster)
             {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_success!(gas, Bytes::default());
             }
 
             context
@@ -126,33 +118,21 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
                 .batch_poster_table()
                 .add(&call.newBatchPoster, &call.newBatchPoster);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::new(),
-            }))
+            return_success!(gas, Bytes::new());
         }
         ArbAggregator::getBatchPostersCall::SELECTOR => {
             let posters = context.arb_state().l1_pricing().batch_poster_table().all();
 
             let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&posters);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbAggregator::getDefaultAggregatorCall::SELECTOR => {
             let output = ArbAggregator::getDefaultAggregatorCall::abi_encode_returns(
                 &ARBOS_BATCH_POSTER_ADDRESS,
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbAggregator::getFeeCollectorCall::SELECTOR => {
             let call = ArbAggregator::getFeeCollectorCall::abi_decode(input).unwrap();
@@ -166,25 +146,17 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
 
             let output = ArbAggregator::getFeeCollectorCall::abi_encode_returns(&fee_collector);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbAggregator::getPreferredAggregatorCall::SELECTOR => {
             let output = ArbAggregator::getPreferredAggregatorCall::abi_encode_returns(
-                &ArbAggregator::getPreferredAggregatorReturn {
-                    _0: ARBOS_BATCH_POSTER_ADDRESS,
-                    _1: true,
-                },
+                &ArbAggregator::getPreferredAggregatorReturn::from((
+                    ARBOS_BATCH_POSTER_ADDRESS,
+                    true,
+                )),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbAggregator::setFeeCollectorCall::SELECTOR => {
             let call = ArbAggregator::setFeeCollectorCall::abi_decode(input).unwrap();
@@ -202,41 +174,26 @@ fn arb_aggregator_run<CTX: ArbitrumContextTr>(
                 && caller_address != current_fee_collector
                 && !is_chain_owner
             {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from(
-                        "only a batch poster (or its fee collector / chain owner) may change its fee collector",
-                    ),
-                }));
+                return_revert!(
+                    gas,
+                    Bytes::from(
+                        "only the batch poster, its fee collector, or a chain owner may change its fee collector"
+                    )
+                );
             }
 
             batch_poster_state.pay_recipient().set(&call.newFeeCollector);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::new(),
-            }))
+            return_success!(gas, Bytes::new());
         }
         ArbAggregator::getTxBaseFeeCall::SELECTOR => {
             let output = ArbAggregator::getTxBaseFeeCall::abi_encode_returns(&U256::ZERO);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        ArbAggregator::setTxBaseFeeCall::SELECTOR => Ok(Some(InterpreterResult {
-            result: InstructionResult::Return,
-            gas: Gas::new(gas_limit),
-            output: Bytes::new(),
-        })),
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Function not implemented"),
-        })),
+        ArbAggregator::setTxBaseFeeCall::SELECTOR => {
+            return_success!(gas, Bytes::new());
+        }
+        _ => return_revert!(gas, Bytes::from("Function not implemented")),
     }
 }

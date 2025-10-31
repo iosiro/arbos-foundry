@@ -1,12 +1,15 @@
 use crate::{
     ArbitrumContextTr,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{gas, return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 use alloy_sol_types::{SolCall, sol};
 use revm::{
     context::JournalTr,
-    interpreter::{Gas, InstructionResult, InterpreterResult, gas},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
@@ -56,7 +59,8 @@ pub fn arb_native_token_manager_precompile<CTX: ArbitrumContextTr>() -> Extended
     )
 }
 
-const MINT_BURN_GAS_COST: u64 = gas::WARM_STORAGE_READ_COST + gas::CALLVALUE;
+const MINT_BURN_GAS_COST: u64 =
+    revm::interpreter::gas::WARM_STORAGE_READ_COST + revm::interpreter::gas::CALLVALUE;
 
 /// Run the precompile with the given context and input data.
 /// Run the arb_native_token_manager precompile with the given context and input data.
@@ -69,16 +73,11 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
-
-    let mut gas = Gas::new(gas_limit);
 
     // decode selector
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
@@ -86,20 +85,10 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     match selector {
         ArbNativeTokenManager::mintNativeTokenCall::SELECTOR => {
             if !has_access(context, caller_address) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_revert!(gas);
             }
 
-            if !gas.record_cost(MINT_BURN_GAS_COST) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::OutOfGas,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from("Out of gas"),
-                }));
-            }
+            gas!(gas, MINT_BURN_GAS_COST);
 
             let call = ArbNativeTokenManager::mintNativeTokenCall::abi_decode(input).unwrap();
             context
@@ -111,38 +100,20 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 &ArbNativeTokenManager::mintNativeTokenReturn {},
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas,
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbNativeTokenManager::burnNativeTokenCall::SELECTOR => {
             if !has_access(context, caller_address) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::default(),
-                }));
+                return_revert!(gas);
             }
 
-            if !gas.record_cost(MINT_BURN_GAS_COST) {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::OutOfGas,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from("Out of gas"),
-                }));
-            }
+            gas!(gas, MINT_BURN_GAS_COST);
 
             let call = ArbNativeTokenManager::burnNativeTokenCall::abi_decode(input).unwrap();
             let balance = context.balance(caller_address).unwrap_or_default().data;
 
             if balance.checked_sub(call.amount).is_none() {
-                return Ok(Some(InterpreterResult {
-                    result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from("burn amount exceeds balance"),
-                }));
+                return_revert!(gas, Bytes::from("burn amount exceeds balance"));
             };
 
             match context.journal_mut().transfer(caller_address, *target_address, call.amount) {
@@ -150,25 +121,17 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                     let output = ArbNativeTokenManager::burnNativeTokenCall::abi_encode_returns(
                         &ArbNativeTokenManager::burnNativeTokenReturn {},
                     );
-                    Ok(Some(InterpreterResult {
-                        result: InstructionResult::Return,
-                        gas,
-                        output: Bytes::from(output),
-                    }))
+                    return_success!(gas, Bytes::from(output));
                 }
                 Ok(Some(err)) => Ok(Some(InterpreterResult {
                     result: err.into(),
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::default(),
                 })),
                 Err(e) => Err(format!("transfer failed: {e}")),
             }
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Unknown function selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }
 

@@ -1,7 +1,7 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
     context::Block,
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, I256, U256, address},
 };
@@ -10,7 +10,10 @@ use crate::{
     ArbitrumContextTr,
     chain::ArbitrumChainInfoTr,
     constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 
@@ -150,13 +153,10 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
@@ -171,11 +171,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 &amortized_cost_cap_bips,
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {
             let speed_limit_per_second =
@@ -184,29 +180,21 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let max_tx_gas_limit = context.arb_state().l2_pricing().per_block_gas_limit().get();
 
             let output = ArbGasInfo::getGasAccountingParamsCall::abi_encode_returns(
-                &ArbGasInfo::getGasAccountingParamsReturn {
-                    _0: U256::from(speed_limit_per_second),
-                    _1: U256::from(max_tx_gas_limit),
-                    _2: U256::from(max_tx_gas_limit),
-                },
+                &ArbGasInfo::getGasAccountingParamsReturn::from((
+                    U256::from(speed_limit_per_second),
+                    U256::from(max_tx_gas_limit),
+                    U256::from(max_tx_gas_limit),
+                )),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getGasBacklogCall::SELECTOR => {
             let gas_backlog = context.arb_state().l2_pricing().gas_backlog().get();
 
             let output = ArbGasInfo::getGasBacklogCall::abi_encode_returns(&gas_backlog);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {
             let l1_base_fee_estimate = context.arb_state().l1_pricing().price_per_unit().get();
@@ -214,11 +202,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getL1BaseFeeEstimateCall::abi_encode_returns(&l1_base_fee_estimate);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {
             let pricing_inertia = context.arb_state().l1_pricing().inertia().get();
@@ -226,22 +210,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getL1BaseFeeEstimateInertiaCall::abi_encode_returns(&pricing_inertia);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {
             let l1_fees_available = context.arb_state().l1_pricing().l1_fees_available().get();
 
             let output = ArbGasInfo::getL1FeesAvailableCall::abi_encode_returns(&l1_fees_available);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {
             let equilibration_units = context.arb_state().l1_pricing().equilibration_units().get();
@@ -250,11 +226,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 &equilibration_units,
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {
             let funds_due_for_rewards =
@@ -264,11 +236,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 &U256::from(funds_due_for_rewards),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {
             let l1_pricing_surplus = context.arb_state().l1_pricing().last_surplus().get();
@@ -276,11 +244,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getL1PricingSurplusCall::abi_encode_returns(&l1_pricing_surplus);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {
             let funds_due_for_refund =
@@ -303,11 +267,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
 
             let output = ArbGasInfo::getLastL1PricingSurplusCall::abi_encode_returns(&surplus);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {
             let last_update_time = context.arb_state().l1_pricing().last_update_time().get();
@@ -315,22 +275,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getLastL1PricingUpdateTimeCall::abi_encode_returns(&last_update_time);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {
             let minimum_gas_price = context.arb_state().l2_pricing().min_base_fee_wei().get();
 
             let output = ArbGasInfo::getMinimumGasPriceCall::abi_encode_returns(&minimum_gas_price);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {
             let per_batch_gas_charge = context.arb_state().l1_pricing().per_batch_gas_cost().get();
@@ -339,11 +291,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 &(per_batch_gas_charge as i64),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getPricesInArbGasCall::SELECTOR => {
             let l1_gas_price = { context.arb_state().l1_pricing().price_per_unit().get() };
@@ -364,18 +312,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
 
                 let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn {
-                        _0: per_l2_tx,
-                        _1: gas_for_l1_calldata,
-                        _2: U256::from(revm::interpreter::gas::SSTORE_SET),
-                    },
+                    &ArbGasInfo::getPricesInArbGasReturn::from((
+                        per_l2_tx,
+                        gas_for_l1_calldata,
+                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                    )),
                 );
 
-                Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from(output),
-                }))
+                return_success!(gas, Bytes::from(output));
             } else {
                 let wei_per_l2_tx = wei_for_l1_calldata
                     .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
@@ -388,18 +332,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 }
 
                 let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn {
-                        _0: gas_per_l2_tx,
-                        _1: gas_for_l1_calldata,
-                        _2: U256::from(revm::interpreter::gas::SSTORE_SET),
-                    },
+                    &ArbGasInfo::getPricesInArbGasReturn::from((
+                        gas_per_l2_tx,
+                        gas_for_l1_calldata,
+                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                    )),
                 );
 
-                Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from(output),
-                }))
+                return_success!(gas, Bytes::from(output));
             }
         }
         ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {
@@ -421,18 +361,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
 
                 let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn {
-                        _0: per_l2_tx,
-                        _1: gas_for_l1_calldata,
-                        _2: U256::from(revm::interpreter::gas::SSTORE_SET),
-                    },
+                    &ArbGasInfo::getPricesInArbGasReturn::from((
+                        per_l2_tx,
+                        gas_for_l1_calldata,
+                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                    )),
                 );
 
-                Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from(output),
-                }))
+                return_success!(gas, Bytes::from(output));
             } else {
                 let wei_per_l2_tx = wei_for_l1_calldata
                     .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
@@ -445,18 +381,14 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 }
 
                 let output = ArbGasInfo::getPricesInArbGasWithAggregatorCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasWithAggregatorReturn {
-                        _0: gas_per_l2_tx,
-                        _1: gas_for_l1_calldata,
-                        _2: U256::from(revm::interpreter::gas::SSTORE_SET),
-                    },
+                    &ArbGasInfo::getPricesInArbGasWithAggregatorReturn::from((
+                        gas_per_l2_tx,
+                        gas_for_l1_calldata,
+                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                    )),
                 );
 
-                Ok(Some(InterpreterResult {
-                    result: InstructionResult::Return,
-                    gas: Gas::new(gas_limit),
-                    output: Bytes::from(output),
-                }))
+                return_success!(gas, Bytes::from(output));
             }
         }
         ArbGasInfo::getPricesInWeiCall::SELECTOR => {
@@ -479,21 +411,17 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 .saturating_mul(U256::from(l2_gas_price));
 
             let output = ArbGasInfo::getPricesInWeiCall::abi_encode_returns(
-                &ArbGasInfo::getPricesInWeiReturn {
-                    _0: wei_per_l2_tx,
-                    _1: wei_for_l1_calldata,
-                    _2: wei_for_l2_storage,
-                    _3: U256::from(per_arb_gas_base),
-                    _4: per_arb_gas_congestion,
-                    _5: U256::from(per_arb_gas_total),
-                },
+                &ArbGasInfo::getPricesInWeiReturn::from((
+                    wei_per_l2_tx,
+                    wei_for_l1_calldata,
+                    wei_for_l2_storage,
+                    U256::from(per_arb_gas_base),
+                    per_arb_gas_congestion,
+                    U256::from(per_arb_gas_total),
+                )),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {
             let l1_gas_price = { context.arb_state().l1_pricing().price_per_unit().get() };
@@ -515,52 +443,36 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 .saturating_mul(U256::from(l2_gas_price));
 
             let output = ArbGasInfo::getPricesInWeiWithAggregatorCall::abi_encode_returns(
-                &ArbGasInfo::getPricesInWeiWithAggregatorReturn {
-                    _0: wei_per_l2_tx,
-                    _1: wei_for_l1_calldata,
-                    _2: wei_for_l2_storage,
-                    _3: U256::from(per_arb_gas_base),
-                    _4: per_arb_gas_congestion,
-                    _5: U256::from(per_arb_gas_total),
-                },
+                &ArbGasInfo::getPricesInWeiWithAggregatorReturn::from((
+                    wei_per_l2_tx,
+                    wei_for_l1_calldata,
+                    wei_for_l2_storage,
+                    U256::from(per_arb_gas_base),
+                    per_arb_gas_congestion,
+                    U256::from(per_arb_gas_total),
+                )),
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {
             let output = ArbGasInfo::getCurrentTxL1GasFeesCall::abi_encode_returns(&U256::ZERO);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getPricingInertiaCall::SELECTOR => {
             let pricing_inertia = context.arb_state().l2_pricing().pricing_inertia().get();
 
             let output = ArbGasInfo::getPricingInertiaCall::abi_encode_returns(&pricing_inertia);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1RewardRateCall::SELECTOR => {
             let l1_reward_rate = context.arb_state().l1_pricing().per_unit_reward().get();
 
             let output = ArbGasInfo::getL1RewardRateCall::abi_encode_returns(&l1_reward_rate);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {
             let l1_reward_recipient = context.arb_state().l1_pricing().reward_recipient().get();
@@ -568,11 +480,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getL1RewardRecipientCall::abi_encode_returns(&l1_reward_recipient);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {
             let l1_gas_price_estimate = context.arb_state().l1_pricing().price_per_unit().get();
@@ -580,16 +488,8 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbGasInfo::getL1GasPriceEstimateCall::abi_encode_returns(&l1_gas_price_estimate);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Unknown function selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }

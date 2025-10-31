@@ -1,6 +1,6 @@
 use std::{
     cmp::max,
-    mem,
+    fmt, mem,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
@@ -475,6 +475,23 @@ where
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompileStylusError {
+    InvalidCompressedPayload,
+    NotStylusProgram,
+}
+
+impl fmt::Display for CompileStylusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidCompressedPayload => f.write_str("invalid Stylus compressed payload"),
+            Self::NotStylusProgram => f.write_str("bytecode is not a Stylus program"),
+        }
+    }
+}
+
+impl std::error::Error for CompileStylusError {}
+
 /// Compile Stylus bytecode
 #[allow(clippy::too_many_arguments)]
 pub fn compile_stylus_bytecode(
@@ -485,13 +502,13 @@ pub fn compile_stylus_bytecode(
     page_limit: u16,
     debug: bool,
     gas_limit: u64,
-) -> Result<(Vec<u8>, Module, StylusData, u64), ()> {
+) -> Result<(Vec<u8>, Module, StylusData, u64), CompileStylusError> {
     if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
         let (dictionary, compressed_bytecode) =
             if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
                 (dictionary, compressed_bytecode)
             } else {
-                return Err(());
+                return Err(CompileStylusError::InvalidCompressedPayload);
             };
 
         let dictionary = match dictionary[0] {
@@ -534,7 +551,7 @@ pub fn compile_stylus_bytecode(
         return Ok((bytecode, module, stylus_data, gas_limit.saturating_sub(activation_gas)));
     }
 
-    Err(())
+    Err(CompileStylusError::NotStylusProgram)
 }
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I>

@@ -1,13 +1,16 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
 
 use crate::{
     ArbitrumContextTr,
-    precompiles::extension::ExtendedPrecompile,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
     state::{ArbState, ArbStateGetter},
 };
 
@@ -89,19 +92,14 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
     let selector: [u8; 4] = input[0..4].try_into().unwrap();
-
-    let gas = Gas::new(gas_limit);
 
     match selector {
         ArbOwnerPublic::isChainOwnerCall::SELECTOR => {
@@ -111,11 +109,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwnerPublic::isChainOwnerCall::abi_encode_returns(&is_owner);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::isNativeTokenOwnerCall::SELECTOR => {
             let call = ArbOwnerPublic::isNativeTokenOwnerCall::abi_decode(input).unwrap();
@@ -124,11 +118,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwnerPublic::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getAllChainOwnersCall::SELECTOR => {
             let _ = ArbOwnerPublic::getAllChainOwnersCall::abi_decode(input).unwrap();
@@ -136,11 +126,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
 
             let output = ArbOwnerPublic::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getAllNativeTokenOwnersCall::SELECTOR => {
             let _ = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_decode(input).unwrap();
@@ -150,11 +136,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
                 &native_token_owners,
             );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getNetworkFeeAccountCall::SELECTOR => {
             let _ = ArbOwnerPublic::getNetworkFeeAccountCall::abi_decode(input).unwrap();
@@ -163,22 +145,14 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
             let output =
                 ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(&network_fee_account);
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getInfraFeeAccountCall::SELECTOR => {
             let _ = ArbOwnerPublic::getInfraFeeAccountCall::abi_decode(input).unwrap();
             let infra_fee_account = context.arb_state().infra_fee_account().get();
             let output =
                 ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getBrotliCompressionLevelCall::SELECTOR => {
             let _ = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_decode(input).unwrap();
@@ -186,11 +160,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
             let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(
                 &compression_level,
             );
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::getScheduledUpgradeCall::SELECTOR => {
             let _ = ArbOwnerPublic::getScheduledUpgradeCall::abi_decode(input).unwrap();
@@ -202,19 +172,11 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
                     scheduledForTimestamp: upgrade_timestamp,
                 },
             );
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
         ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::SELECTOR => {
             todo!()
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas,
-            output: Bytes::from("Unknown selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }

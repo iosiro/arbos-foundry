@@ -1,11 +1,17 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
-    interpreter::{Gas, InstructionResult, InterpreterResult},
+    interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
 
-use crate::{ArbitrumContextTr, precompiles::extension::ExtendedPrecompile};
+use crate::{
+    ArbitrumContextTr,
+    precompiles::{
+        extension::ExtendedPrecompile,
+        macros::{return_revert, return_success},
+    },
+};
 
 sol! {
 
@@ -53,13 +59,10 @@ fn arb_statistics_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
-        return Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Input too short"),
-        }));
+        return_revert!(gas, Bytes::from("Input too short"));
     }
 
     // decode selector
@@ -67,26 +70,19 @@ fn arb_statistics_run<CTX: ArbitrumContextTr>(
 
     match selector {
         ArbStatistics::getStatsCall::SELECTOR => {
-            let output =
-                ArbStatistics::getStatsCall::abi_encode_returns(&ArbStatistics::getStatsReturn {
-                    _0: context.block_number(),
-                    _1: U256::ZERO,
-                    _2: U256::ZERO,
-                    _3: U256::ZERO,
-                    _4: U256::ZERO,
-                    _5: U256::ZERO,
-                });
+            let output = ArbStatistics::getStatsCall::abi_encode_returns(
+                &ArbStatistics::getStatsReturn::from((
+                    context.block_number(),
+                    U256::ZERO,
+                    U256::ZERO,
+                    U256::ZERO,
+                    U256::ZERO,
+                    U256::ZERO,
+                )),
+            );
 
-            Ok(Some(InterpreterResult {
-                result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
-                output: Bytes::from(output),
-            }))
+            return_success!(gas, Bytes::from(output));
         }
-        _ => Ok(Some(InterpreterResult {
-            result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
-            output: Bytes::from("Unknown function selector"),
-        })),
+        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }

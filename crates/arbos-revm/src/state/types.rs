@@ -322,9 +322,7 @@ where
     }
 
     pub fn size(&mut self) -> u64 {
-        let head_slot = {
-            self.head_slot()
-        };
+        let head_slot = { self.head_slot() };
         let head = self
             .0
             .journal_mut()
@@ -332,9 +330,7 @@ where
             .unwrap_or_default()
             .data
             .saturating_to::<u64>();
-        let tail_slot = {
-            self.tail_slot()
-        };
+        let tail_slot = { self.tail_slot() };
         let tail = self
             .0
             .journal_mut()
