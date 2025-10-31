@@ -147,11 +147,13 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
+    let mut gas = Gas::new(gas_limit);
+
     // decode selector
     if input.len() < 4 {
         return Ok(Some(InterpreterResult {
             result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
+            gas,
             output: Bytes::from("Input too short"),
         }));
     }
@@ -170,7 +172,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
             if caller_address != beneficiary {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("only the beneficiary may cancel a retryable"),
                 }));
             }
@@ -189,7 +191,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                 {
                     return Ok(Some(InterpreterResult {
                         result: error.into(),
-                        gas: Gas::new(gas_limit),
+                        gas,
                         output: Bytes::default(),
                     }));
                 }
@@ -234,7 +236,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -251,14 +253,14 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Revert,
-                        gas: Gas::new(gas_limit),
+                        gas,
                         output: Bytes::from(output),
                     }));
                 }
 
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("ticketId not found"),
                 }));
             }
@@ -267,7 +269,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -276,7 +278,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -287,7 +289,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -303,14 +305,14 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Revert,
-                        gas: Gas::new(gas_limit),
+                        gas,
                         output: Bytes::from(output),
                     }));
                 }
 
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("ticketId not found"),
                 }));
             }
@@ -319,7 +321,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -335,28 +337,38 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Revert,
-                        gas: Gas::new(gas_limit),
+                        gas,
                         output: Bytes::from(output),
                     }));
                 }
 
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("ticketId not found"),
                 }));
             }
 
             let nbytes = {
-                context
+                7 * 32 + 32 * context
                     .arb_state()
                     .retryable_state()
                     .retryable(call.ticketId)
                     .calldata()
                     .get()
                     .len()
-                    .div(32)
+                    .div_ceil(32)
             };
+
+            let update_cost = nbytes.div_ceil(32) as u64 * revm::interpreter::gas::SSTORE_SET / 100;
+
+            if !gas.record_cost(update_cost) {
+                return Ok(Some(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    gas,
+                    output: Bytes::from("out of gas"),
+                }));
+            }
 
             let current_time = context.block().timestamp().saturating_to::<u64>();
             let window = current_time + ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;
@@ -374,7 +386,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
             if timeout > window {
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("timeout too far into the future"),
                 }));
             }
@@ -398,6 +410,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
             }
             .into_log_data();
 
+            // TODO charge gas for logging
             context.journal_mut().log(Log { address: *target_address, data: log });
 
             let output =
@@ -405,7 +418,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -421,14 +434,14 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
                     return Ok(Some(InterpreterResult {
                         result: InstructionResult::Revert,
-                        gas: Gas::new(gas_limit),
+                        gas,
                         output: Bytes::from(output),
                     }));
                 }
 
                 return Ok(Some(InterpreterResult {
                     result: InstructionResult::Revert,
-                    gas: Gas::new(gas_limit),
+                    gas,
                     output: Bytes::from("ticketId not found"),
                 }));
             }
@@ -439,7 +452,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Return,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
@@ -450,13 +463,13 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
-                gas: Gas::new(gas_limit),
+                gas,
                 output: Bytes::from(output),
             }))
         }
         _ => Ok(Some(InterpreterResult {
             result: InstructionResult::Revert,
-            gas: Gas::new(gas_limit),
+            gas,
             output: Bytes::from("Unknown function selector"),
         })),
     }

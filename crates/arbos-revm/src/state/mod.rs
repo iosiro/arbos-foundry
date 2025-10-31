@@ -8,7 +8,7 @@ use crate::{
     constants::{
         ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY,
         ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
-        ARBOS_STATE_PROGRAMS_KEY,
+        ARBOS_STATE_PROGRAMS_KEY, ARBOS_STATE_RETRYABLES_KEY,
     },
     state::{
         address_table::AddressTable,
@@ -196,6 +196,7 @@ where
 
     fn retryable_state(&mut self) -> RetryableState<'_, CTX> {
         let subkey = substorage(&B256::ZERO, ARBOS_STATE_RETRYABLES_KEY);
+        println!("RetryableState subkey: {:?}", subkey);
         RetryableState::new(self.context, subkey)
     }
 }

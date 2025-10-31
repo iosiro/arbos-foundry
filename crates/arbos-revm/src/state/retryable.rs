@@ -26,7 +26,8 @@ impl<'a, CTX: ArbitrumContextTr> RetryableState<'a, CTX> {
     }
 
     pub fn retryable(&mut self, id: B256) -> Retryable<'_, CTX> {
-        Retryable::new(self.0, id)
+        let slot = substorage(&self.1, id.as_slice());
+        Retryable::new(self.0, slot)
     }
 }
 
