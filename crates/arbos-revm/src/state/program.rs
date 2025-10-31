@@ -5,17 +5,14 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, buffer,
-    chain::ArbitrumChainInfoTr,
-    constants::{
+    ArbitrumContextTr, buffer, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
         ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
         ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
         ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY,
         ARBOS_STATE_ADDRESS, INITIAL_MAX_WASM_SIZE,
-    },
-    state::types::{
+    }, state::types::{
         StorageBackedAddressSet, StorageBackedU32, StorageBackedU64, map_address, substorage,
-    },
+    }
 };
 
 // stylus params type
@@ -211,11 +208,11 @@ where
             params.keepalive_days = buffer::take_u16(&mut data);
             params.block_cache_size = buffer::take_u16(&mut data);
 
-            if self.0.chain().arbos_version_or_default() >= 40 {
+            if self.0.cfg().stylus().arbos_version_or_default() >= 40 {
                 params.max_wasm_size = buffer::take_u32(&mut data);
             }
 
-            params.page_ramp = self.0.chain().page_ramp_or_default();
+            params.page_ramp = self.0.cfg().stylus().page_ramp_or_default();
 
             if params.max_wasm_size == 0 {
                 params.max_wasm_size = INITIAL_MAX_WASM_SIZE;
@@ -225,21 +222,21 @@ where
         }
 
         // Load defaults
-        params.version = self.0.chain().stylus_version_or_default();
-        params.ink_price = self.0.chain().ink_price_or_default();
-        params.max_stack_depth = self.0.chain().max_stack_depth_or_default();
-        params.free_pages = self.0.chain().free_pages_or_default();
-        params.page_gas = self.0.chain().page_gas_or_default();
-        params.page_ramp = self.0.chain().page_ramp_or_default();
-        params.page_limit = self.0.chain().page_limit_or_default();
-        params.min_init_gas = self.0.chain().min_init_gas_or_default();
-        params.min_cached_init_gas = self.0.chain().min_cached_init_gas_or_default();
-        params.init_cost_scalar = self.0.chain().init_cost_scalar_or_default();
-        params.cached_cost_scalar = self.0.chain().cached_cost_scalar_or_default();
-        params.expiry_days = self.0.chain().expiry_days_or_default();
-        params.keepalive_days = self.0.chain().keepalive_days_or_default();
-        params.block_cache_size = self.0.chain().block_cache_size_or_default();
-        params.max_wasm_size = self.0.chain().max_wasm_size_or_default();
+        params.version = self.0.cfg().stylus().stylus_version_or_default();
+        params.ink_price = self.0.cfg().stylus().ink_price_or_default();
+        params.max_stack_depth = self.0.cfg().stylus().max_stack_depth_or_default();
+        params.free_pages = self.0.cfg().stylus().free_pages_or_default();
+        params.page_gas = self.0.cfg().stylus().page_gas_or_default();
+        params.page_ramp = self.0.cfg().stylus().page_ramp_or_default();
+        params.page_limit = self.0.cfg().stylus().page_limit_or_default();
+        params.min_init_gas = self.0.cfg().stylus().min_init_gas_or_default();
+        params.min_cached_init_gas = self.0.cfg().stylus().min_cached_init_gas_or_default();
+        params.init_cost_scalar = self.0.cfg().stylus().init_cost_scalar_or_default();
+        params.cached_cost_scalar = self.0.cfg().stylus().cached_cost_scalar_or_default();
+        params.expiry_days = self.0.cfg().stylus().expiry_days_or_default();
+        params.keepalive_days = self.0.cfg().stylus().keepalive_days_or_default();
+        params.block_cache_size = self.0.cfg().stylus().block_cache_size_or_default();
+        params.max_wasm_size = self.0.cfg().stylus().max_wasm_size_or_default();
 
         (params, gas_cost)
     }
@@ -263,7 +260,7 @@ where
         data[22..24].copy_from_slice(&params.keepalive_days.to_be_bytes());
         data[24..26].copy_from_slice(&params.block_cache_size.to_be_bytes());
 
-        if self.0.chain().arbos_version_or_default() >= 40 {
+        if self.0.cfg().stylus().arbos_version_or_default() >= 40 {
             data[26..30].copy_from_slice(&params.max_wasm_size.to_be_bytes());
         }
 

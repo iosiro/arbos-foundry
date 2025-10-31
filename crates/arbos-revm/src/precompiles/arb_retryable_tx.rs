@@ -9,13 +9,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
-    chain::ArbitrumChainInfoTr,
-    precompiles::{
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, precompiles::{
         extension::ExtendedPrecompile,
         macros::{gas, return_revert, return_success},
-    },
-    state::{ArbState, ArbStateGetter},
+    }, state::{ArbState, ArbStateGetter}
 };
 
 const ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60; // 1 week
@@ -234,7 +231,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
             };
 
             if beneficiary == Address::ZERO {
-                if context.chain().arbos_version_or_default() >= 3 {
+                if context.cfg().stylus().arbos_version_or_default() >= 3 {
                     let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                     return_revert!(gas, Bytes::from(output));
@@ -266,7 +263,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                 { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
 
             if timeout == 0 {
-                if context.chain().arbos_version_or_default() >= 3 {
+                if context.cfg().stylus().arbos_version_or_default() >= 3 {
                     let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                     return_revert!(gas, Bytes::from(output));
@@ -286,7 +283,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                 { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
 
             if timeout == 0 {
-                if context.chain().arbos_version_or_default() >= 3 {
+                if context.cfg().stylus().arbos_version_or_default() >= 3 {
                     let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                     return_revert!(gas, Bytes::from(output));
@@ -362,7 +359,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                 { context.arb_state().retryable_state().retryable(call.ticketId).timeout().get() };
 
             if timeout == 0 {
-                if context.chain().arbos_version_or_default() >= 3 {
+                if context.cfg().stylus().arbos_version_or_default() >= 3 {
                     let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                     return_revert!(gas, Bytes::from(output));

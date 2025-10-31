@@ -10,10 +10,12 @@ use eyre::WrapErr;
 use foundry_common::{ALCHEMY_FREE_TIER_CUPS, provider::ProviderBuilder};
 use foundry_config::{Chain, Config, GasLimit};
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, TxEnv};
+use revm::context::{BlockEnv, TxEnv, Cfg};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use url::Url;
+
+use arbos_revm::config::StylusConfig;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EvmOpts {
@@ -139,6 +141,7 @@ impl EvmOpts {
             self.sender,
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
+            &self.env.stylus
         )
         .await
         .wrap_err_with(|| {
@@ -159,6 +162,7 @@ impl EvmOpts {
             self.memory_limit,
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
+            &self.env.stylus
         );
 
         crate::Env {
@@ -199,7 +203,7 @@ impl EvmOpts {
     /// be at `~/.foundry/cache/mainnet/14435000/storage.json`.
     pub fn get_fork(&self, config: &Config, env: crate::Env) -> Option<CreateFork> {
         let url = self.fork_url.clone()?;
-        let enable_caching = config.enable_caching(&url, env.evm_env.cfg_env.chain_id);
+        let enable_caching = config.enable_caching(&url, env.evm_env.cfg_env.chain_id());
         Some(CreateFork { url, enable_caching, env, evm_opts: self.clone() })
     }
 
@@ -312,4 +316,8 @@ pub struct Env {
     /// EIP-170: Contract code size limit in bytes. Useful to increase this because of tests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_size_limit: Option<usize>,
+
+    /// Stylus configuration.
+    #[serde(flatten)]
+    pub stylus: StylusConfig,
 }

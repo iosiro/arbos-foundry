@@ -1,19 +1,15 @@
 #![allow(missing_docs)]
 
 use crate::{
-    ArbitrumContextTr,
-    chain::ArbitrumChainInfoTr,
-    constants::{
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
         COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    },
-    precompiles::{
+    }, precompiles::{
         extension::ExtendedPrecompile,
         macros::{gas, return_revert, return_success},
-    },
-    state::{
+    }, state::{
         ArbState, ArbStateGetter,
         program::{ProgramInfo, StylusParams},
-    },
+    }
 };
 use alloy_sol_types::{SolCall, SolError, SolInterface, sol};
 use arbutil::evm::ARBOS_VERSION_STYLUS_CHARGING_FIXES;
@@ -222,13 +218,13 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             }
 
             let compile_config =
-                CompileConfig::version(params.version, context.chain().debug_mode());
+                CompileConfig::version(params.version, context.cfg().stylus().debug_mode());
 
             let (_, module, stylus_data, gas_cost) =
                 crate::stylus_executor::compile_stylus_bytecode(
                     &bytecode,
                     code_hash,
-                    context.chain().arbos_version_or_default(),
+                    context.cfg().stylus().arbos_version_or_default(),
                     params.version,
                     params.page_limit,
                     true,

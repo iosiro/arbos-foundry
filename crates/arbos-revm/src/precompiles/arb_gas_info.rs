@@ -7,14 +7,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
-    chain::ArbitrumChainInfoTr,
-    constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
-    precompiles::{
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::ARBOS_L1_PRICER_FUNDS_ADDRESS, precompiles::{
         extension::ExtendedPrecompile,
         macros::{return_revert, return_success},
-    },
-    state::{ArbState, ArbStateGetter},
+    }, state::{ArbState, ArbStateGetter}
 };
 
 const ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE: u64 = 140;
@@ -255,7 +251,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
 
             let need_funds = funds_due_for_refund.wrapping_add(funds_due_for_rewards);
 
-            let have_funds = if context.chain().arbos_version().unwrap_or_default() < 10 {
+            let have_funds = if context.cfg().stylus().arbos_version().unwrap_or_default() < 10 {
                 let arb_pricer_funds =
                     context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default();
                 arb_pricer_funds.data
@@ -302,7 +298,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
             ));
 
-            if context.chain().arbos_version().unwrap_or_default() < 4 {
+            if context.cfg().stylus().arbos_version().unwrap_or_default() < 4 {
                 let mut gas_for_l1_calldata = U256::ZERO;
                 if l2_gas_price > 0 {
                     gas_for_l1_calldata =
@@ -351,7 +347,7 @@ fn arb_gas_info_run<CTX: ArbitrumContextTr>(
                 revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
             ));
 
-            if context.chain().arbos_version().unwrap_or_default() < 4 {
+            if context.cfg().stylus().arbos_version().unwrap_or_default() < 4 {
                 let mut gas_for_l1_calldata = U256::ZERO;
                 if l2_gas_price > 0 {
                     gas_for_l1_calldata =

@@ -1192,6 +1192,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
  "arbutil",
+ "auto_impl",
  "lazy_static",
  "lru 0.14.0",
  "revm",
@@ -4973,6 +4974,7 @@ version = "1.4.0"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
+ "arbos-revm",
  "clap 4.5.48",
  "dirs",
  "dunce",
