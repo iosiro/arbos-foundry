@@ -51,6 +51,8 @@ use std::{
     str::FromStr,
 };
 
+use arbos_revm::config::StylusConfig;
+
 mod macros;
 
 pub mod utils;
@@ -551,6 +553,8 @@ pub struct Config {
 
     /// Whether to enable script execution protection.
     pub script_execution_protection: bool,
+
+    pub stylus: StylusConfig,
 
     /// PRIVATE: This structure may grow, As such, constructing this structure should
     /// _always_ be done using a public constructor or update syntax:
@@ -2573,6 +2577,7 @@ impl Default for Config {
             additional_compiler_profiles: Default::default(),
             compilation_restrictions: Default::default(),
             script_execution_protection: true,
+            stylus: Default::default(),
             _non_exhaustive: (),
         }
     }

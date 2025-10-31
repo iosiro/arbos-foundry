@@ -1,0 +1,52 @@
+[package]
+name = "alloy-evm"
+description = "EVM abstraction for Alloy"
+
+version = "0.21.1"
+edition = "2021"
+rust-version = "1.88"
+authors = ["Alloy Contributors"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/alloy-rs/alloy-evm"
+repository = "https://github.com/alloy-rs/alloy-evm"
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-consensus = { workspace = true, features = ["k256"] }
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+alloy-eips.workspace = true
+alloy-hardforks.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
+
+revm.workspace = true
+
+auto_impl.workspace = true
+derive_more.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+serde_json.workspace = true
+test-case.workspace = true
+
+[features]
+default = ["std"]
+secp256k1 = [
+    "std",
+    "alloy-consensus/secp256k1",
+]
+std = [
+    "alloy-primitives/std",
+    "revm/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-sol-types/std",
+    "derive_more/std",
+    "thiserror/std",
+    "alloy-rpc-types-eth?/std"
+]
+overrides = ["dep:alloy-rpc-types-eth"]
+call-util = ["overrides"]

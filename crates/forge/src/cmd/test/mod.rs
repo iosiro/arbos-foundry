@@ -31,9 +31,9 @@ use foundry_compilers::{
     utils::source_files_iter,
 };
 use foundry_config::{
-    Config, figment,
+    Config,
     figment::{
-        Metadata, Profile, Provider,
+        self, Metadata, Profile, Provider,
         value::{Dict, Map},
     },
     filter::GlobMatcher,

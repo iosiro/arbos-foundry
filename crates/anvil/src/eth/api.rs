@@ -528,24 +528,13 @@ impl EthApi {
         from: &Address,
         request: TypedTransactionRequest,
     ) -> Result<TypedTransaction> {
-        match request {
-            TypedTransactionRequest::Deposit(_) => {
-                let nil_signature = Signature::from_scalars_and_parity(
-                    B256::with_last_byte(1),
-                    B256::with_last_byte(1),
-                    false,
-                );
-                return build_typed_transaction(request, nil_signature);
-            }
-            _ => {
-                for signer in self.signers.iter() {
-                    if signer.accounts().contains(from) {
-                        let signature = signer.sign_transaction(request.clone(), from)?;
-                        return build_typed_transaction(request, signature);
-                    }
-                }
+        for signer in self.signers.iter() {
+            if signer.accounts().contains(from) {
+                let signature = signer.sign_transaction(request.clone(), from)?;
+                return build_typed_transaction(request, signature);
             }
         }
+
         Err(BlockchainError::NoSignerAvailable)
     }
 
@@ -3274,10 +3263,6 @@ impl EthApi {
                     }
                 })
             }
-            Some(TypedTransactionRequest::Deposit(mut m)) => {
-                m.gas_limit = gas_limit;
-                TypedTransactionRequest::Deposit(m)
-            }
             None => return Err(BlockchainError::FailedToDecodeTransaction),
         };
         Ok(request)
@@ -3301,8 +3286,7 @@ impl EthApi {
             TypedTransactionRequest::EIP2930(_)
             | TypedTransactionRequest::EIP1559(_)
             | TypedTransactionRequest::EIP7702(_)
-            | TypedTransactionRequest::EIP4844(_)
-            | TypedTransactionRequest::Deposit(_) => Signature::from_scalars_and_parity(
+            | TypedTransactionRequest::EIP4844(_) => Signature::from_scalars_and_parity(
                 B256::with_last_byte(1),
                 B256::with_last_byte(1),
                 false,
@@ -3375,7 +3359,6 @@ impl EthApi {
             TypedTransaction::EIP1559(_) => self.backend.ensure_eip1559_active(),
             TypedTransaction::EIP4844(_) => self.backend.ensure_eip4844_active(),
             TypedTransaction::EIP7702(_) => self.backend.ensure_eip7702_active(),
-            TypedTransaction::Deposit(_) => self.backend.ensure_op_deposits_active(),
             TypedTransaction::Legacy(_) => Ok(()),
         }
     }
@@ -3428,10 +3411,6 @@ fn determine_base_gas_by_kind(request: &WithOtherFields<TransactionRequest>) -> 
                 TxKind::Create => MIN_CREATE_GAS,
             },
             TypedTransactionRequest::EIP4844(_) => MIN_TRANSACTION_GAS,
-            TypedTransactionRequest::Deposit(req) => match req.to {
-                TxKind::Call(_) => MIN_TRANSACTION_GAS,
-                TxKind::Create => MIN_CREATE_GAS,
-            },
         },
         // Tighten the gas limit upwards if we don't know the transaction type to avoid deployments
         // failing.

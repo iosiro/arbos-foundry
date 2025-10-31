@@ -38,6 +38,10 @@ pub(crate) fn take_u16(data: &mut Vec<u8>) -> u16 {
     take_int!(data, u16, 2)
 }
 
+pub(crate) fn take_u8(data: &mut Vec<u8>) -> u8 {
+    take_int!(data, u8, 1)
+}
+
 pub(crate) fn take_rest(data: &mut Vec<u8>) -> Bytes {
     let bytes = Bytes::from(data.clone());
     data.clear();
