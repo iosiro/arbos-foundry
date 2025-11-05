@@ -290,6 +290,9 @@ pub enum InvalidTransactionError {
     /// Deposit transaction error post regolith
     #[error("op-deposit failure post regolith")]
     DepositTxErrorPostRegolith,
+    /// Missing enveloped transaction
+    #[error("missing enveloped transaction")]
+    MissingEnvelopedTx,
 }
 
 impl From<InvalidTransaction> for InvalidTransactionError {
