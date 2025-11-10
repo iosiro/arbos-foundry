@@ -128,9 +128,6 @@ where
     pub fn program_info(&mut self, code_hash: &B256) -> Option<ProgramInfo> {
         let slot = map_address(&self.program_data_subkey(), code_hash);
 
-        // warm account where useful
-        let _ = self.0.journal_mut().warm_account(ARBOS_STATE_ADDRESS);
-
         if let Ok(state) = self.0.journal_mut().sload(ARBOS_STATE_ADDRESS, slot.into())
             && !state.is_zero()
         {
@@ -186,7 +183,6 @@ where
         let slot = map_address(&subkey, &B256::ZERO);
 
         let gas_cost = sload_cost(self.0.cfg().spec().into(), false);
-        let _ = self.0.journal_mut().warm_account(ARBOS_STATE_ADDRESS);
 
         let mut params = StylusParams::zero();
 

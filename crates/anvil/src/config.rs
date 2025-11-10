@@ -46,7 +46,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
 use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
+    context::{BlockEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
 };

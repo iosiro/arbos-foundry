@@ -5,7 +5,7 @@ use crate::{
         COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
     }, precompiles::{
         extension::ExtendedPrecompile,
-        macros::{gas, return_revert, return_success},
+        macros::{emit_event, gas, return_revert, return_success},
     }, state::{
         ArbState, ArbStateGetter,
         program::{ProgramInfo, StylusParams},
@@ -399,14 +399,12 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
 
             context.arb_state().programs().save_program_info(&call.codehash, &program_info);
 
-            let log = IArbWasm::ProgramLifetimeExtended {
+            // emit ProgramLifetimeExtended
+            emit_event!(context, Log { address: *target_address, data: IArbWasm::ProgramLifetimeExtended {
                 codehash: call.codehash,
                 dataFee: U256::from(data_fee),
             }
-            .into_log_data();
-
-            // emit ProgramLifetimeExtended
-            context.journal_mut().log(Log { address: *target_address, data: log });
+            .into_log_data() }, gas);
 
             return_success!(gas);
         }

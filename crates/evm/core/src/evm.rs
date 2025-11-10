@@ -34,14 +34,14 @@ use arbos_revm::{
 
 type CfgEnv = arbos_revm::config::ArbitrumConfig;
 
-pub type EthEvmContext<DB> = ArbitrumContext<DB>;
+pub type FoundryEvmContext<DB> = ArbitrumContext<DB>;
 
 pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     db: &'db mut dyn DatabaseExt,
     env: Env,
     inspector: I,
 ) -> FoundryEvm<'db, I> {
-    let mut ctx = EthEvmContext {
+    let mut ctx = FoundryEvmContext {
         journaled_state: {
             let mut journal = Journal::new(db);
             journal.set_spec_id(env.evm_env.cfg_env.spec);
@@ -71,7 +71,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
 }
 
 pub fn new_evm_with_existing_context<'a>(
-    ctx: EthEvmContext<&'a mut dyn DatabaseExt>,
+    ctx: FoundryEvmContext<&'a mut dyn DatabaseExt>,
     inspector: &'a mut dyn InspectorExt,
 ) -> FoundryEvm<'a, &'a mut dyn InspectorExt> {
     // let spec = ctx.cfg.spec;
@@ -112,13 +112,13 @@ fn get_create2_factory_call_inputs(
 pub struct FoundryEvm<'db, I: InspectorExt> {
     #[allow(clippy::type_complexity)]
     pub inner: RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+        FoundryEvmContext<&'db mut dyn DatabaseExt>,
         I,
         PrecompilesMap<
-            EthEvmContext<&'db mut dyn DatabaseExt>,
-            ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+            FoundryEvmContext<&'db mut dyn DatabaseExt>,
+            ArbitrumPrecompiles<FoundryEvmContext<&'db mut dyn DatabaseExt>>,
         >,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
+        EthInstructions<EthInterpreter, FoundryEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >,
 }
@@ -146,8 +146,8 @@ impl<I: InspectorExt> FoundryEvm<'_, I> {
 
 impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     type Precompiles = PrecompilesMap<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
-        ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+        FoundryEvmContext<&'db mut dyn DatabaseExt>,
+        ArbitrumPrecompiles<FoundryEvmContext<&'db mut dyn DatabaseExt>>,
     >;
     type Inspector = I;
     type DB = &'db mut dyn DatabaseExt;
@@ -238,7 +238,7 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
 }
 
 impl<'db, I: InspectorExt> Deref for FoundryEvm<'db, I> {
-    type Target = EthEvmContext<&'db mut dyn DatabaseExt>;
+    type Target = FoundryEvmContext<&'db mut dyn DatabaseExt>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner.0.ctx
@@ -266,13 +266,13 @@ impl<I: InspectorExt> Default for FoundryHandler<'_, I> {
 // trait.
 impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
     type Evm = RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+        FoundryEvmContext<&'db mut dyn DatabaseExt>,
         I,
         PrecompilesMap<
-            EthEvmContext<&'db mut dyn DatabaseExt>,
-            ArbitrumPrecompiles<EthEvmContext<&'db mut dyn DatabaseExt>>,
+            FoundryEvmContext<&'db mut dyn DatabaseExt>,
+            ArbitrumPrecompiles<FoundryEvmContext<&'db mut dyn DatabaseExt>>,
         >,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
+        EthInstructions<EthInterpreter, FoundryEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >;
     type Error = EVMError<DatabaseError>;

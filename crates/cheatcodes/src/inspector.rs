@@ -41,7 +41,7 @@ use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    evm::{EthEvmContext, FoundryEvm, new_evm_with_existing_context},
+    evm::{FoundryEvmContext, FoundryEvm, new_evm_with_existing_context},
 };
 use foundry_evm_traces::{
     TracingInspector, TracingInspectorConfig, identifier::SignaturesIdentifier,
@@ -76,7 +76,7 @@ use std::{
 
 mod utils;
 
-pub type Ecx<'a, 'b, 'c> = &'a mut EthEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
+pub type Ecx<'a, 'b, 'c> = &'a mut FoundryEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
 
 /// Helper trait for obtaining complete [revm::Inspector] instance from mutable reference to
 /// [Cheatcodes].
@@ -157,7 +157,7 @@ where
     let mut inspector = executor.get_inspector(ccx.state);
     let error = std::mem::replace(&mut ccx.ecx.error, Ok(()));
 
-    let ctx = EthEvmContext {
+    let ctx = FoundryEvmContext {
         block: ccx.ecx.block.clone(),
         cfg: ccx.ecx.cfg.clone(),
         tx: ccx.ecx.tx.clone(),
@@ -1091,7 +1091,7 @@ impl Cheatcodes {
     }
 }
 
-impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
+impl Inspector<FoundryEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
     fn initialize_interp(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {
         // When the first interpreter is initialized we've circumvented the balance and gas checks,
         // so we apply our actual block data with the correct fees and all.

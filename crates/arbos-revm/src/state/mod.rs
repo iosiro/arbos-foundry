@@ -109,10 +109,6 @@ where
     CTX: ArbitrumContextTr,
 {
     fn programs(&mut self) -> Programs<'_, CTX> {
-        self.context
-            .journal_mut()
-            .warm_account(ARBOS_STATE_ADDRESS)
-            .expect("arbos state must exist");
         Programs::new(self.context, state_subkey(ARBOS_STATE_PROGRAMS_KEY))
     }
 

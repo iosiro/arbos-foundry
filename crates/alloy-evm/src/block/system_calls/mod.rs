@@ -4,6 +4,7 @@ use crate::{
     block::{BlockExecutionError, OnStateHook},
     Evm,
 };
+use alloc::{borrow::Cow, boxed::Box};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
@@ -93,7 +94,7 @@ where
             eip2935::transact_blockhashes_contract_call(&self.spec, parent_block_hash, evm)?;
 
         if let Some(res) = result_and_state {
-            if let Some(hook) = &mut self.hook {
+            if let Some(ref mut hook) = &mut self.hook {
                 hook.on_state(
                     StateChangeSource::PreBlock(StateChangePreBlockSource::BlockHashesContract),
                     &res.state,
@@ -115,7 +116,7 @@ where
             eip4788::transact_beacon_root_contract_call(&self.spec, parent_beacon_block_root, evm)?;
 
         if let Some(res) = result_and_state {
-            if let Some(hook) = &mut self.hook {
+            if let Some(ref mut hook) = &mut self.hook {
                 hook.on_state(
                     StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract),
                     &res.state,
@@ -134,7 +135,7 @@ where
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7002::transact_withdrawal_requests_contract_call(evm)?;
 
-        if let Some(hook) = &mut self.hook {
+        if let Some(ref mut hook) = &mut self.hook {
             hook.on_state(
                 StateChangeSource::PostBlock(
                     StateChangePostBlockSource::WithdrawalRequestsContract,
@@ -154,7 +155,7 @@ where
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7251::transact_consolidation_requests_contract_call(evm)?;
 
-        if let Some(hook) = &mut self.hook {
+        if let Some(ref mut hook) = &mut self.hook {
             hook.on_state(
                 StateChangeSource::PostBlock(
                     StateChangePostBlockSource::ConsolidationRequestsContract,
@@ -169,7 +170,7 @@ where
 
     /// Delegate to stored `OnStateHook`, noop if hook is `None`.
     pub fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
-        if let Some(hook) = &mut self.hook {
+        if let Some(ref mut hook) = &mut self.hook {
             hook.on_state(source, state);
         }
     }

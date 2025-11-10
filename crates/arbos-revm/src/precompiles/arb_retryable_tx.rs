@@ -11,7 +11,7 @@ use revm::{
 use crate::{
     ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, precompiles::{
         extension::ExtendedPrecompile,
-        macros::{gas, return_revert, return_success},
+        macros::{emit_event, gas, return_revert, return_success},
     }, state::{ArbState, ArbStateGetter}
 };
 
@@ -338,14 +338,12 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                 .timeout_windows_left()
                 .set(windows_left.saturating_add(1));
 
-            let log = ArbRetryableTx::LifetimeExtended {
+
+            emit_event!(context, Log { address: *target_address, data: ArbRetryableTx::LifetimeExtended {
                 ticketId: call.ticketId,
                 newTimeout: U256::from(new_timeout),
             }
-            .into_log_data();
-
-            // TODO charge gas for logging
-            context.journal_mut().log(Log { address: *target_address, data: log });
+            .into_log_data() }, gas);
 
             let output =
                 ArbRetryableTx::keepaliveCall::abi_encode_returns(&U256::from(new_timeout));

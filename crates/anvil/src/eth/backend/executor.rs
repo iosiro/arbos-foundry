@@ -1,6 +1,5 @@
 use crate::{
-    PrecompileFactory,
-    eth::{
+    PrecompileFactory, eth::{
         backend::{
             cheats::{CheatEcrecover, CheatsManager},
             db::Db,
@@ -9,16 +8,14 @@ use crate::{
         },
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
-    },
-    inject_custom_precompiles,
-    mem::inspector::AnvilInspector,
+    }, evm::{AnvilEvm, AnvilEvmContext}, inject_custom_precompiles, mem::inspector::AnvilInspector
 };
 use alloy_consensus::{
     Receipt, ReceiptWithBloom, constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
 use alloy_evm::{
-    Evm, eth::{self, EthEvmContext}, precompiles::{DynPrecompile, Precompile, PrecompilesMap}
+    Evm, precompiles::{DynPrecompile, Precompile, PrecompilesMap}
 };
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
@@ -28,18 +25,17 @@ use anvil_core::eth::{
 use arbos_revm::{ArbitrumEvm, config::ArbitrumConfig, local_context::ArbitrumLocalContext, precompiles::ArbitrumPrecompiles};
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::{EitherEvm, EitherEvmContext}, precompiles::EC_RECOVER},
+    core::precompiles::EC_RECOVER,
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
     Database, DatabaseRef, Inspector, Journal,
-    context::{Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext},
+    context::{Block as RevmBlock, BlockEnv, Cfg, JournalTr},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -440,13 +436,13 @@ fn build_logs_bloom(logs: Vec<Log>, bloom: &mut Bloom) {
 }
 
 /// Creates a database with given database and inspector.
-pub fn new_evm_with_inspector<DB, I>(db: DB, env: &Env, inspector: I) -> EitherEvm<DB, I>
+pub fn new_evm_with_inspector<DB, I>(db: DB, env: &Env, inspector: I) -> AnvilEvm<DB, I>
 where
     DB: Database<Error = DatabaseError> + Debug,
-    I: Inspector<EitherEvmContext<DB>>,
+    I: Inspector<AnvilEvmContext<DB>>,
 {
     let spec = env.evm_env.cfg_env.spec;
-    let eth_context = EitherEvmContext {
+    let eth_context = AnvilEvmContext {
         journaled_state: {
             let mut journal = Journal::new(db);
             journal.set_spec_id(spec);
@@ -469,7 +465,7 @@ where
         PrecompilesMap::new(eth_precompiles),
     );
 
-    EitherEvm {
+    AnvilEvm {
         inner: eth_evm,
         inspect: true,
     }
@@ -480,10 +476,10 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
-    I: Inspector<EitherEvmContext<WrapDatabaseRef<&'db DB>>>,
+    I: Inspector<AnvilEvmContext<WrapDatabaseRef<&'db DB>>>,
     WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
 {
     new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)
