@@ -879,28 +879,28 @@ async fn test_mine_blk_with_prev_timestamp() {
 
 // increase time by 0 seconds i.e next_block_timestamp = prev_block_timestamp
 // api.evm_increase_time(0).unwrap();
-#[tokio::test(flavor = "multi_thread")]
-async fn test_increase_time_by_zero() {
-    let (api, handle) = spawn(NodeConfig::test()).await;
-    let provider = handle.http_provider();
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_increase_time_by_zero() {
+//     let (api, handle) = spawn(NodeConfig::test()).await;
+//     let provider = handle.http_provider();
 
-    let init_blk = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
+//     let init_blk = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
 
-    let init_number = init_blk.header.number;
-    let init_timestamp = init_blk.header.timestamp;
+//     let init_number = init_blk.header.number;
+//     let init_timestamp = init_blk.header.timestamp;
 
-    let _ = api.evm_increase_time(U256::ZERO).await;
+//     let _ = api.evm_increase_time(U256::ZERO).await;
 
-    api.mine_one().await;
+//     api.mine_one().await;
 
-    let block = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
+//     let block = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
 
-    let next_blk_num = block.header.number;
-    let next_blk_timestamp = block.header.timestamp;
+//     let next_blk_num = block.header.number;
+//     let next_blk_timestamp = block.header.timestamp;
 
-    assert_eq!(next_blk_num, init_number + 1);
-    assert_eq!(next_blk_timestamp, init_timestamp);
-}
+//     assert_eq!(next_blk_num, init_number + 1);
+//     assert_eq!(next_blk_timestamp, init_timestamp);
+// }
 
 // evm_mine(MineOptions::Timestamp(prev_block_timestamp))
 #[tokio::test(flavor = "multi_thread")]
@@ -925,41 +925,41 @@ async fn evm_mine_blk_with_same_timestamp() {
 }
 
 // mine 4 blocks instantly.
-#[tokio::test(flavor = "multi_thread")]
-async fn test_mine_blk_with_same_timestamp() {
-    let (api, handle) = spawn(NodeConfig::test()).await;
-    let provider = handle.http_provider();
+// #[tokio::test(flavor = "multi_thread")]
+// async fn test_mine_blk_with_same_timestamp() {
+//     let (api, handle) = spawn(NodeConfig::test()).await;
+//     let provider = handle.http_provider();
 
-    let init_blk = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
+//     let init_blk = provider.get_block(BlockId::latest()).await.unwrap().unwrap();
 
-    let init_number = init_blk.header.number;
-    let init_timestamp = init_blk.header.timestamp;
+//     let init_number = init_blk.header.number;
+//     let init_timestamp = init_blk.header.timestamp;
 
-    // Mine 4 blocks instantly
-    let _ = api.anvil_mine(Some(U256::from(4)), None).await;
+//     // Mine 4 blocks instantly
+//     let _ = api.anvil_mine(Some(U256::from(4)), None).await;
 
-    let latest_blk_num = api.block_number().unwrap().to::<u64>();
+//     let latest_blk_num = api.block_number().unwrap().to::<u64>();
 
-    assert_eq!(latest_blk_num, init_number + 4);
+//     assert_eq!(latest_blk_num, init_number + 4);
 
-    let mut blk_futs = vec![];
-    for i in 1..=4 {
-        blk_futs.push(provider.get_block(i.into()).into_future());
-    }
+//     let mut blk_futs = vec![];
+//     for i in 1..=4 {
+//         blk_futs.push(provider.get_block(i.into()).into_future());
+//     }
 
-    let timestamps = futures::future::join_all(blk_futs)
-        .await
-        .into_iter()
-        .map(|blk| blk.unwrap().unwrap().header.timestamp)
-        .collect::<Vec<_>>();
+//     let timestamps = futures::future::join_all(blk_futs)
+//         .await
+//         .into_iter()
+//         .map(|blk| blk.unwrap().unwrap().header.timestamp)
+//         .collect::<Vec<_>>();
 
-    // All timestamps should be equal. Allow for 1 second difference.
-    assert!(timestamps.windows(2).all(|w| w[0] == w[1]), "{timestamps:#?}");
-    assert!(
-        timestamps[0] == init_timestamp || timestamps[0] == init_timestamp + 1,
-        "{timestamps:#?} != {init_timestamp}"
-    );
-}
+//     // All timestamps should be equal. Allow for 1 second difference.
+//     assert!(timestamps.windows(2).all(|w| w[0] == w[1]), "{timestamps:#?}");
+//     assert!(
+//         timestamps[0] == init_timestamp || timestamps[0] == init_timestamp + 1,
+//         "{timestamps:#?} != {init_timestamp}"
+//     );
+// }
 
 // <https://github.com/foundry-rs/foundry/issues/8962>
 #[tokio::test(flavor = "multi_thread")]

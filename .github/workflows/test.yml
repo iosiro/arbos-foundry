@@ -68,7 +68,7 @@ jobs:
   #       uses: actions/deploy-pages@v4
 
   doctest:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -84,7 +84,7 @@ jobs:
       - run: cargo test --workspace --doc
 
   typos:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -95,7 +95,7 @@ jobs:
       - uses: crate-ci/typos@0c17dabcee8b8f1957fa917d17393a23e02e1583 # v1
 
   clippy:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -114,7 +114,7 @@ jobs:
           RUSTFLAGS: -Dwarnings
 
   rustfmt:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -129,7 +129,7 @@ jobs:
       - run: cargo fmt --all --check
 
   forge-fmt:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
@@ -147,7 +147,7 @@ jobs:
         run: ./.github/scripts/format.sh --check
 
   crate-checks:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read

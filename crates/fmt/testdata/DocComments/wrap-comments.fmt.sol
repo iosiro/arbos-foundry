@@ -24,8 +24,7 @@ contract HelloWorld {
     /// @param age The dude's age
     constructor(uint256 age) {
         theDude = Person({
-            age: age,
-            wallet: msg.sender
+            age: age, wallet: msg.sender
         });
     }
 
