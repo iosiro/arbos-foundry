@@ -143,8 +143,15 @@ where
 
             if let Ok(FrameResult::Call(call_outcome)) = result {
                 gas.erase_cost(call_outcome.gas().remaining());
+
+                let status = if call_outcome.instruction_result().is_ok() {
+                    Status::Success
+                } else {
+                    Status::Failure
+                };
+
                 return (
-                    Status::Success.into(),
+                    status.into(),
                     VecReader::new(call_outcome.output().to_vec()),
                     ArbGas(gas.spent()),
                 );
