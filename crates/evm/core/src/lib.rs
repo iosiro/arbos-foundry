@@ -5,7 +5,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use crate::{constants::DEFAULT_CREATE2_DEPLOYER, evm::EthEvmContext};
+use crate::{constants::DEFAULT_CREATE2_DEPLOYER, evm::FoundryEvmContext};
 use alloy_primitives::{Address, map::HashMap};
 use auto_impl::auto_impl;
 use backend::DatabaseExt;
@@ -31,7 +31,6 @@ pub mod backend;
 pub mod buffer;
 pub mod constants;
 pub mod decode;
-pub mod either_evm;
 pub mod evm;
 pub mod fork;
 pub mod ic;
@@ -43,14 +42,14 @@ pub mod utils;
 /// An extension trait that allows us to add additional hooks to Inspector for later use in
 /// handlers.
 #[auto_impl(&mut, Box)]
-pub trait InspectorExt: for<'a> Inspector<EthEvmContext<&'a mut dyn DatabaseExt>> {
+pub trait InspectorExt: for<'a> Inspector<FoundryEvmContext<&'a mut dyn DatabaseExt>> {
     /// Determines whether the `DEFAULT_CREATE2_DEPLOYER` should be used for a CREATE2 frame.
     ///
     /// If this function returns true, we'll replace CREATE2 frame with a CALL frame to CREATE2
     /// factory.
     fn should_use_create2_factory(
         &mut self,
-        _context: &mut EthEvmContext<&mut dyn DatabaseExt>,
+        _context: &mut FoundryEvmContext<&mut dyn DatabaseExt>,
         _inputs: &CreateInputs,
     ) -> bool {
         false

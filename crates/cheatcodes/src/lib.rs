@@ -16,7 +16,7 @@ pub extern crate foundry_cheatcodes_spec as spec;
 extern crate tracing;
 
 use alloy_primitives::Address;
-use foundry_evm_core::{backend::DatabaseExt, evm::EthEvmContext};
+use foundry_evm_core::{backend::DatabaseExt, evm::FoundryEvmContext};
 use spec::Status;
 
 pub use Vm::ForgeContext;
@@ -130,7 +130,7 @@ pub struct CheatsCtxt<'cheats, 'evm, 'db, 'db2> {
     /// The cheatcodes inspector state.
     pub(crate) state: &'cheats mut Cheatcodes,
     /// The EVM data.
-    pub(crate) ecx: &'evm mut EthEvmContext<&'db mut (dyn DatabaseExt + 'db2)>,
+    pub(crate) ecx: &'evm mut FoundryEvmContext<&'db mut (dyn DatabaseExt + 'db2)>,
     /// The original `msg.sender`.
     pub(crate) caller: Address,
     /// Gas limit of the current cheatcode call.
@@ -138,7 +138,7 @@ pub struct CheatsCtxt<'cheats, 'evm, 'db, 'db2> {
 }
 
 impl<'db, 'db2> std::ops::Deref for CheatsCtxt<'_, '_, 'db, 'db2> {
-    type Target = EthEvmContext<&'db mut (dyn DatabaseExt + 'db2)>;
+    type Target = FoundryEvmContext<&'db mut (dyn DatabaseExt + 'db2)>;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {

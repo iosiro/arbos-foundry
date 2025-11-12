@@ -31,7 +31,7 @@ use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
 };
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
-use arbos_revm::chain::ArbitrumChainInfo;
+use arbos_revm::local_context::ArbitrumLocalContext;
 use foundry_common::{
     SELECTOR_LEN, TransactionMaybeSigned,
     mapping_slots::{MappingSlots, step as mapping_step},
@@ -41,7 +41,7 @@ use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    evm::{EthEvmContext, FoundryEvm, new_evm_with_existing_context},
+    evm::{FoundryEvmContext, FoundryEvm, new_evm_with_existing_context},
 };
 use foundry_evm_traces::{
     TracingInspector, TracingInspectorConfig, identifier::SignaturesIdentifier,
@@ -53,7 +53,7 @@ use rand::Rng;
 use revm::{
     Inspector, Journal,
     bytecode::opcode as op,
-    context::{BlockEnv, JournalTr, LocalContext, TransactionType, result::EVMError},
+    context::{BlockEnv, JournalTr, TransactionType, result::EVMError},
     context_interface::{CreateScheme, transaction::SignedAuthorization},
     handler::FrameResult,
     interpreter::{
@@ -76,7 +76,7 @@ use std::{
 
 mod utils;
 
-pub type Ecx<'a, 'b, 'c> = &'a mut EthEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
+pub type Ecx<'a, 'b, 'c> = &'a mut FoundryEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
 
 /// Helper trait for obtaining complete [revm::Inspector] instance from mutable reference to
 /// [Cheatcodes].
@@ -157,7 +157,7 @@ where
     let mut inspector = executor.get_inspector(ccx.state);
     let error = std::mem::replace(&mut ccx.ecx.error, Ok(()));
 
-    let ctx = EthEvmContext {
+    let ctx = FoundryEvmContext {
         block: ccx.ecx.block.clone(),
         cfg: ccx.ecx.cfg.clone(),
         tx: ccx.ecx.tx.clone(),
@@ -165,8 +165,8 @@ where
             inner: ccx.ecx.journaled_state.inner.clone(),
             database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
         },
-        local: LocalContext::default(),
-        chain: ArbitrumChainInfo::default(),
+        local: ArbitrumLocalContext::default(),
+        chain: (),
         error,
     };
 
@@ -1084,7 +1084,7 @@ impl Cheatcodes {
     }
 }
 
-impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
+impl Inspector<FoundryEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
     fn initialize_interp(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {
         // When the first interpreter is initialized we've circumvented the balance and gas checks,
         // so we apply our actual block data with the correct fees and all.

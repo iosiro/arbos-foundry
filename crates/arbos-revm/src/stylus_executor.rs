@@ -1,6 +1,6 @@
 use std::{
     cmp::max,
-    mem,
+    fmt, mem,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
@@ -42,15 +42,13 @@ use stylus::{
 };
 
 use crate::{
-    ArbitrumEvm,
-    chain::ArbitrumChainInfoTr,
-    constants::{
-        COST_SCALAR_PERCENT, INITIAL_CACHED_COST_SCALAR, INITIAL_FREE_PAGES,
-        INITIAL_INIT_COST_SCALAR, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS, INITIAL_PAGE_GAS,
-        MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    },
-    context::ArbitrumContextTr,
-    stylus_api::StylusHandler,
+    ArbitrumEvm, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
+        COST_SCALAR_PERCENT, INITIAL_FREE_PAGES, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
+        MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
+    }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, state::{
+        ArbState, ArbStateGetter,
+        program::{ProgramInfo, StylusParams},
+    }, stylus_api::StylusHandler
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -62,12 +60,12 @@ lazy_static::lazy_static! {
 type EvmApiHandler<'a> =
     Arc<Box<dyn Fn(EvmApiMethod, Vec<u8>) -> (Vec<u8>, VecReader, arbutil::evm::api::Gas) + 'a>>;
 
-pub fn build_evm_data<CTX>(context: &mut CTX, input: InputsImpl) -> EvmData
+pub fn build_evm_data<CTX>(context: &CTX, input: InputsImpl) -> EvmData
 where
     CTX: ArbitrumContextTr,
 {
     let config_env = context.cfg();
-    let arbos_env = context.chain();
+    let arbos_env = context.cfg().stylus();
 
     let block_env = context.block();
     let tx_env = context.tx();
@@ -75,7 +73,7 @@ where
     let base_fee = block_env.basefee();
 
     let evm_data: EvmData = EvmData {
-        arbos_version: arbos_env.arbos_version() as u64,
+        arbos_version: arbos_env.arbos_version_or_default() as u64,
         block_basefee: Bytes32::from(U256::from(base_fee).to_be_bytes()),
         chainid: config_env.chain_id(),
         block_coinbase: Bytes20::try_from(block_env.beneficiary().as_slice()).unwrap(),
@@ -111,16 +109,16 @@ pub(crate) struct StylusExecutionContext {
     calldata: Bytes,
 }
 
-pub fn stylus_call_cost(new: u16, open: u16, ever: u16) -> u64 {
+pub fn stylus_call_cost(stylus_params: &StylusParams, new: u16, open: u16, ever: u16) -> u64 {
     let new_open = open.saturating_add(new);
     let new_ever = max(ever, new_open);
 
-    if new_ever < INITIAL_FREE_PAGES as u16 {
+    if new_ever < stylus_params.free_pages {
         return 0;
     }
 
-    let adding = new_open.saturating_sub(open).saturating_sub(INITIAL_FREE_PAGES as u16);
-    let linear = (adding as u64).saturating_mul(INITIAL_PAGE_GAS);
+    let adding = new_open.saturating_sub(open).saturating_sub(stylus_params.free_pages);
+    let linear = (adding as u64).saturating_mul(stylus_params.page_gas as u64);
     let exp = |x: u16| -> u64 {
         if x < MEMORY_EXPONENTS.len() as u16 {
             return MEMORY_EXPONENTS[x as usize] as u64;
@@ -134,17 +132,17 @@ pub fn stylus_call_cost(new: u16, open: u16, ever: u16) -> u64 {
     linear.saturating_add(expand)
 }
 
-pub fn init_gas(params: StylusData) -> u64 {
-    let base = MIN_INIT_GAS_UNITS * INITIAL_MIN_INIT_GAS;
-    let dyno = (params.init_cost as u64)
-        .saturating_mul(INITIAL_INIT_COST_SCALAR as u64 * COST_SCALAR_PERCENT);
+pub fn init_gas(program_info: &ProgramInfo, stylus_params: &StylusParams) -> u64 {
+    let base = stylus_params.min_init_gas as u64 * MIN_INIT_GAS_UNITS;
+    let dyno = (program_info.init_cost as u64)
+        .saturating_mul(stylus_params.init_cost_scalar as u64 * COST_SCALAR_PERCENT);
     base.saturating_add(dyno.div_ceil(100))
 }
 
-pub fn cached_gas(params: StylusData) -> u64 {
-    let base = INITIAL_MIN_CACHED_GAS * MIN_CACHED_GAS_UNITS;
-    let dyno = (params.cached_init_cost as u64)
-        .saturating_mul(INITIAL_CACHED_COST_SCALAR as u64 * COST_SCALAR_PERCENT);
+pub fn cached_gas(program_info: &ProgramInfo, stylus_params: &StylusParams) -> u64 {
+    let base = stylus_params.min_cached_init_gas as u64 * MIN_CACHED_GAS_UNITS;
+    let dyno = (program_info.cached_cost as u64)
+        .saturating_mul(stylus_params.cached_cost_scalar as u64 * COST_SCALAR_PERCENT);
     base.saturating_add(dyno.div_ceil(100))
 }
 
@@ -230,66 +228,6 @@ where
         Some((context, code_hash))
     }
 
-    /// Compile Stylus bytecode
-    fn compile_stylus_bytecode(
-        bytecode: &Bytes,
-        code_hash: B256,
-        arbos_version: u16,
-        stylus_version: u16,
-        _gas_limit: u64,
-        compile_config: &CompileConfig,
-    ) -> Result<(Vec<u8>, Module, StylusData), ()> {
-        if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
-            let (dictionary, compressed_bytecode) =
-                if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
-                    (dictionary, compressed_bytecode)
-                } else {
-                    return Err(());
-                };
-
-            let dictionary = match dictionary[0] {
-                0x00 => Dictionary::Empty,
-                0x01 => Dictionary::StylusProgram,
-                _ => unreachable!(),
-            };
-
-            let bytecode = brotli::decompress(compressed_bytecode, dictionary)
-                .or_else(|err| {
-                    if dictionary == Dictionary::Empty {
-                        Ok(compressed_bytecode.to_vec())
-                    } else {
-                        Err(err)
-                    }
-                })
-                .unwrap();
-
-            let mut activation_gas = 10_000_000u64;
-            let (module, stylus_data) = native::activate(
-                bytecode.as_slice(),
-                &Bytes32::from(code_hash.0),
-                stylus_version,
-                arbos_version as u64,
-                128,
-                false,
-                &mut activation_gas,
-            )
-            .unwrap();
-
-            let bytecode = native::compile(
-                bytecode.as_slice(),
-                compile_config.version,
-                false,
-                wasmer_types::compilation::target::Target::default(),
-                true,
-            )
-            .unwrap();
-
-            return Ok((bytecode, module, stylus_data));
-        }
-
-        Err(())
-    }
-
     /// Core Stylus execution logic shared between inspected and non-inspected modes
     pub(crate) fn execute_stylus_program(
         &mut self,
@@ -303,56 +241,174 @@ where
             Vec<u8>,
         ) -> (Vec<u8>, VecReader, ArbGas),
     ) -> Option<InterpreterAction> {
-        let context = self.ctx();
+        let mut gas = Gas::new(stylus_ctx.gas_limit);
 
-        let compile_config =
-            CompileConfig::version(context.chain().stylus_version(), context.chain().debug_mode());
+        let (
+            compile_config,
+            stylus_config,
+            (serialized, _module),
+            wasm_open_pages,
+            call_cost,
+            evm_data,
+        ) = {
+            let context = self.ctx();
 
-        let stylus_config = StylusConfig::new(
-            context.chain().stylus_version(),
-            context.chain().max_depth(),
-            context.chain().ink_price(),
-        );
+            let (stylus_params, gas_cost) = context.arb_state().programs().get_stylus_params();
+            if !gas.record_cost(gas_cost) {
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::OutOfGas,
+                    output: Default::default(),
+                    gas: Default::default(),
+                }));
+            }
 
-        let (serialized, _module, stylus_data) = {
-            // Use read lock to get cached program if available
-            // if not available drop the read lock and acquire write lock to compile and insert
-            let maybe_cached = {
-                let mut cache = PROGRAM_CACHE.lock().unwrap();
-                if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
-                    Some((serialized, module, stylus_data))
+            let compile_config = CompileConfig::version(
+                context.cfg().stylus().stylus_version_or_default(),
+                context.cfg().stylus().debug_mode(),
+            );
+
+            let stylus_config = StylusConfig::new(
+                context.cfg().stylus().stylus_version_or_default(),
+                context.cfg().stylus().max_stack_depth_or_default(),
+                context.cfg().stylus().ink_price_or_default(),
+            );
+
+            let (serialized, _module, stylus_data, gas_cost) = {
+                let maybe_cached = PROGRAM_CACHE.lock().unwrap().get(&code_hash).cloned();
+                if let Some((serialized, module, stylus_data)) = maybe_cached {
+                    (serialized, module, stylus_data, 0)
                 } else {
-                    None
-                }
-            };
+                    let bytecode =
+                        context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
 
-            if let Some((serialized, module, stylus_data)) = maybe_cached {
-                (serialized, module, stylus_data)
-            } else {
-                let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
+                    if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
+                        return None;
+                    }
 
-                if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
-                    return None;
-                }
+                    let (serialized, module, stylus_data, gas_cost) = compile_stylus_bytecode(
+                        &bytecode,
+                        code_hash,
+                        context.cfg().stylus().arbos_version_or_default(),
+                        context.cfg().stylus().stylus_version_or_default(),
+                        context.cfg().stylus().page_limit_or_default(),
+                        context.cfg().stylus().debug_mode(),
+                        stylus_ctx.gas_limit,
+                    )
+                    .ok()?;
 
-                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
-                    &bytecode,
-                    code_hash,
-                    context.chain().arbos_version(),
-                    context.chain().stylus_version(),
-                    stylus_ctx.gas_limit,
-                    &compile_config,
-                ) {
-                    let mut cache = PROGRAM_CACHE.lock().unwrap();
-                    cache.get_or_insert(code_hash, || {
+                    PROGRAM_CACHE.lock().unwrap().get_or_insert(code_hash, || {
                         (serialized.clone(), module.clone(), stylus_data)
                     });
 
-                    (serialized, module, stylus_data)
-                } else {
-                    return None;
+                    (serialized, module, stylus_data, gas_cost)
                 }
+            };
+
+            if !gas.record_cost(gas_cost) {
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::OutOfGas,
+                    output: Default::default(),
+                    gas: Default::default(),
+                }));
             }
+
+            let wasm_open_pages = context.local().stylus_pages_open();
+
+            let program_info = if let Some(program_info) =
+                context.arb_state().programs().program_info(&code_hash)
+            {
+                if !context.cfg().stylus().disable_auto_activate() {
+                    let program_info = ProgramInfo {
+                        version: stylus_config.version,
+                        init_cost: stylus_data.init_cost,
+                        cached_cost: stylus_data.cached_init_cost,
+                        footprint: stylus_data.footprint,
+                        cached: program_info.cached,
+                        asm_estimated_kb: stylus_data.asm_estimate,
+                        age: 0,
+                    };
+
+                    context.arb_state().programs().save_program_info(&code_hash, &program_info);
+
+                    program_info
+                } else {
+                    // if not auto-activate, require match
+                    if program_info.version != stylus_config.version
+                        || program_info.init_cost != stylus_data.init_cost
+                        || program_info.cached_cost != stylus_data.cached_init_cost
+                        || program_info.footprint != stylus_data.footprint
+                    {
+                        return Some(InterpreterAction::Return(InterpreterResult {
+                            result: InstructionResult::Revert,
+                            output: Default::default(),
+                            gas: Default::default(),
+                        }));
+                    }
+
+                    program_info
+                }
+            } else if context.cfg().stylus().disable_auto_activate() {
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::Revert,
+                    output: Default::default(),
+                    gas: Default::default(),
+                }));
+            } else {
+                let program_info = ProgramInfo {
+                    version: stylus_config.version,
+                    init_cost: stylus_data.init_cost,
+                    cached_cost: stylus_data.cached_init_cost,
+                    footprint: stylus_data.footprint,
+                    cached: !context.cfg().stylus().disable_auto_cache(),
+                    asm_estimated_kb: stylus_data.asm_estimate,
+                    age: 0,
+                };
+
+                let _ = context.arb_state().programs().save_program_info(&code_hash, &program_info);
+
+                program_info
+            };
+
+
+            let inputs = InputsImpl {
+                target_address: stylus_ctx.target_address,
+                caller_address: stylus_ctx.caller_address,
+                input: CallInput::Bytes(Bytes::from(stylus_ctx.calldata.to_vec())),
+                call_value: stylus_ctx.call_value,
+                bytecode_address: Some(stylus_ctx.target_address),
+            };
+
+            // Store or update program info in ArbOS state
+
+            let mut call_cost =
+                stylus_call_cost(&stylus_params, stylus_data.footprint, 0, INITIAL_FREE_PAGES);
+
+            if program_info.cached {
+                call_cost += cached_gas(&program_info, &stylus_params);
+            } else {
+                call_cost += init_gas(&program_info, &stylus_params);
+            }
+
+            if !gas.record_cost(call_cost) {
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::OutOfGas,
+                    output: Default::default(),
+                    gas,
+                }));
+            }
+
+            context.local_mut().add_stylus_pages_open(stylus_data.footprint as u64);
+
+            let evm_data = build_evm_data(context, inputs);
+
+            (
+                compile_config,
+                stylus_config,
+                (serialized, _module),
+                wasm_open_pages,
+                call_cost,
+                evm_data,
+            )
         };
 
         let inputs = InputsImpl {
@@ -363,9 +419,6 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16)
-            + cached_gas(stylus_data);
-
         let mut gas = Gas::new(stylus_ctx.gas_limit);
         if !gas.record_cost(call_cost) {
             return Some(InterpreterAction::Return(InterpreterResult {
@@ -375,7 +428,6 @@ where
             }));
         }
 
-        let evm_data = build_evm_data(self.ctx(), inputs.clone());
         let evm_api =
             self.build_api_requestor(inputs.clone(), stylus_ctx.is_static, api_request_handler);
 
@@ -402,17 +454,20 @@ where
         let (kind, data) = outcome.into_data();
 
         let result = match kind {
-            UserOutcomeKind::Success => revm::interpreter::InstructionResult::Return,
-            UserOutcomeKind::Revert => revm::interpreter::InstructionResult::Revert,
-            UserOutcomeKind::Failure => revm::interpreter::InstructionResult::Revert,
-            UserOutcomeKind::OutOfInk => revm::interpreter::InstructionResult::OutOfGas,
+            UserOutcomeKind::Success => InstructionResult::Return,
+            UserOutcomeKind::Revert => InstructionResult::Revert,
+            UserOutcomeKind::Failure => InstructionResult::Revert,
+            UserOutcomeKind::OutOfInk => InstructionResult::OutOfGas,
             UserOutcomeKind::OutOfStack => {
                 gas_left = 0;
-                revm::interpreter::InstructionResult::StackOverflow
+                InstructionResult::StackOverflow
             }
         };
 
         gas.erase_cost(gas_left);
+
+        // re-borrow context briefly for the update
+        self.ctx().local_mut().set_stylus_pages_open(wasm_open_pages);
 
         Some(InterpreterAction::Return(InterpreterResult { result, output: data.into(), gas }))
     }
@@ -425,6 +480,85 @@ where
             |evm, inputs, is_static, req_type, data| evm.request(inputs, is_static, req_type, data),
         )
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompileStylusError {
+    InvalidCompressedPayload,
+    NotStylusProgram,
+}
+
+impl fmt::Display for CompileStylusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidCompressedPayload => f.write_str("invalid Stylus compressed payload"),
+            Self::NotStylusProgram => f.write_str("bytecode is not a Stylus program"),
+        }
+    }
+}
+
+impl std::error::Error for CompileStylusError {}
+
+/// Compile Stylus bytecode
+#[allow(clippy::too_many_arguments)]
+pub fn compile_stylus_bytecode(
+    bytecode: &Bytes,
+    code_hash: B256,
+    arbos_version: u16,
+    stylus_version: u16,
+    page_limit: u16,
+    debug: bool,
+    gas_limit: u64,
+) -> Result<(Vec<u8>, Module, StylusData, u64), CompileStylusError> {
+    if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
+        let (dictionary, compressed_bytecode) =
+            if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
+                (dictionary, compressed_bytecode)
+            } else {
+                return Err(CompileStylusError::InvalidCompressedPayload);
+            };
+
+        let dictionary = match dictionary[0] {
+            0x00 => Dictionary::Empty,
+            0x01 => Dictionary::StylusProgram,
+            _ => unreachable!(),
+        };
+
+        let bytecode = brotli::decompress(compressed_bytecode, dictionary)
+            .or_else(|err| {
+                if dictionary == Dictionary::Empty {
+                    Ok(compressed_bytecode.to_vec())
+                } else {
+                    Err(err)
+                }
+            })
+            .unwrap();
+
+        let mut activation_gas = gas_limit;
+        let (module, stylus_data) = native::activate(
+            bytecode.as_slice(),
+            &Bytes32::from(code_hash.0),
+            stylus_version,
+            arbos_version as u64,
+            page_limit,
+            debug,
+            &mut activation_gas,
+        )
+        .unwrap();
+
+        let bytecode = native::compile(
+            bytecode.as_slice(),
+            stylus_version,
+            false,
+            wasmer_types::compilation::target::Target::default(),
+            true,
+        )
+        .unwrap();
+
+        return Ok((bytecode, module, stylus_data, gas_limit.saturating_sub(activation_gas)));
+    }
+
+    Err(CompileStylusError::NotStylusProgram)
 }
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I>

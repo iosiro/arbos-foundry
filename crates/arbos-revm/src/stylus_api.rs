@@ -112,7 +112,10 @@ where
         };
 
         let mut gas = Gas::new(gas_limit);
-        _ = gas.record_cost(100);
+        if !gas.record_cost(100) {
+            gas.spend_all();
+            return (Status::OutOfGas.into(), VecReader::new(vec![]), ArbGas(gas.spent()));
+        }
 
         let first_frame_input = FrameInput::Call(Box::new(CallInputs {
             input: CallInput::Bytes(calldata),
@@ -232,7 +235,7 @@ where
             return (
                 [vec![0x00], "out of gas".as_bytes().to_vec()].concat(),
                 VecReader::new(vec![]),
-                ArbGas(gas_remaining),
+                ArbGas(0),
             );
         }
 

@@ -9,6 +9,7 @@ use alloy_chains::NamedChain;
 use alloy_evm::precompiles::PrecompilesMap;
 use alloy_primitives::{Address, map::AddressHashMap};
 use clap::Parser;
+use revm::{context::ContextTr, handler::PrecompileProvider};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -44,7 +45,10 @@ impl NetworkConfigs {
     }
 
     /// Inject precompiles for configured networks.
-    pub fn inject_precompiles(self, precompiles: &mut PrecompilesMap) {
+    pub fn inject_precompiles<CTX: ContextTr, P: PrecompileProvider<CTX>>(
+        self,
+        precompiles: &mut PrecompilesMap<CTX, P>,
+    ) {
         if self.celo {
             precompiles.apply_precompile(&CELO_TRANSFER_ADDRESS, move |_| {
                 Some(celo::transfer::precompile())
