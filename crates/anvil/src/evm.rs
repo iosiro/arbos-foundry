@@ -155,12 +155,15 @@ mod tests {
     impl PrecompileFactory for CustomPrecompileFactory {
         fn precompiles(&self) -> Vec<(Precompile, u64)> {
             vec![(
-                Precompile::from((
-                    PrecompileId::Custom(Cow::Borrowed("custom_echo")),
-                    PRECOMPILE_ADDR,
-                    custom_echo_precompile as fn(&[u8], u64) -> PrecompileResult,
-                )),
-                1000,
+                PRECOMPILE_ADDR,
+                DynPrecompile::from(|input: PrecompileInput<'_>| {
+                    Ok(PrecompileOutput {
+                        bytes: Bytes::copy_from_slice(input.data),
+                        gas_used: 0,
+                        gas_refunded: 0,
+                        reverted: false,
+                    })
+                }),
             )]
         }
     }

@@ -1793,12 +1793,17 @@ async fn test_config_with_osaka_hardfork_with_precompile_factory() {
     impl PrecompileFactory for CustomPrecompileFactory {
         fn precompiles(&self) -> Vec<(Precompile, u64)> {
             vec![(
-                Precompile::from((
-                    PrecompileId::Custom(Cow::Borrowed("custom_echo")),
-                    address!("0x0000000000000000000000000000000000000071"),
-                    custom_echo_precompile as fn(&[u8], u64) -> PrecompileResult,
-                )),
-                1000,
+                address!("0x0000000000000000000000000000000000000071"),
+                alloy_evm::precompiles::DynPrecompile::from(
+                    |input: alloy_evm::precompiles::PrecompileInput<'_>| {
+                        Ok(revm::precompile::PrecompileOutput {
+                            bytes: Bytes::copy_from_slice(input.data),
+                            gas_used: 0,
+                            gas_refunded: 0,
+                            reverted: false,
+                        })
+                    },
+                ),
             )]
         }
     }

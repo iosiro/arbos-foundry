@@ -669,9 +669,9 @@ where
 
             EvmApiMethod::EmitLog => {
                 self.handle_emit_log(input, data, |(evm, log): (&mut Self, Log)| {
-                    let (context, inspector, frame) = evm.ctx_inspector_frame();
+                    let (context, inspector) = evm.ctx_inspector();
                     context.log(log.clone());
-                    inspector.log(&mut frame.interpreter, context, log);
+                    inspector.log(context, log);
                 })
             }
             _ => self.request_inner(input, is_static, req_type, data),
