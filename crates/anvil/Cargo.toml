@@ -31,7 +31,6 @@ foundry-evm-networks.workspace = true
 
 # alloy
 alloy-evm = { workspace = true, features = ["call-util"] }
-alloy-op-evm.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }
 alloy-contract = { workspace = true, features = ["pubsub"] }
@@ -57,8 +56,6 @@ alloy-chains.workspace = true
 alloy-genesis.workspace = true
 alloy-trie.workspace = true
 alloy-hardforks.workspace = true
-alloy-op-hardforks.workspace = true
-op-alloy-consensus = { workspace = true, features = ["serde"] }
 
 # revm
 revm = { workspace = true, features = [
@@ -68,7 +65,6 @@ revm = { workspace = true, features = [
     "c-kzg",
 ] }
 revm-inspectors.workspace = true
-op-revm.workspace = true
 
 # axum related
 axum.workspace = true
@@ -113,8 +109,6 @@ alloy-eip5792.workspace = true
 rand.workspace = true
 foundry-test-utils.workspace = true
 tokio = { workspace = true, features = ["full"] }
-
-op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["cli", "jemalloc"]
