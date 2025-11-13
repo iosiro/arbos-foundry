@@ -1240,7 +1240,7 @@ dependencies = [
 [[package]]
 name = "arbutil"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "digest 0.10.7",
  "eyre",
@@ -2489,7 +2489,7 @@ checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
 [[package]]
 name = "brotli"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "cc",
  "lazy_static",
@@ -2616,7 +2616,7 @@ dependencies = [
 [[package]]
 name = "caller-env"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "brotli",
  "num_enum",
@@ -4673,7 +4673,7 @@ dependencies = [
 [[package]]
 name = "forward"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "eyre",
  "structopt",
@@ -8164,7 +8164,7 @@ dependencies = [
 [[package]]
 name = "prover"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "arbutil",
  "bincode",
@@ -10249,7 +10249,7 @@ dependencies = [
 [[package]]
 name = "stylus"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "arbutil",
  "bincode",
@@ -11334,7 +11334,7 @@ checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 [[package]]
 name = "user-host-trait"
 version = "0.1.0"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "arbutil",
  "caller-env",
@@ -11631,7 +11631,7 @@ dependencies = [
 [[package]]
 name = "wasmer"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "bytes",
  "cfg-if 1.0.3",
@@ -11659,7 +11659,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "backtrace",
  "bytes",
@@ -11685,7 +11685,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-cranelift"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "cranelift-codegen",
  "cranelift-entity",
@@ -11703,7 +11703,7 @@ dependencies = [
 [[package]]
 name = "wasmer-compiler-singlepass"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "byteorder",
  "dynasm",
@@ -11720,7 +11720,7 @@ dependencies = [
 [[package]]
 name = "wasmer-derive"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "proc-macro-error",
  "proc-macro2",
@@ -11731,7 +11731,7 @@ dependencies = [
 [[package]]
 name = "wasmer-types"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "bytecheck",
  "enum-iterator 0.7.0",
@@ -11746,7 +11746,7 @@ dependencies = [
 [[package]]
 name = "wasmer-vm"
 version = "4.2.8"
-source = "git+https://github.com/bernard-wagner/nitro?branch=dev#3f8ea704474417f4b0e9f77d5ca7a03028da1ea3"
+source = "git+https://github.com/bernard-wagner/nitro?rev=e1d47755c5fe476cf197c9304faf2ec61ea0e850#e1d47755c5fe476cf197c9304faf2ec61ea0e850"
 dependencies = [
  "backtrace",
  "cc",

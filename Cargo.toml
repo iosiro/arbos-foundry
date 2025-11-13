@@ -279,9 +279,9 @@ revm-inspectors = { version = "0.30.0", features = ["serde"] }
 op-revm = { version = "10.0.0", default-features = false }
 
 # arbos
-arbutil = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
-stylus = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
-wasmer-types = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
+arbutil = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
+stylus = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
+wasmer-types = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
 
 ## alloy-evm
 alloy-evm = "0.21.1"
