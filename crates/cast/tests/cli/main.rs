@@ -25,14 +25,14 @@ mod selectors;
 
 casttest!(print_short_version, |_prj, cmd| {
     cmd.arg("-V").assert_success().stdout_eq(str![[r#"
-cast [..]-[..] ([..] [..])
+arbos-cast [..]-[..] ([..] [..])
 
 "#]]);
 });
 
 casttest!(print_long_version, |_prj, cmd| {
     cmd.arg("--version").assert_success().stdout_eq(str![[r#"
-cast Version: [..]
+arbos-cast Version: [..]
 Commit SHA: [..]
 Build Timestamp: [..]
 Build Profile: [..]
@@ -45,7 +45,7 @@ casttest!(print_help, |_prj, cmd| {
     cmd.arg("--help").assert_success().stdout_eq(str![[r#"
 A Swiss Army knife for interacting with Ethereum applications from the command line
 
-Usage: cast[..] <COMMAND>
+Usage: arbos-cast[..] <COMMAND>
 
 Commands:
 ...
@@ -3979,7 +3979,7 @@ error: unexpected argument '--invalid-flag' found
 
   tip: to pass '--invalid-flag' as a value, use '-- --invalid-flag'
 
-Usage: cast[..] call [OPTIONS] [TO] [SIG] [ARGS]... [COMMAND]
+Usage: arbos-cast[..] call [OPTIONS] [TO] [SIG] [ARGS]... [COMMAND]
 
 For more information, try '--help'.
 

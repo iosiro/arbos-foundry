@@ -21,7 +21,6 @@ use crate::{
     utils::IgnoredTraces,
 };
 use alloy_consensus::BlobTransactionSidecar;
-use alloy_evm::eth::EthEvmContext;
 use alloy_network::TransactionBuilder4844;
 use alloy_primitives::{
     Address, B256, Bytes, Log, TxKind, U256, hex,
@@ -32,6 +31,7 @@ use alloy_rpc_types::{
     request::{TransactionInput, TransactionRequest},
 };
 use alloy_sol_types::{SolCall, SolInterface, SolValue};
+use arbos_revm::chain::ArbitrumChainInfo;
 use foundry_common::{
     SELECTOR_LEN, TransactionMaybeSigned,
     mapping_slots::{MappingSlots, step as mapping_step},
@@ -41,7 +41,7 @@ use foundry_evm_core::{
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
-    evm::{FoundryEvm, new_evm_with_existing_context},
+    evm::{EthEvmContext, FoundryEvm, new_evm_with_existing_context},
 };
 use foundry_evm_traces::{
     TracingInspector, TracingInspectorConfig, identifier::SignaturesIdentifier,
@@ -110,6 +110,28 @@ pub trait CheatcodesExecutor {
         })
     }
 
+    /// Obtains [FoundryEvm] instance and executes the given CALL frame.
+    fn exec_call(
+        &mut self,
+        inputs: CallInputs,
+        ccx: &mut CheatsCtxt,
+    ) -> Result<CallOutcome, EVMError<DatabaseError>> {
+        with_evm(self, ccx, |evm| {
+            evm.inner.ctx.journaled_state.depth += 1;
+
+            let frame = FrameInput::Call(Box::new(inputs));
+
+            let outcome = match evm.run_execution(frame)? {
+                FrameResult::Create(_) => unreachable!(),
+                FrameResult::Call(call) => call,
+            };
+
+            evm.inner.ctx.journaled_state.depth -= 1;
+
+            Ok(outcome)
+        })
+    }
+
     fn console_log(&mut self, ccx: &mut CheatsCtxt, msg: &str) {
         self.get_inspector(ccx.state).console_log(msg);
     }
@@ -144,7 +166,7 @@ where
             database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
         },
         local: LocalContext::default(),
-        chain: (),
+        chain: ArbitrumChainInfo::default(),
         error,
     };
 
@@ -152,11 +174,11 @@ where
 
     let res = f(&mut evm)?;
 
-    ccx.ecx.journaled_state.inner = evm.inner.ctx.journaled_state.inner;
-    ccx.ecx.block = evm.inner.ctx.block;
-    ccx.ecx.tx = evm.inner.ctx.tx;
-    ccx.ecx.cfg = evm.inner.ctx.cfg;
-    ccx.ecx.error = evm.inner.ctx.error;
+    ccx.ecx.journaled_state.inner = evm.inner.0.ctx.journaled_state.inner;
+    ccx.ecx.block = evm.inner.0.ctx.block;
+    ccx.ecx.tx = evm.inner.0.ctx.tx;
+    ccx.ecx.cfg = evm.inner.0.ctx.cfg;
+    ccx.ecx.error = evm.inner.0.ctx.error;
 
     Ok(res)
 }
@@ -1131,6 +1153,10 @@ impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
     }
 
     fn step_end(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {
+        if self.broadcast.is_some() {
+            self.set_gas_limit_type(interpreter);
+        }
+
         if self.gas_metering.paused {
             self.meter_gas_end(interpreter);
         }

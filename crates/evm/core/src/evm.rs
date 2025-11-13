@@ -7,14 +7,13 @@ use crate::{
     Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{Evm, EvmEnv, eth::EthEvmContext, precompiles::PrecompilesMap};
+use alloy_evm::{Evm, EvmEnv, precompiles::PrecompilesMap};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
     Context, Journal,
     context::{
-        BlockEnv, CfgEnv, ContextTr, CreateScheme, Evm as RevmEvm, JournalTr, LocalContext,
-        LocalContextTr, TxEnv,
+        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
         result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
     },
     handler::{
@@ -31,6 +30,10 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
+use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo};
+
+pub type EthEvmContext<DB> = ArbitrumContext<DB>;
+
 pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     db: &'db mut dyn DatabaseExt,
     env: Env,
@@ -45,7 +48,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         block: env.evm_env.block_env,
         cfg: env.evm_env.cfg_env,
         tx: env.tx,
-        chain: (),
+        chain: ArbitrumChainInfo::default(),
         local: LocalContext::default(),
         error: Ok(()),
     };
@@ -120,8 +123,8 @@ pub struct FoundryEvm<'db, I: InspectorExt> {
     pub inner: RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         PrecompilesMap,
+        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >,
 }
@@ -157,43 +160,47 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     type Tx = TxEnv;
 
     fn block(&self) -> &BlockEnv {
-        &self.inner.block
+        &self.inner.0.block
     }
 
     fn chain_id(&self) -> u64 {
-        self.inner.ctx.cfg.chain_id
+        self.inner.0.ctx.cfg.chain_id
     }
 
     fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-        (&self.inner.ctx.journaled_state.database, &self.inner.inspector, &self.inner.precompiles)
+        (
+            &self.inner.0.ctx.journaled_state.database,
+            &self.inner.0.inspector,
+            &self.inner.0.precompiles,
+        )
     }
 
     fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
         (
-            &mut self.inner.ctx.journaled_state.database,
-            &mut self.inner.inspector,
-            &mut self.inner.precompiles,
+            &mut self.inner.0.ctx.journaled_state.database,
+            &mut self.inner.0.inspector,
+            &mut self.inner.0.precompiles,
         )
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
-        &mut self.inner.ctx.journaled_state.database
+        &mut self.inner.0.ctx.journaled_state.database
     }
 
     fn precompiles(&self) -> &Self::Precompiles {
-        &self.inner.precompiles
+        &self.inner.0.precompiles
     }
 
     fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
-        &mut self.inner.precompiles
+        &mut self.inner.0.precompiles
     }
 
     fn inspector(&self) -> &Self::Inspector {
-        &self.inner.inspector
+        &self.inner.0.inspector
     }
 
     fn inspector_mut(&mut self) -> &mut Self::Inspector {
-        &mut self.inner.inspector
+        &mut self.inner.0.inspector
     }
 
     fn set_inspector_enabled(&mut self, _enabled: bool) {
@@ -225,23 +232,23 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     where
         Self: Sized,
     {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.ctx;
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
 
         (journaled_state.database, EvmEnv { block_env, cfg_env })
     }
 }
 
 impl<'db, I: InspectorExt> Deref for FoundryEvm<'db, I> {
-    type Target = Context<BlockEnv, TxEnv, CfgEnv, &'db mut dyn DatabaseExt>;
+    type Target = EthEvmContext<&'db mut dyn DatabaseExt>;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.ctx
+        &self.inner.0.ctx
     }
 }
 
 impl<I: InspectorExt> DerefMut for FoundryEvm<'_, I> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner.ctx
+        &mut self.inner.0.ctx
     }
 }
 
@@ -262,8 +269,8 @@ impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
     type Evm = RevmEvm<
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         PrecompilesMap,
+        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
         EthFrame<EthInterpreter>,
     >;
     type Error = EVMError<DatabaseError>;

@@ -5,6 +5,7 @@ members = [
     "crates/anvil/core/",
     "crates/anvil/rpc/",
     "crates/anvil/server/",
+    "crates/arbos-revm/",
     "crates/cast/",
     "crates/cheatcodes/",
     "crates/cheatcodes/spec/",
@@ -26,6 +27,7 @@ members = [
     "crates/test-utils/",
     "crates/lint/",
 ]
+exclude = [ "testdata" ]
 resolver = "2"
 
 [workspace.package]
@@ -177,6 +179,7 @@ trezor-client.opt-level = "z"
 
 [workspace.dependencies]
 anvil = { path = "crates/anvil" }
+arbos-revm = { path = "crates/arbos-revm" }
 cast = { path = "crates/cast" }
 chisel = { path = "crates/chisel" }
 forge = { path = "crates/forge" }
@@ -274,6 +277,12 @@ op-alloy-flz = "0.13.1"
 revm = { version = "29.0.0", default-features = false }
 revm-inspectors = { version = "0.30.0", features = ["serde"] }
 op-revm = { version = "10.0.0", default-features = false }
+
+# arbos
+arbutil = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
+stylus = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
+wasmer-types = { git = "https://github.com/bernard-wagner/nitro", branch = "dev", default-features = false }
+
 ## alloy-evm
 alloy-evm = "0.21.1"
 alloy-op-evm = "0.21.1"

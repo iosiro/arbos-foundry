@@ -23,7 +23,7 @@ forgetest!(throws_on_conflicting_args, |prj, cmd| {
     cmd.args(["compile", "--format-json", "--quiet"]).assert_failure().stderr_eq(str![[r#"
 error: the argument '--json' cannot be used with '--quiet'
 
-Usage: forge[..] build --json [PATHS]...
+Usage: arbos-forge[..] build --json [PATHS]...
 
 For more information, try '--help'.
 
