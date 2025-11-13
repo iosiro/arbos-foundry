@@ -19,7 +19,6 @@ use alloy_chains::Chain;
 use alloy_consensus::BlockHeader;
 use alloy_genesis::Genesis;
 use alloy_network::{AnyNetwork, TransactionResponse};
-use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{BlockNumber, TxHash, U256, hex, map::HashMap, utils::Unit};
 use alloy_provider::Provider;
 use alloy_rpc_types::{Block, BlockNumberOrTag};
@@ -43,7 +42,6 @@ use foundry_evm::{
     utils::{apply_chain_and_block_specific_env_changes, get_blob_base_fee_update_fraction},
 };
 use itertools::Itertools;
-use op_revm::OpTransaction;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
 use revm::{
@@ -538,9 +536,6 @@ impl NodeConfig {
         if let Some(hardfork) = self.hardfork {
             return hardfork;
         }
-        if self.networks.optimism {
-            return OpHardfork::default().into();
-        }
         EthereumHardfork::default().into()
     }
 
@@ -989,13 +984,6 @@ impl NodeConfig {
         Config::foundry_block_cache_file(chain_id, block)
     }
 
-    /// Sets whether to enable optimism support
-    #[must_use]
-    pub fn with_optimism(mut self, enable_optimism: bool) -> Self {
-        self.networks.optimism = enable_optimism;
-        self
-    }
-
     /// Sets whether to disable the default create2 deployer
     #[must_use]
     pub fn with_disable_default_create2_deployer(mut self, yes: bool) -> Self {
@@ -1021,17 +1009,6 @@ impl NodeConfig {
     #[must_use]
     pub fn with_networks(mut self, networks: NetworkConfigs) -> Self {
         self.networks = networks;
-        self
-    }
-
-    /// Sets whether to enable Celo support
-    #[must_use]
-    pub fn with_celo(mut self, celo: bool) -> Self {
-        self.networks.celo = celo;
-        if celo {
-            // Celo requires Optimism support
-            self.networks.optimism = true;
-        }
         self
     }
 
@@ -1088,10 +1065,7 @@ impl NodeConfig {
                 basefee: self.get_base_fee(),
                 ..Default::default()
             },
-            OpTransaction {
-                base: TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
-                ..Default::default()
-            },
+            TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
             self.networks,
         );
 
@@ -1359,7 +1333,7 @@ latest block number: {latest_block}"
             // need to update the dev signers and env with the chain id
             self.set_chain_id(Some(chain_id));
             env.evm_env.cfg_env.chain_id = chain_id;
-            env.tx.base.chain_id = chain_id.into();
+            env.tx.chain_id = chain_id.into();
             chain_id
         };
         let override_chain_id = self.chain_id;

@@ -209,26 +209,6 @@ async fn test_fork_eth_get_nonce() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_fork_optimism_with_transaction_hash() {
-    use std::str::FromStr;
-
-    // Fork to a block with a specific transaction
-    let fork_tx_hash =
-        TxHash::from_str("fcb864b5a50f0f0b111dbbf9e9167b2cb6179dfd6270e1ad53aac6049c0ec038")
-            .unwrap();
-    let (api, _handle) = spawn(
-        NodeConfig::test()
-            .with_eth_rpc_url(Some(rpc::next_rpc_endpoint(NamedChain::Optimism)))
-            .with_fork_transaction_hash(Some(fork_tx_hash)),
-    )
-    .await;
-
-    // Make sure the fork starts from previous block
-    let block_number = api.block_number().unwrap().to::<u64>();
-    assert_eq!(block_number, 125777954 - 1);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn test_fork_eth_fee_history() {
     let (api, handle) = spawn(fork_config()).await;
     let provider = handle.http_provider();
@@ -1732,68 +1712,6 @@ async fn test_config_with_cancun_hardfork() {
         SystemContract::BeaconRoots,
         address!("000f3df6d732807ef1319fb7b8bb8522d0beac02"),
     )]);
-
-    assert_hardfork_config(
-        &config,
-        &expected_blob_params,
-        &expected_precompiles,
-        &expected_system_contracts,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_config_with_prague_hardfork_with_celo() {
-    let (api, _handle) = spawn(
-        NodeConfig::test().with_hardfork(Some(EthereumHardfork::Prague.into())).with_celo(true),
-    )
-    .await;
-
-    let config = api.config().unwrap();
-
-    let expected_blob_params = BlobParams {
-        target_blob_count: 6,
-        max_blob_count: 9,
-        update_fraction: 5007716,
-        min_blob_fee: 1,
-        max_blobs_per_tx: 9,
-        blob_base_cost: 0,
-    };
-
-    // <= Prague + Celo precompiles
-    let expected_precompiles = [
-        address!("0000000000000000000000000000000000000001"),
-        address!("0000000000000000000000000000000000000002"),
-        address!("0000000000000000000000000000000000000003"),
-        address!("0000000000000000000000000000000000000004"),
-        address!("0000000000000000000000000000000000000005"),
-        address!("0000000000000000000000000000000000000006"),
-        address!("0000000000000000000000000000000000000007"),
-        address!("0000000000000000000000000000000000000008"),
-        address!("0000000000000000000000000000000000000009"),
-        address!("000000000000000000000000000000000000000a"),
-        address!("000000000000000000000000000000000000000b"),
-        address!("000000000000000000000000000000000000000c"),
-        address!("000000000000000000000000000000000000000d"),
-        address!("000000000000000000000000000000000000000e"),
-        address!("000000000000000000000000000000000000000f"),
-        address!("0000000000000000000000000000000000000010"),
-        address!("0000000000000000000000000000000000000011"),
-        address!("00000000000000000000000000000000000000fd"), // `celo transfer`
-    ];
-
-    let expected_system_contracts = BTreeMap::from([
-        (SystemContract::BeaconRoots, address!("000f3df6d732807ef1319fb7b8bb8522d0beac02")),
-        (
-            SystemContract::ConsolidationRequestPredeploy,
-            address!("0000bbddc7ce488642fb579f8b00f3a590007251"),
-        ),
-        (SystemContract::DepositContract, address!("00000000219ab540356cbb839cbe05303d7705fa")),
-        (SystemContract::HistoryStorage, address!("0000f90827f1c53a10cb7a02335b175320002935")),
-        (
-            SystemContract::WithdrawalRequestPredeploy,
-            address!("00000961ef480eb55e80d19ad83579a64c007002"),
-        ),
-    ]);
 
     assert_hardfork_config(
         &config,
