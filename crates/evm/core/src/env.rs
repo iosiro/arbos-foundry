@@ -1,9 +1,10 @@
-pub use alloy_evm::EvmEnv;
 use revm::{
     Context, Database, Journal, JournalEntry,
-    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, TxEnv},
+    context::{JournalInner, JournalTr},
     primitives::hardfork::SpecId,
 };
+
+use crate::evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv};
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]

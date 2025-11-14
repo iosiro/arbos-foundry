@@ -27,6 +27,7 @@ use crate::{
         pool::transactions::PoolTransaction,
         sign::build_typed_transaction,
     },
+    evm::AnvilEvm,
     inject_custom_precompiles,
     mem::{
         inspector::AnvilInspector,
@@ -49,7 +50,6 @@ use alloy_eips::{
 };
 use alloy_evm::{
     Database, Evm,
-    eth::EthEvmContext,
     overrides::{OverrideBlockHashes, apply_state_overrides},
     precompiles::{DynPrecompile, Precompile, PrecompilesMap},
 };
@@ -97,7 +97,10 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{
+        evm::{BlockEnv, EthEvmContext},
+        precompiles::EC_RECOVER,
+    },
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -110,7 +113,7 @@ use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
     DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv, result::HaltReason},
+    context::{Block as RevmBlock, Cfg, TxEnv, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
@@ -1145,7 +1148,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -1445,7 +1448,7 @@ impl Backend {
 
         self.fees.set_blob_excess_gas_and_price(BlobExcessGasAndPrice::new(
             next_block_excess_blob_gas,
-            get_blob_base_fee_update_fraction_by_spec_id(*self.env.read().evm_env.spec_id()),
+            get_blob_base_fee_update_fraction_by_spec_id(self.env.read().evm_env.spec_id()),
         ));
 
         // notify all listeners

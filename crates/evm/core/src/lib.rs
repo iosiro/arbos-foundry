@@ -31,7 +31,6 @@ pub mod backend;
 pub mod buffer;
 pub mod constants;
 pub mod decode;
-pub mod either_evm;
 pub mod evm;
 pub mod fork;
 pub mod ic;

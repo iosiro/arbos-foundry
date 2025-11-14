@@ -5,7 +5,7 @@
 mod buffer;
 
 // pub mod api;
-pub mod chain;
+pub mod config;
 pub mod constants;
 pub mod context;
 pub mod evm;

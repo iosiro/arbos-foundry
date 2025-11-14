@@ -7,13 +7,13 @@ use crate::{
     Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{Evm, EvmEnv, precompiles::PrecompilesMap};
+use alloy_evm::{Evm, precompiles::PrecompilesMap};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
     Context, Journal,
     context::{
-        BlockEnv, ContextTr, CreateScheme, JournalTr, LocalContext, LocalContextTr, TxEnv,
+        ContextTr, CreateScheme, JournalTr, LocalContextTr,
         result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
     },
     handler::{
@@ -30,9 +30,22 @@ use revm::{
     primitives::hardfork::SpecId,
 };
 
-use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm, chain::ArbitrumChainInfo};
+use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm};
+
+pub type BlockEnv = revm::context::BlockEnv;
+pub type CfgEnv<SPEC = SpecId> = arbos_revm::config::ArbitrumConfig<SPEC>;
+pub type TxEnv = revm::context::TxEnv;
+pub type LocalContext = revm::context::LocalContext;
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
+pub type EvmEnv<SPEC = SpecId> = alloy_evm::EvmEnv<BlockEnv, CfgEnv<SPEC>>;
+pub type EthEvm<DB, I, P> = RevmEvm<
+    EthEvmContext<DB>,
+    I,
+    P,
+    EthInstructions<EthInterpreter, EthEvmContext<DB>>,
+    EthFrame<EthInterpreter>,
+>;
 
 pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     db: &'db mut dyn DatabaseExt,
@@ -48,7 +61,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         block: env.evm_env.block_env,
         cfg: env.evm_env.cfg_env,
         tx: env.tx,
-        chain: ArbitrumChainInfo::default(),
+        chain: (),
         local: LocalContext::default(),
         error: Ok(()),
     };
@@ -157,6 +170,8 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     type Error = EVMError<DatabaseError>;
     type HaltReason = HaltReason;
     type Spec = SpecId;
+    type Block = BlockEnv;
+    type Config = CfgEnv;
     type Tx = TxEnv;
 
     fn block(&self) -> &BlockEnv {

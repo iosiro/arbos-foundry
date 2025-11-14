@@ -9,9 +9,11 @@ use crate::{
 };
 use alloy_primitives::{Address, B256, U256, map::HashMap};
 use alloy_rpc_types::BlockId;
-use foundry_evm::backend::{BlockchainDb, DatabaseResult, StateSnapshot};
+use foundry_evm::{
+    backend::{BlockchainDb, DatabaseResult, StateSnapshot},
+    core::evm::BlockEnv,
+};
 use revm::{
-    context::BlockEnv,
     database::{DatabaseRef, DbAccount},
     state::AccountInfo,
 };

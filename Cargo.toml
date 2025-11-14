@@ -277,7 +277,7 @@ stylus = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe4
 wasmer-types = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
 
 ## alloy-evm
-alloy-evm = "0.21.1"
+alloy-evm = { git = "https://github.com/iosiro/alloy-evm", rev = "c18cc373d3de47b2dfcd57d0149972aecaa1ccfc", default-features = false }
 
 ## cli
 anstream = "0.6"
