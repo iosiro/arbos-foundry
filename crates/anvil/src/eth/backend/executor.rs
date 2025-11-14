@@ -10,6 +10,7 @@ use crate::{
         error::InvalidTransactionError,
         pool::transactions::PoolTransaction,
     },
+    evm::AnvilEvm,
     inject_custom_precompiles,
     mem::inspector::AnvilInspector,
 };
@@ -18,8 +19,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
 use alloy_evm::{
-    EthEvm, Evm,
-    eth::EthEvmContext,
+    Evm,
     precompiles::{DynPrecompile, Precompile, PrecompilesMap},
 };
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
@@ -29,13 +29,16 @@ use anvil_core::eth::{
 };
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{
+        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext},
+        precompiles::EC_RECOVER,
+    },
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
     Database, DatabaseRef, Inspector, Journal,
-    context::{Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext},
+    context::{Block as RevmBlock, Cfg, JournalTr},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
     handler::{EthPrecompiles, instructions::EthInstructions},
@@ -446,7 +449,7 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> EitherEvm<DB, I, PrecompilesMap>
+) -> AnvilEvm<DB, I, PrecompilesMap>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -471,16 +474,14 @@ where
         spec,
     }
     .precompiles;
-    let eth_evm = RevmEvm::new_with_inspector(
+    let eth_evm = EthEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
         PrecompilesMap::from_static(eth_precompiles),
     );
 
-    let eth = EthEvm::new(eth_evm, true);
-
-    EitherEvm(eth)
+    AnvilEvm::new(eth_evm, true)
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -488,7 +489,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

@@ -1,11 +1,21 @@
 use alloy_evm::{
     Database, Evm,
-    eth::EthEvmContext,
     precompiles::{DynPrecompile, PrecompileInput, PrecompilesMap},
 };
-
-use foundry_evm::core::either_evm::EitherEvm;
-use revm::{Inspector, precompile::Precompile};
+use alloy_primitives::{Address, Bytes};
+use core::ops::{Deref, DerefMut};
+use foundry_evm::{
+    EvmEnv,
+    core::evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, TxEnv},
+};
+use revm::{
+    Context, ExecuteEvm, InspectEvm, Inspector, SystemCallEvm,
+    context::result::{EVMError, HaltReason, ResultAndState},
+    handler::PrecompileProvider,
+    interpreter::InterpreterResult,
+    precompile::Precompile,
+    primitives::hardfork::SpecId,
+};
 use std::fmt::Debug;
 
 /// Object-safe trait that enables injecting extra precompiles when using
@@ -17,7 +27,7 @@ pub trait PrecompileFactory: Send + Sync + Unpin + Debug {
 
 /// Inject custom precompiles into the EVM dynamically.
 pub fn inject_custom_precompiles<DB, I>(
-    evm: &mut EitherEvm<DB, I, PrecompilesMap>,
+    evm: &mut AnvilEvm<DB, I, PrecompilesMap>,
     precompiles: Vec<(Precompile, u64)>,
 ) where
     DB: Database,
@@ -32,18 +42,122 @@ pub fn inject_custom_precompiles<DB, I>(
     }
 }
 
+pub struct AnvilEvm<DB: Database, I, P> {
+    inner: EthEvm<DB, I, P>,
+    inspect: bool,
+}
+
+impl<DB, I, P> Deref for AnvilEvm<DB, I, P>
+where
+    DB: Database,
+{
+    type Target = EthEvm<DB, I, P>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<DB, I, P> DerefMut for AnvilEvm<DB, I, P>
+where
+    DB: Database,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<DB, I, P> AnvilEvm<DB, I, P>
+where
+    DB: Database,
+{
+    pub fn new(evm: EthEvm<DB, I, P>, inspect: bool) -> Self {
+        Self { inner: evm, inspect }
+    }
+}
+
+impl<DB, I, PRECOMPILE> Evm for AnvilEvm<DB, I, PRECOMPILE>
+where
+    DB: Database,
+    I: Inspector<EthEvmContext<DB>>,
+    PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
+{
+    type DB = DB;
+    type Block = BlockEnv;
+    type Config = CfgEnv;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
+    type Spec = SpecId;
+    type Precompiles = PRECOMPILE;
+    type Inspector = I;
+
+    fn block(&self) -> &Self::Block {
+        &self.inner.0.block
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.inner.0.cfg.chain_id
+    }
+
+    fn transact_raw(
+        &mut self,
+        tx: Self::Tx,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        if self.inspect { self.inner.0.inspect_tx(tx) } else { self.inner.0.transact(tx) }
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
+        self.inner.0.system_call_with_caller(caller, contract, data)
+    }
+
+    fn finish(self) -> (DB, EvmEnv) {
+        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
+
+        (journaled_state.database, EvmEnv { block_env, cfg_env })
+    }
+
+    fn set_inspector_enabled(&mut self, enabled: bool) {
+        self.inspect = enabled;
+    }
+
+    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
+        (
+            &self.inner.0.ctx.journaled_state.database,
+            &self.inner.0.inspector,
+            &self.inner.0.precompiles,
+        )
+    }
+
+    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
+        (
+            &mut self.inner.0.ctx.journaled_state.database,
+            &mut self.inner.0.inspector,
+            &mut self.inner.0.precompiles,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{borrow::Cow, convert::Infallible};
 
-    use crate::{PrecompileFactory, inject_custom_precompiles};
-    use alloy_evm::{EthEvm, Evm, EvmEnv, eth::EthEvmContext, precompiles::PrecompilesMap};
+    use crate::{PrecompileFactory, evm::AnvilEvm, inject_custom_precompiles};
+    use alloy_evm::{Evm, precompiles::PrecompilesMap};
     use alloy_primitives::{Address, Bytes, TxKind, address};
-    use foundry_evm::core::either_evm::EitherEvm;
+    use foundry_evm::{
+        EvmEnv,
+        core::evm::{CfgEnv, EthEvm, EthEvmContext, LocalContext, TxEnv},
+    };
     use itertools::Itertools;
     use revm::{
         Journal,
-        context::{CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv},
+        context::JournalTr,
         database::{EmptyDB, EmptyDBTyped},
         handler::{EthPrecompiles, instructions::EthInstructions},
         inspector::NoOpInspector,
@@ -87,8 +201,7 @@ mod tests {
     /// Creates a new EVM instance with the custom precompile factory.
     fn create_eth_evm(
         spec: SpecId,
-    ) -> (foundry_evm::Env, EitherEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap>)
-    {
+    ) -> (foundry_evm::Env, AnvilEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap>) {
         let eth_env = foundry_evm::Env {
             evm_env: EvmEnv { block_env: Default::default(), cfg_env: CfgEnv::new_with_spec(spec) },
             tx: TxEnv {
@@ -113,15 +226,15 @@ mod tests {
             spec,
         }
         .precompiles;
-        let eth_evm = EitherEvm(EthEvm::new(
-            RevmEvm::new_with_inspector(
+        let eth_evm = AnvilEvm::new(
+            EthEvm::new_with_inspector(
                 eth_evm_context,
                 NoOpInspector,
                 EthInstructions::<EthInterpreter, EthEvmContext<EmptyDB>>::default(),
                 PrecompilesMap::from_static(eth_precompiles),
             ),
             true,
-        ));
+        );
 
         (eth_env, eth_evm)
     }

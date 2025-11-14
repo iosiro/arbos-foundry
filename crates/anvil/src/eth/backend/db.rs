@@ -14,13 +14,16 @@ use anvil_core::eth::{
     transaction::{MaybeImpersonatedTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
 use foundry_common::errors::FsPathError;
-use foundry_evm::backend::{
-    BlockchainDb, DatabaseError, DatabaseResult, MemDb, RevertStateSnapshotAction, StateSnapshot,
+use foundry_evm::{
+    backend::{
+        BlockchainDb, DatabaseError, DatabaseResult, MemDb, RevertStateSnapshotAction,
+        StateSnapshot,
+    },
+    core::evm::BlockEnv,
 };
 use revm::{
     Database, DatabaseCommit,
     bytecode::Bytecode,
-    context::BlockEnv,
     context_interface::block::BlobExcessGasAndPrice,
     database::{CacheDB, DatabaseRef, DbAccount},
     primitives::{KECCAK_EMPTY, eip4844::BLOB_BASE_FEE_UPDATE_FRACTION_PRAGUE},

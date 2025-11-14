@@ -1,11 +1,14 @@
-use crate::{AsEnvMut, Env, EvmEnv, utils::apply_chain_and_block_specific_env_changes};
+use crate::{
+    AsEnvMut, Env,
+    evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv},
+    utils::apply_chain_and_block_specific_env_changes,
+};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::WrapErr;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.

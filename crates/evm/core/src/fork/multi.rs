@@ -4,7 +4,7 @@
 //! concurrently active pairs at once.
 
 use super::CreateFork;
-use crate::Env;
+use crate::{Env, evm::BlockEnv};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{U256, map::HashMap};
 use alloy_provider::network::BlockResponse;
@@ -17,7 +17,6 @@ use futures::{
     stream::{Fuse, Stream},
     task::{Context, Poll},
 };
-use revm::context::BlockEnv;
 use std::{
     fmt::{self, Write},
     pin::Pin,

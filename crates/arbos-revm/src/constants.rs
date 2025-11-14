@@ -5,20 +5,22 @@ const STYLUS_EOF_VERSION: u8 = 0x00;
 pub const STYLUS_DISCRIMINANT: &[u8] =
     &[STYLUS_EOF_MAGIC, STYLUS_EOF_MAGIC_SUFFIX, STYLUS_EOF_VERSION];
 
-pub const INITIAL_MAX_WASM_SIZE: usize = 128 * 1024; // max decompressed wasm size (programs are also bounded by compressed size)
-pub const INITIAL_STACK_DEPTH: usize = 4 * 65536; // 4 page stack.
-pub const INITIAL_FREE_PAGES: u32 = 2; // 2 pages come free
-pub const INITIAL_PAGE_GAS: u64 = 1000; // linear cost per allocation.
+pub const INITIAL_ARBOS_VERSION: u16 = 42;
+pub const INITIAL_STYLUS_VERSION: u16 = 1;
+pub const INITIAL_MAX_WASM_SIZE: u32 = 128 * 1024; // max decompressed wasm size (programs are also bounded by compressed size)
+pub const INITIAL_MAX_STACK_DEPTH: u32 = 4 * 65536; // 4 page stack.
+pub const INITIAL_FREE_PAGES: u16 = 2; // 2 pages come free
+pub const INITIAL_PAGE_GAS: u16 = 1000; // linear cost per allocation.
 pub const INITIAL_PAGE_RAMP: u64 = 620674314; // targets 8
-pub const INITIAL_PAGE_LIMIT: u32 = 128; // reject wasms with memories larger than 8MB.
-pub const INITIAL_INK_PRICE: u64 = 10000; // 1 evm
-pub const INITIAL_MIN_INIT_GAS: u64 = 72; // charge 72 * 128 = 9216 gas.
-pub const INITIAL_MIN_CACHED_GAS: u64 = 11; // charge 11
-pub const INITIAL_INIT_COST_SCALAR: u32 = 50; // scale costs 1:1 (100%)
-pub const INITIAL_CACHED_COST_SCALAR: u32 = 50; // scale costs
-pub const INITIAL_EXPIRY_DAYS: u32 = 365; // deactivate after 1 year.
-pub const INITIAL_KEEPALIVE_DAYS: u32 = 31; // wait a month
-pub const INITIAL_RECENT_CACHE_SIZE: usize = 32; // cache the 32 most recent programs.
+pub const INITIAL_PAGE_LIMIT: u16 = 128; // reject wasms with memories larger than 8MB.
+pub const INITIAL_INK_PRICE: u32 = 10000; // 1 evm
+pub const INITIAL_MIN_INIT_GAS: u8 = 72; // charge 72 * 128 = 9216 gas.
+pub const INITIAL_MIN_CACHED_GAS: u8 = 11; // charge 11
+pub const INITIAL_INIT_COST_SCALAR: u8 = 50; // scale costs 1:1 (100%)
+pub const INITIAL_CACHED_COST_SCALAR: u8 = 50; // scale costs
+pub const INITIAL_EXPIRY_DAYS: u16 = 365; // deactivate after 1 year.
+pub const INITIAL_KEEPALIVE_DAYS: u16 = 31; // wait a month
+pub const INITIAL_RECENT_CACHE_SIZE: u16 = 32; // cache the 32 most recent programs.
 
 pub const MIN_INIT_GAS_UNITS: u64 = 128;
 pub const MIN_CACHED_GAS_UNITS: u64 = 32;
