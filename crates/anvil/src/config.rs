@@ -38,17 +38,16 @@ use foundry_config::Config;
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
-    core::AsEnvMut,
+    core::{
+        AsEnvMut,
+        evm::{BlockEnv, CfgEnv, TxEnv},
+    },
     utils::{apply_chain_and_block_specific_env_changes, get_blob_base_fee_update_fraction},
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
-use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
-    context_interface::block::BlobExcessGasAndPrice,
-    primitives::hardfork::SpecId,
-};
+use revm::{context_interface::block::BlobExcessGasAndPrice, primitives::hardfork::SpecId};
 use serde_json::{Value, json};
 use std::{
     fmt::Write as FmtWrite,

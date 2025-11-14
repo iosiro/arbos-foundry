@@ -81,14 +81,13 @@ use anvil_core::{
 };
 use anvil_rpc::{error::RpcError, response::ResponseResult};
 use foundry_common::provider::ProviderBuilder;
-use foundry_evm::decode::RevertDecoder;
+use foundry_evm::{core::evm::BlockEnv, decode::RevertDecoder};
 use futures::{
     StreamExt, TryFutureExt,
     channel::{mpsc::Receiver, oneshot},
 };
 use parking_lot::RwLock;
 use revm::{
-    context::BlockEnv,
     context_interface::{block::BlobExcessGasAndPrice, result::Output},
     database::CacheDB,
     interpreter::{InstructionResult, return_ok, return_revert},

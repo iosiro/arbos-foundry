@@ -1,7 +1,7 @@
 use super::fork::environment;
 use crate::{
-    EvmEnv,
     constants::DEFAULT_CREATE2_DEPLOYER,
+    evm::{BlockEnv, EvmEnv, TxEnv},
     fork::{CreateFork, configure_env},
 };
 use alloy_primitives::{Address, B256, U256};
@@ -10,7 +10,6 @@ use eyre::WrapErr;
 use foundry_common::{ALCHEMY_FREE_TIER_CUPS, provider::ProviderBuilder};
 use foundry_config::{Chain, Config, GasLimit};
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, TxEnv};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use url::Url;

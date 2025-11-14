@@ -43,7 +43,7 @@ use stylus::{
 
 use crate::{
     ArbitrumEvm,
-    chain::ArbitrumChainInfoTr,
+    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     constants::{
         COST_SCALAR_PERCENT, INITIAL_CACHED_COST_SCALAR, INITIAL_FREE_PAGES,
         INITIAL_INIT_COST_SCALAR, INITIAL_MIN_CACHED_GAS, INITIAL_MIN_INIT_GAS, INITIAL_PAGE_GAS,
@@ -67,7 +67,7 @@ where
     CTX: ArbitrumContextTr,
 {
     let config_env = context.cfg();
-    let arbos_env = context.chain();
+    let arbos_env = context.cfg().stylus();
 
     let block_env = context.block();
     let tx_env = context.tx();
@@ -115,12 +115,12 @@ pub fn stylus_call_cost(new: u16, open: u16, ever: u16) -> u64 {
     let new_open = open.saturating_add(new);
     let new_ever = max(ever, new_open);
 
-    if new_ever < INITIAL_FREE_PAGES as u16 {
+    if new_ever < INITIAL_FREE_PAGES {
         return 0;
     }
 
-    let adding = new_open.saturating_sub(open).saturating_sub(INITIAL_FREE_PAGES as u16);
-    let linear = (adding as u64).saturating_mul(INITIAL_PAGE_GAS);
+    let adding = new_open.saturating_sub(open).saturating_sub(INITIAL_FREE_PAGES);
+    let linear = (adding as u64).saturating_mul(INITIAL_PAGE_GAS as u64);
     let exp = |x: u16| -> u64 {
         if x < MEMORY_EXPONENTS.len() as u16 {
             return MEMORY_EXPONENTS[x as usize] as u64;
@@ -135,14 +135,14 @@ pub fn stylus_call_cost(new: u16, open: u16, ever: u16) -> u64 {
 }
 
 pub fn init_gas(params: StylusData) -> u64 {
-    let base = MIN_INIT_GAS_UNITS * INITIAL_MIN_INIT_GAS;
+    let base = INITIAL_MIN_INIT_GAS as u64 * MIN_INIT_GAS_UNITS;
     let dyno = (params.init_cost as u64)
         .saturating_mul(INITIAL_INIT_COST_SCALAR as u64 * COST_SCALAR_PERCENT);
     base.saturating_add(dyno.div_ceil(100))
 }
 
 pub fn cached_gas(params: StylusData) -> u64 {
-    let base = INITIAL_MIN_CACHED_GAS * MIN_CACHED_GAS_UNITS;
+    let base = INITIAL_MIN_CACHED_GAS as u64 * MIN_CACHED_GAS_UNITS;
     let dyno = (params.cached_init_cost as u64)
         .saturating_mul(INITIAL_CACHED_COST_SCALAR as u64 * COST_SCALAR_PERCENT);
     base.saturating_add(dyno.div_ceil(100))
@@ -270,7 +270,7 @@ where
                 stylus_version,
                 arbos_version as u64,
                 128,
-                false,
+                compile_config.debug.debug_funcs,
                 &mut activation_gas,
             )
             .unwrap();
@@ -278,9 +278,9 @@ where
             let bytecode = native::compile(
                 bytecode.as_slice(),
                 compile_config.version,
-                false,
+                compile_config.debug.debug_funcs,
                 wasmer_types::compilation::target::Target::default(),
-                true,
+                false,
             )
             .unwrap();
 
@@ -305,13 +305,15 @@ where
     ) -> Option<InterpreterAction> {
         let context = self.ctx();
 
-        let compile_config =
-            CompileConfig::version(context.chain().stylus_version(), context.chain().debug_mode());
+        let compile_config = CompileConfig::version(
+            context.cfg().stylus().stylus_version(),
+            context.cfg().stylus().debug_mode(),
+        );
 
         let stylus_config = StylusConfig::new(
-            context.chain().stylus_version(),
-            context.chain().max_depth(),
-            context.chain().ink_price(),
+            context.cfg().stylus().stylus_version(),
+            context.cfg().stylus().max_stack_depth(),
+            context.cfg().stylus().ink_price(),
         );
 
         let (serialized, _module, stylus_data) = {
@@ -338,8 +340,8 @@ where
                 if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
                     &bytecode,
                     code_hash,
-                    context.chain().arbos_version(),
-                    context.chain().stylus_version(),
+                    context.cfg().stylus().arbos_version(),
+                    context.cfg().stylus().stylus_version(),
                     stylus_ctx.gas_limit,
                     &compile_config,
                 ) {
@@ -363,7 +365,7 @@ where
             bytecode_address: Some(stylus_ctx.target_address),
         };
 
-        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES as u16)
+        let call_cost = stylus_call_cost(stylus_data.footprint, 0, INITIAL_FREE_PAGES)
             + cached_gas(stylus_data);
 
         let mut gas = Gas::new(stylus_ctx.gas_limit);

@@ -249,8 +249,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e536feefca2ba96c75798ac75a31046e8adfcefecdb6653803361045cc65b9"
+source = "git+https://github.com/iosiro/alloy-evm?rev=c18cc373d3de47b2dfcd57d0149972aecaa1ccfc#c18cc373d3de47b2dfcd57d0149972aecaa1ccfc"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -260,8 +259,6 @@ dependencies = [
  "alloy-sol-types",
  "auto_impl",
  "derive_more 2.0.1",
- "op-alloy-consensus",
- "op-revm",
  "revm",
  "thiserror 2.0.16",
 ]
@@ -1192,6 +1189,7 @@ name = "arbos-revm"
 version = "1.4.4"
 dependencies = [
  "arbutil",
+ "auto_impl",
  "lazy_static",
  "lru 0.14.0",
  "revm",
@@ -7362,31 +7360,6 @@ dependencies = [
  "hashbrown 0.16.0",
  "parking_lot",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "op-alloy-consensus"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a501241474c3118833d6195312ae7eb7cc90bbb0d5f524cbb0b06619e49ff67"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "derive_more 2.0.1",
- "thiserror 2.0.16",
-]
-
-[[package]]
-name = "op-revm"
-version = "10.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9ba4f4693811e73449193c8bd656d3978f265871916882e6a51a487e4f96217"
-dependencies = [
- "auto_impl",
- "revm",
- "serde",
 ]
 
 [[package]]

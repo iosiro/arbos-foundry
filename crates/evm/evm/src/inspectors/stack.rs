@@ -11,17 +11,14 @@ use foundry_cheatcodes::{CheatcodesExecutor, Wallets};
 use foundry_evm_core::{
     ContextExt, Env, InspectorExt,
     backend::{DatabaseExt, JournaledState},
-    evm::{EthEvmContext, new_evm_with_inspector},
+    evm::{BlockEnv, EthEvmContext, new_evm_with_inspector},
 };
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_networks::NetworkConfigs;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
     Inspector,
-    context::{
-        BlockEnv,
-        result::{ExecutionResult, Output},
-    },
+    context::result::{ExecutionResult, Output},
     context_interface::CreateScheme,
     interpreter::{
         CallInputs, CallOutcome, CallScheme, CreateInputs, CreateOutcome, Gas, InstructionResult,

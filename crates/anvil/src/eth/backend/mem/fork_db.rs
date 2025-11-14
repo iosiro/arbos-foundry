@@ -6,10 +6,10 @@ use alloy_primitives::{Address, B256, U256, map::HashMap};
 use alloy_rpc_types::BlockId;
 use foundry_evm::{
     backend::{BlockchainDb, DatabaseResult, RevertStateSnapshotAction, StateSnapshot},
+    core::evm::BlockEnv,
     fork::database::ForkDbStateSnapshot,
 };
 use revm::{
-    context::BlockEnv,
     database::{Database, DbAccount},
     state::AccountInfo,
 };
