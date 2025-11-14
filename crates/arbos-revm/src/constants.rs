@@ -6,7 +6,7 @@ pub const STYLUS_DISCRIMINANT: &[u8] =
     &[STYLUS_EOF_MAGIC, STYLUS_EOF_MAGIC_SUFFIX, STYLUS_EOF_VERSION];
 
 pub const INITIAL_ARBOS_VERSION: u16 = 42;
-pub const INITIAL_STYLUS_VERSION: u16 = 1;
+pub const INITIAL_STYLUS_VERSION: u16 = 2;
 pub const INITIAL_MAX_WASM_SIZE: u32 = 128 * 1024; // max decompressed wasm size (programs are also bounded by compressed size)
 pub const INITIAL_MAX_STACK_DEPTH: u32 = 4 * 65536; // 4 page stack.
 pub const INITIAL_FREE_PAGES: u16 = 2; // 2 pages come free

@@ -1,6 +1,6 @@
 use revm::{
     Context, Database, Journal, JournalEntry,
-    context::{JournalInner, JournalTr},
+    context::{JournalInner, JournalTr, LocalContextTr},
     primitives::hardfork::SpecId,
 };
 
@@ -71,8 +71,8 @@ impl AsEnvMut for Env {
     }
 }
 
-impl<DB: Database, J: JournalTr<Database = DB>, C> AsEnvMut
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C>
+impl<DB: Database, J: JournalTr<Database = DB>, C, L: LocalContextTr> AsEnvMut
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C, L>
 {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
         EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
@@ -87,8 +87,8 @@ pub trait ContextExt {
     ) -> (&mut Self::DB, &mut JournalInner<JournalEntry>, EnvMut<'_>);
 }
 
-impl<DB: Database, C> ContextExt
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C>
+impl<DB: Database, C, L: LocalContextTr> ContextExt
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C, L>
 {
     type DB = DB;
 

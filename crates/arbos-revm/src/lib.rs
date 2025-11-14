@@ -11,6 +11,7 @@ pub mod context;
 pub mod evm;
 pub mod handler;
 pub mod inspector;
+pub mod local_context;
 //pub mod precompiles;
 pub mod result;
 //pub mod spec;
