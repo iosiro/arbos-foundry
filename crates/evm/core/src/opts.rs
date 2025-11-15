@@ -81,6 +81,9 @@ pub struct EvmOpts {
 
     /// The CREATE2 deployer's address.
     pub create2_deployer: Address,
+
+    /// Stylus configuration options.
+    pub stylus: Option<StylusOpts>,
 }
 
 impl Default for EvmOpts {
@@ -106,6 +109,7 @@ impl Default for EvmOpts {
             enable_tx_gas_limit: false,
             networks: NetworkConfigs::default(),
             create2_deployer: DEFAULT_CREATE2_DEPLOYER,
+            stylus: None,
         }
     }
 }
@@ -158,6 +162,7 @@ impl EvmOpts {
             self.memory_limit,
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
+            self.stylus.clone(),
         );
 
         crate::Env {
@@ -311,4 +316,46 @@ pub struct Env {
     /// EIP-170: Contract code size limit in bytes. Useful to increase this because of tests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_size_limit: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StylusOpts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arbos_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stylus_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ink_price: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_stack_depth: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_pages: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_gas: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_ramp: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_limit: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_init_gas: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_cached_init_gas: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub init_cost_scalar: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_cost_scalar: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_days: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive_days: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_cache_size: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_wasm_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub debug_mode: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_auto_cache: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_auto_activate: bool,
 }

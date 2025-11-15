@@ -1,6 +1,7 @@
 use crate::{
     AsEnvMut, Env,
     evm::{BlockEnv, CfgEnv, EvmEnv, TxEnv},
+    opts::StylusOpts,
     utils::apply_chain_and_block_specific_env_changes,
 };
 use alloy_consensus::BlockHeader;
@@ -56,6 +57,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
         memory_limit,
         disable_block_gas_limit,
         enable_tx_gas_limit,
+        Some(StylusOpts::default()),
     );
 
     let mut env = Env {
@@ -92,7 +94,10 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus: Option<StylusOpts>,
 ) -> CfgEnv {
+    let stylus = stylus.unwrap_or_default();
+
     let mut cfg = CfgEnv::default();
     cfg.chain_id = chain_id;
     cfg.memory_limit = memory_limit;
@@ -109,5 +114,27 @@ pub fn configure_env(
     if !enable_tx_gas_limit {
         cfg.tx_gas_limit_cap = Some(u64::MAX);
     }
+
+    // Apply Stylus configuration options
+    cfg.stylus.arbos_version = stylus.arbos_version;
+    cfg.stylus.stylus_version = stylus.stylus_version;
+    cfg.stylus.ink_price = stylus.ink_price;
+    cfg.stylus.max_stack_depth = stylus.max_stack_depth;
+    cfg.stylus.free_pages = stylus.free_pages;
+    cfg.stylus.page_gas = stylus.page_gas;
+    cfg.stylus.page_ramp = stylus.page_ramp;
+    cfg.stylus.page_limit = stylus.page_limit;
+    cfg.stylus.min_init_gas = stylus.min_init_gas;
+    cfg.stylus.min_cached_init_gas = stylus.min_cached_init_gas;
+    cfg.stylus.init_cost_scalar = stylus.init_cost_scalar;
+    cfg.stylus.cached_cost_scalar = stylus.cached_cost_scalar;
+    cfg.stylus.expiry_days = stylus.expiry_days;
+    cfg.stylus.keepalive_days = stylus.keepalive_days;
+    cfg.stylus.block_cache_size = stylus.block_cache_size;
+    cfg.stylus.max_wasm_size = stylus.max_wasm_size;
+    cfg.stylus.debug_mode = stylus.debug_mode;
+    cfg.stylus.disable_auto_cache = stylus.disable_auto_cache;
+    cfg.stylus.disable_auto_activate = stylus.disable_auto_activate;
+
     cfg
 }
