@@ -35,7 +35,7 @@ use arbos_revm::{ArbitrumContext, ArbitrumEvm as RevmEvm};
 pub type BlockEnv = revm::context::BlockEnv;
 pub type CfgEnv<SPEC = SpecId> = arbos_revm::config::ArbitrumConfig<SPEC>;
 pub type TxEnv = revm::context::TxEnv;
-pub type LocalContext = revm::context::LocalContext;
+pub type LocalContext = arbos_revm::local_context::ArbitrumLocalContext;
 
 pub type EthEvmContext<DB> = ArbitrumContext<DB>;
 pub type EvmEnv<SPEC = SpecId> = alloy_evm::EvmEnv<BlockEnv, CfgEnv<SPEC>>;
