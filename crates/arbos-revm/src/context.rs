@@ -3,10 +3,12 @@ use revm::{
     context::{BlockEnv, ContextTr, TxEnv},
 };
 
-use crate::config::{ArbitrumConfig, ArbitrumConfigTr};
+use crate::{
+    config::{ArbitrumConfig, ArbitrumConfigTr},
+    local_context::{ArbitrumLocalContext, ArbitrumLocalContextTr},
+};
 
 pub type ArbitrumChainInfo = ();
-pub type ArbitrumLocalContext = revm::context::LocalContext;
 
 /// Type alias for the default context type of the ArbitrumEvm.
 pub type ArbitrumContext<DB> = Context<
@@ -20,6 +22,12 @@ pub type ArbitrumContext<DB> = Context<
 >;
 
 /// Type alias for Arbitrum context
-pub trait ArbitrumContextTr: ContextTr<Cfg: ArbitrumConfigTr> {}
+pub trait ArbitrumContextTr:
+    ContextTr<Cfg: ArbitrumConfigTr, Local: ArbitrumLocalContextTr>
+{
+}
 
-impl<T> ArbitrumContextTr for T where T: ContextTr<Cfg: ArbitrumConfigTr> {}
+impl<T> ArbitrumContextTr for T where
+    T: ContextTr<Cfg: ArbitrumConfigTr, Local: ArbitrumLocalContextTr>
+{
+}
