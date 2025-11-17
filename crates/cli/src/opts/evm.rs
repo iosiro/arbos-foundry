@@ -369,6 +369,11 @@ pub struct StylusArgs {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_wasm_size: Option<u32>,
 
+    /// Enables debug mode for stylus programs.
+    #[arg(long, visible_alias = "stylus-debug")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub debug_mode: bool,
+
     /// Disables auto caching of stylus programs.
     #[arg(long, visible_alias = "stylus-no-auto-cache")]
     #[serde(skip_serializing_if = "std::ops::Not::not")]
