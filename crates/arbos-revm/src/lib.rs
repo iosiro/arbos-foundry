@@ -14,7 +14,7 @@ pub mod inspector;
 pub mod local_context;
 //pub mod precompiles;
 pub mod result;
-//pub mod spec;
+pub mod state;
 pub mod stylus_api;
 pub mod stylus_executor;
 pub mod transaction;

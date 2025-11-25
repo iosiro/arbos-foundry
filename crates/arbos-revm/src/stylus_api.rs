@@ -6,7 +6,7 @@ use arbutil::evm::{
 };
 use revm::{
     Database,
-    context::{Cfg, ContextError, ContextTr, CreateScheme, FrameStack},
+    context::{Cfg, ContextError, ContextTr, CreateScheme, FrameStack, JournalTr},
     handler::{
         EvmTr, FrameResult, ItemOrResult, PrecompileProvider, instructions::InstructionProvider,
     },
@@ -112,8 +112,9 @@ where
         };
 
         let mut gas = Gas::new(gas_limit);
-        if !gas.record_cost(100) {
-            gas.spend_all();
+        if !gas.record_cost(warm_cold_cost(
+            self.ctx().journal_mut().load_account(bytecode_address).unwrap().is_cold,
+        )) {
             return (Status::OutOfGas.into(), VecReader::new(vec![]), ArbGas(gas.spent()));
         }
 
@@ -129,14 +130,14 @@ where
             is_static,
         }));
 
-        gas.spend_all();
-
         let next_action = InterpreterAction::NewFrame(first_frame_input);
 
         let frame_result: Result<_, ContextError<<<CTX as ContextTr>::Db as Database>::Error>> =
             self.0.frame_stack.get().process_next_action(&mut self.0.ctx, next_action);
 
         let original_frame_stack = mem::replace(&mut self.0.frame_stack, FrameStack::new());
+
+        gas.spend_all();
 
         if let Ok(ItemOrResult::Item(frame_init)) = frame_result {
             let result = call_handler(self, frame_init);

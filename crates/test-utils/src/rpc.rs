@@ -35,7 +35,7 @@ shuffled_list!(
     vec![
         //
         "reth-ethereum.ithaca.xyz/rpc",
-        "reth-ethereum-full.ithaca.xyz/rpc",
+        // "reth-ethereum-full.ithaca.xyz/rpc",
     ],
 );
 shuffled_list!(
@@ -50,7 +50,7 @@ shuffled_list!(
     vec![
         //
         "reth-ethereum.ithaca.xyz/ws",
-        "reth-ethereum-full.ithaca.xyz/ws",
+        // "reth-ethereum-full.ithaca.xyz/ws",
     ],
 );
 

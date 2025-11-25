@@ -50,6 +50,7 @@ use crate::{
     },
     context::ArbitrumContextTr,
     local_context::ArbitrumLocalContextTr,
+    state::{ArbState, ArbStateGetter},
     stylus_api::StylusHandler,
 };
 
@@ -306,19 +307,83 @@ where
             Vec<u8>,
         ) -> (Vec<u8>, VecReader, ArbGas),
     ) -> Option<InterpreterAction> {
+        let mut gas = Gas::new(stylus_ctx.gas_limit);
+
+        let (serialized, _module, stylus_data, stylus_params) = {
+            // Use read lock to get cached program if available
+            // if not available drop the read lock and acquire write lock to compile and insert
+            let maybe_cached = {
+                let mut cache = PROGRAM_CACHE.lock().unwrap();
+                if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
+                    Some((serialized, module, stylus_data))
+                } else {
+                    None
+                }
+            };
+
+            if let Some((serialized, module, stylus_data)) = maybe_cached {
+                let stylus_params = {
+                    let context = self.ctx();
+
+                    match context.arb_state(None).programs().get_stylus_params() {
+                        Ok(params) => params,
+                        Err(e) => return Some(e.into()),
+                    }
+                };
+
+                (serialized, module, stylus_data, stylus_params)
+            } else {
+                let context = self.ctx();
+
+                let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
+
+                if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
+                    return None;
+                }
+
+                let stylus_params = {
+                    match context.arb_state(None).programs().get_stylus_params() {
+                        Ok(params) => params,
+                        Err(e) => return Some(e.into()),
+                    }
+                };
+
+                let compile_config = CompileConfig::version(
+                    stylus_params.version,
+                    context.cfg().stylus().debug_mode(),
+                );
+
+                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
+                    &bytecode,
+                    code_hash,
+                    context.cfg().stylus().arbos_version(),
+                    stylus_params.version,
+                    stylus_ctx.gas_limit,
+                    &compile_config,
+                ) {
+                    let mut cache = PROGRAM_CACHE.lock().unwrap();
+                    cache.get_or_insert(code_hash, || {
+                        (serialized.clone(), module.clone(), stylus_data)
+                    });
+
+                    (serialized, module, stylus_data, stylus_params)
+                } else {
+                    return None;
+                }
+            }
+        };
+
         let (stylus_config, compile_config, evm_data) = {
             let context = self.ctx();
 
-            let config = context.cfg().stylus();
-
             let stylus_config = StylusConfig::new(
-                config.stylus_version(),
-                config.max_stack_depth(),
-                config.ink_price(),
+                stylus_params.version,
+                stylus_params.max_stack_depth,
+                stylus_params.ink_price,
             );
 
             let compile_config =
-                CompileConfig::version(config.stylus_version(), config.debug_mode());
+                CompileConfig::version(stylus_params.version, context.cfg().stylus().debug_mode());
 
             let evm_data = build_evm_data(
                 self.ctx(),
@@ -332,49 +397,6 @@ where
             );
 
             (stylus_config, compile_config, evm_data)
-        };
-
-        let (serialized, _module, stylus_data) = {
-            // Use read lock to get cached program if available
-            // if not available drop the read lock and acquire write lock to compile and insert
-            let maybe_cached = {
-                let mut cache = PROGRAM_CACHE.lock().unwrap();
-                if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
-                    Some((serialized, module, stylus_data))
-                } else {
-                    None
-                }
-            };
-
-            if let Some((serialized, module, stylus_data)) = maybe_cached {
-                (serialized, module, stylus_data)
-            } else {
-                let context = self.ctx();
-
-                let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
-
-                if !bytecode.starts_with(STYLUS_DISCRIMINANT) {
-                    return None;
-                }
-
-                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
-                    &bytecode,
-                    code_hash,
-                    context.cfg().stylus().arbos_version(),
-                    context.cfg().stylus().stylus_version(),
-                    stylus_ctx.gas_limit,
-                    &compile_config,
-                ) {
-                    let mut cache = PROGRAM_CACHE.lock().unwrap();
-                    cache.get_or_insert(code_hash, || {
-                        (serialized.clone(), module.clone(), stylus_data)
-                    });
-
-                    (serialized, module, stylus_data)
-                } else {
-                    return None;
-                }
-            }
         };
 
         let inputs = InputsImpl {
@@ -393,21 +415,20 @@ where
                 stylus_data.footprint,
                 wasm_open_pages,
                 context.local().stylus_pages_ever(),
-                context.cfg().stylus().free_pages(),
-                context.cfg().stylus().page_gas(),
+                stylus_params.free_pages,
+                stylus_params.page_gas,
             );
 
             let program_cost = cached_gas_cost(
                 stylus_data.cached_init_cost,
-                context.cfg().stylus().min_cached_init_gas(),
-                context.cfg().stylus().cached_cost_scalar(),
+                stylus_params.min_cached_init_gas,
+                stylus_params.cached_cost_scalar,
             );
 
             let cost = program_cost.saturating_add(page_grow_cost);
             (cost, wasm_open_pages)
         };
 
-        let mut gas = Gas::new(stylus_ctx.gas_limit);
         if !gas.record_cost(call_cost) {
             return Some(InterpreterAction::Return(InterpreterResult {
                 result: InstructionResult::OutOfGas,
