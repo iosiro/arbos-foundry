@@ -230,7 +230,7 @@ fn arb_wasm_run<CTX: ArbitrumContextTr>(
             let debug = context.cfg().stylus().debug_mode();
 
             let (_, module, stylus_data) = crate::stylus_executor::compile_stylus_bytecode(
-                &mut gas,
+                Some(&mut gas),
                 &bytecode,
                 code_hash,
                 context.cfg().stylus().arbos_version(),

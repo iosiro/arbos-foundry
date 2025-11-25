@@ -296,7 +296,7 @@ where
                 let debug = context.cfg().stylus().debug_mode();
 
                 let (serialized, module, stylus_data) = match compile_stylus_bytecode(
-                    &mut gas,
+                    None,
                     &bytecode,
                     code_hash,
                     context.cfg().stylus().arbos_version(),
@@ -503,7 +503,7 @@ where
 /// Compile Stylus bytecode
 #[allow(clippy::too_many_arguments)]
 pub fn compile_stylus_bytecode(
-    gas: &mut Gas,
+    mut gas: Option<&mut Gas>,
     bytecode: &Bytes,
     code_hash: B256,
     arbos_version: u16,
@@ -536,8 +536,14 @@ pub fn compile_stylus_bytecode(
             })
             .unwrap();
 
-        let mut activation_gas = gas.remaining();
-        gas.spend_all();
+        let mut activation_gas = if let Some(gas) = gas.as_deref_mut() {
+            let remaining = gas.remaining();
+            gas.spend_all();
+            remaining
+        } else {
+            u64::MAX
+        };
+
         let (module, stylus_data) = match native::activate(
             bytecode.as_slice(),
             &Bytes32::from(code_hash.0),
@@ -551,7 +557,9 @@ pub fn compile_stylus_bytecode(
             Err(e) => return Err(e.to_string()),
         };
 
-        gas.erase_cost(activation_gas);
+        if let Some(gas) = gas.as_deref_mut() {
+            gas.erase_cost(activation_gas);
+        }
 
         let bytecode = native::compile(
             bytecode.as_slice(),
