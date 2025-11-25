@@ -24,11 +24,11 @@ interface ArbOwnerPublic {
         address addr
     ) external view returns (bool);
 
-    /**
-     * @notice Rectify the list of chain owners
-     * If successful, emits ChainOwnerRectified event
-     * Available in ArbOS version 11
-     */
+    ///
+    /// @notice Rectify the list of chain owners
+    /// If successful, emits ChainOwnerRectified event
+    /// Available in ArbOS version 11
+    ///
     function rectifyChainOwner(
         address ownerToRectify
     ) external;
@@ -63,10 +63,10 @@ interface ArbOwnerPublic {
         view
         returns (uint64 arbosVersion, uint64 scheduledForTimestamp);
 
-    /**
-     * @notice Checks if the increased calldata price feature (EIP-7623) is enabled
-     * Available in ArbOS version 40 with default as false
-     */
+    ///
+    /// @notice Checks if the increased calldata price feature (EIP-7623) is enabled
+    /// Available in ArbOS version 40 with default as false
+    ///
     function isCalldataPriceIncreaseEnabled() external view returns (bool);
 
     event ChainOwnerRectified(address rectifiedOwner);

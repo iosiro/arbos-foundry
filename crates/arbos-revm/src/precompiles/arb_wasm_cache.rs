@@ -16,11 +16,11 @@ use crate::{
 
 sol! {
 
-/**
- * @title Methods for managing Stylus caches
- * @notice Precompiled contract that exists in every Arbitrum chain at 0x0000000000000000000000000000000000000072.
- * @notice Available in ArbOS version 30 and above
- */
+///
+/// @title Methods for managing Stylus caches
+/// @notice Precompiled contract that exists in every Arbitrum chain at 0x0000000000000000000000000000000000000072.
+/// @notice Available in ArbOS version 30 and above
+///
 interface ArbWasmCache {
     /// @notice See if the user is a cache manager.
     function isCacheManager(

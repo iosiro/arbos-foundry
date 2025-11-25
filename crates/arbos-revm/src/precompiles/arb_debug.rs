@@ -15,10 +15,10 @@ use crate::{
 };
 
 sol! {
-/**
- * @title A test contract whose methods are only accessible in debug mode
- * @notice Precompiled contract that exists in every Arbitrum chain at 0x00000000000000000000000000000000000000ff.
- */
+///
+/// @title A test contract whose methods are only accessible in debug mode
+/// @notice Precompiled contract that exists in every Arbitrum chain at 0x00000000000000000000000000000000000000ff.
+///
 interface ArbDebug {
     /// @notice Caller becomes a chain owner
     function becomeChainOwner() external;
