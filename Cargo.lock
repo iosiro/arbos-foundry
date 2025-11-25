@@ -1188,6 +1188,7 @@ dependencies = [
 name = "arbos-revm"
 version = "1.4.4"
 dependencies = [
+ "alloy-rlp",
  "arbutil",
  "auto_impl",
  "lazy_static",

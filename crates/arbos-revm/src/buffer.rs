@@ -34,8 +34,17 @@ pub(crate) fn take_u32(data: &mut Vec<u8>) -> u32 {
     take_int!(data, u32, 4)
 }
 
+pub(crate) fn take_u24(data: &mut Vec<u8>) -> u32 {
+    let bytes = take_bytes!(data, 3);
+    u32::from_be_bytes([0, bytes[0], bytes[1], bytes[2]])
+}
+
 pub(crate) fn take_u16(data: &mut Vec<u8>) -> u16 {
     take_int!(data, u16, 2)
+}
+
+pub(crate) fn take_u8(data: &mut Vec<u8>) -> u8 {
+    take_int!(data, u8, 1)
 }
 
 pub(crate) fn take_rest(data: &mut Vec<u8>) -> Bytes {
