@@ -1,10 +1,10 @@
-use revm::primitives::{B256, U256};
+use revm::primitives::{Address, B256, Bytes, U256};
 
 use crate::{
     ArbitrumContextTr,
     state::types::{
-        StorageBackedAddress, StorageBackedBytes, StorageBackedQueue, StorageBackedTr,
-        StorageBackedU64, StorageBackedU256, map_address, substorage,
+        ArbosStateError, StorageBackedAddress, StorageBackedBytes, StorageBackedQueue,
+        StorageBackedTr, StorageBackedU64, StorageBackedU256, map_address, substorage,
     },
 };
 
@@ -96,5 +96,16 @@ impl<'a, CTX: ArbitrumContextTr> Retryable<'a, CTX> {
     pub fn timeout_windows_left(&mut self) -> StorageBackedU64<'_, CTX> {
         let slot = map_address(&self.slot, &B256::from(U256::from(6u64)));
         StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+    }
+
+    pub fn clear(&mut self) -> Result<(), ArbosStateError> {
+        self.num_tries().set(0)?;
+        self.timeout().set(0)?;
+        self.callvalue().set(U256::ZERO)?;
+        self.to().set(Address::ZERO)?;
+        self.from().set(Address::ZERO)?;
+        self.calldata().set(&Bytes::new())?;
+        self.beneficiary().set(Address::ZERO)?;
+        self.timeout_windows_left().set(0)
     }
 }

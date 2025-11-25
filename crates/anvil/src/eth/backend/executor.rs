@@ -18,10 +18,7 @@ use alloy_consensus::{
     Receipt, ReceiptWithBloom, constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
-use alloy_evm::{
-    Evm,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
-};
+use alloy_evm::precompiles::{DynPrecompile, Precompile};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
@@ -30,7 +27,7 @@ use anvil_core::eth::{
 use foundry_evm::{
     backend::DatabaseError,
     core::{
-        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext},
+        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext, PrecompilesMap},
         precompiles::EC_RECOVER,
     },
     traces::{CallTraceDecoder, CallTraceNode},
@@ -41,9 +38,8 @@ use revm::{
     context::{Block as RevmBlock, Cfg, JournalTr},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -449,7 +445,7 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> AnvilEvm<DB, I, PrecompilesMap>
+) -> AnvilEvm<DB, I, PrecompilesMap<DB>>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -469,16 +465,11 @@ where
         error: Ok(()),
     };
 
-    let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
-    }
-    .precompiles;
     let eth_evm = EthEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
-        PrecompilesMap::from_static(eth_precompiles),
+        PrecompilesMap::new(arbos_revm::precompiles::ArbitrumPrecompileProvider::new(spec)),
     );
 
     AnvilEvm::new(eth_evm, true)
@@ -489,7 +480,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

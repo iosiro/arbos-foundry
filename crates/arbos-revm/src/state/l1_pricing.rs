@@ -139,6 +139,19 @@ impl<'a, CTX: ArbitrumContextTr> BatchPosterTable<'a, CTX> {
         Ok(self.all()?.contains(&batch_poster))
     }
 
+    pub fn add_if_missing(
+        &mut self,
+        batch_poster: Address,
+        pay_recipient: Address,
+    ) -> Result<bool, ArbosStateError> {
+        if self.contains(batch_poster)? {
+            return Ok(false);
+        }
+
+        self.add(batch_poster, pay_recipient)?;
+        Ok(true)
+    }
+
     pub fn add(
         &mut self,
         batch_poster: Address,
@@ -151,6 +164,18 @@ impl<'a, CTX: ArbitrumContextTr> BatchPosterTable<'a, CTX> {
     pub fn total_funds_due(&mut self) -> StorageBackedI256<'_, CTX> {
         let slot = map_address(&self.slot, &B256::from(U256::ZERO));
         StorageBackedI256::new(self.context, self.gas.as_deref_mut(), slot)
+    }
+
+    pub fn fee_collector(&mut self, batch_poster: Address) -> Result<Address, ArbosStateError> {
+        self.get(batch_poster).pay_recipient().get()
+    }
+
+    pub fn set_fee_collector(
+        &mut self,
+        batch_poster: Address,
+        new_fee_collector: Address,
+    ) -> Result<(), ArbosStateError> {
+        self.get(batch_poster).pay_recipient().set(new_fee_collector)
     }
 }
 

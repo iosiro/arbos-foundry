@@ -1,25 +1,25 @@
 use revm::{
     context::JournalTr,
     interpreter::Gas,
-    primitives::{B256, U256},
+    primitives::{Address, B256, U256},
 };
 
 use crate::{
     ArbitrumContextTr,
     constants::{
-        ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY,
-        ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
-        ARBOS_STATE_PROGRAMS_KEY, ARBOS_STATE_RETRYABLES_KEY,
+        ARBOS_CHAIN_OWNERS_KEY, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY, ARBOS_STATE_ADDRESS,
+        ARBOS_STATE_ADDRESS_TABLE_KEY, ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY,
+        ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY, ARBOS_STATE_PROGRAMS_KEY, ARBOS_STATE_RETRYABLES_KEY,
     },
     state::{
         address_table::AddressTable,
         l1_pricing::L1Pricing,
         l2_pricing::L2Pricing,
         program::Programs,
-        retryable::RetryableState,
+        retryable::{Retryable, RetryableState},
         types::{
-            StorageBackedAddress, StorageBackedAddressSet, StorageBackedTr, StorageBackedU64,
-            StorageBackedU256, map_address, substorage,
+            ArbosStateError, StorageBackedAddress, StorageBackedAddressSet, StorageBackedQueue,
+            StorageBackedTr, StorageBackedU64, StorageBackedU256, map_address, substorage,
         },
     },
 };
@@ -29,7 +29,7 @@ pub mod l1_pricing;
 pub mod l2_pricing;
 pub mod program;
 pub mod retryable;
-mod types;
+pub mod types;
 
 const ARBOS_STATE_UPGRADE_VERSION_OFFSET: u8 = 1;
 const ARBOS_STATE_UPGRADE_TIMESTAMP_OFFSET: u8 = 2;
@@ -52,6 +52,9 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn programs(&mut self) -> Programs<'_, CTX>;
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
     fn native_token_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
+    fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
+    fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
+    fn is_native_token_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
     fn upgrade_timestamp(&mut self) -> StorageBackedU64<'_, CTX>;
     fn upgrade_version(&mut self) -> StorageBackedU64<'_, CTX>;
     fn network_fee_account(&mut self) -> StorageBackedAddress<'_, CTX>;
@@ -64,6 +67,8 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn l1_pricing(&mut self) -> L1Pricing<'_, CTX>;
     fn l2_pricing(&mut self) -> L2Pricing<'_, CTX>;
     fn retryable_state(&mut self) -> RetryableState<'_, CTX>;
+    fn retryable<'b>(&'b mut self, id: B256) -> Retryable<'b, CTX>;
+    fn timeout_queue(&mut self) -> StorageBackedQueue<'_, CTX>;
 }
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
@@ -112,6 +117,20 @@ where
             self.gas.as_deref_mut(),
             state_subkey(ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY),
         )
+    }
+
+    fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
+        let root = state_subkey(ARBOS_STATE_PROGRAMS_KEY);
+        let slot = substorage(&root, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY);
+        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), slot)
+    }
+
+    fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError> {
+        self.chain_owners().contains(address)
+    }
+
+    fn is_native_token_owner(&mut self, address: Address) -> Result<bool, ArbosStateError> {
+        self.native_token_owners().contains(address)
     }
 
     fn upgrade_timestamp(&mut self) -> StorageBackedU64<'_, CTX> {
@@ -208,5 +227,16 @@ where
             self.gas.as_deref_mut(),
             state_subkey(ARBOS_STATE_RETRYABLES_KEY),
         )
+    }
+
+    fn retryable<'b>(&'b mut self, id: B256) -> Retryable<'b, CTX> {
+        let root = state_subkey(ARBOS_STATE_RETRYABLES_KEY);
+        Retryable::new(self.context, self.gas.as_deref_mut(), substorage(&root, id.as_slice()))
+    }
+
+    fn timeout_queue(&mut self) -> StorageBackedQueue<'_, CTX> {
+        let root = state_subkey(ARBOS_STATE_RETRYABLES_KEY);
+        let slot = substorage(&root, &[0]);
+        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), slot)
     }
 }

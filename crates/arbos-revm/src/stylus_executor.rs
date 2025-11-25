@@ -234,66 +234,6 @@ where
         Some((context, code_hash))
     }
 
-    /// Compile Stylus bytecode
-    fn compile_stylus_bytecode(
-        bytecode: &Bytes,
-        code_hash: B256,
-        arbos_version: u16,
-        stylus_version: u16,
-        _gas_limit: u64,
-        compile_config: &CompileConfig,
-    ) -> Result<(Vec<u8>, Module, StylusData), ()> {
-        if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
-            let (dictionary, compressed_bytecode) =
-                if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
-                    (dictionary, compressed_bytecode)
-                } else {
-                    return Err(());
-                };
-
-            let dictionary = match dictionary[0] {
-                0x00 => Dictionary::Empty,
-                0x01 => Dictionary::StylusProgram,
-                _ => unreachable!(),
-            };
-
-            let bytecode = brotli::decompress(compressed_bytecode, dictionary)
-                .or_else(|err| {
-                    if dictionary == Dictionary::Empty {
-                        Ok(compressed_bytecode.to_vec())
-                    } else {
-                        Err(err)
-                    }
-                })
-                .unwrap();
-
-            let mut activation_gas = 10_000_000u64;
-            let (module, stylus_data) = native::activate(
-                bytecode.as_slice(),
-                &Bytes32::from(code_hash.0),
-                stylus_version,
-                arbos_version as u64,
-                128,
-                compile_config.debug.debug_funcs,
-                &mut activation_gas,
-            )
-            .unwrap();
-
-            let bytecode = native::compile(
-                bytecode.as_slice(),
-                compile_config.version,
-                compile_config.debug.debug_funcs,
-                wasmer_types::compilation::target::Target::default(),
-                false,
-            )
-            .unwrap();
-
-            return Ok((bytecode, module, stylus_data));
-        }
-
-        Err(())
-    }
-
     /// Core Stylus execution logic shared between inspected and non-inspected modes
     pub(crate) fn execute_stylus_program(
         &mut self,
@@ -353,23 +293,35 @@ where
                     context.cfg().stylus().debug_mode(),
                 );
 
-                if let Ok((serialized, module, stylus_data)) = Self::compile_stylus_bytecode(
+                let debug = context.cfg().stylus().debug_mode();
+
+                let (serialized, module, stylus_data) = match compile_stylus_bytecode(
+                    &mut gas,
                     &bytecode,
                     code_hash,
                     context.cfg().stylus().arbos_version(),
                     stylus_params.version,
-                    stylus_ctx.gas_limit,
                     &compile_config,
+                    stylus_params.page_limit,
+                    debug,
                 ) {
-                    let mut cache = PROGRAM_CACHE.lock().unwrap();
-                    cache.get_or_insert(code_hash, || {
-                        (serialized.clone(), module.clone(), stylus_data)
-                    });
+                    Ok((serialized, module, stylus_data)) => {
+                        let mut cache = PROGRAM_CACHE.lock().unwrap();
+                        cache.get_or_insert(code_hash, || {
+                            (serialized.clone(), module.clone(), stylus_data)
+                        });
+                        (serialized, module, stylus_data)
+                    }
+                    Err(e) => {
+                        return Some(InterpreterAction::Return(InterpreterResult {
+                            result: InstructionResult::Revert,
+                            output: Bytes::from(e.as_bytes().to_vec()),
+                            gas,
+                        }));
+                    }
+                };
 
-                    (serialized, module, stylus_data, stylus_params)
-                } else {
-                    return None;
-                }
+                (serialized, module, stylus_data, stylus_params)
             }
         };
 
@@ -546,4 +498,72 @@ where
             _ => self.request_inner(input, is_static, req_type, data),
         }
     }
+}
+
+/// Compile Stylus bytecode
+#[allow(clippy::too_many_arguments)]
+pub fn compile_stylus_bytecode(
+    gas: &mut Gas,
+    bytecode: &Bytes,
+    code_hash: B256,
+    arbos_version: u16,
+    stylus_version: u16,
+    compile_config: &CompileConfig,
+    page_limit: u16,
+    debug: bool,
+) -> Result<(Vec<u8>, Module, StylusData), String> {
+    if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
+        let (dictionary, compressed_bytecode) =
+            if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
+                (dictionary, compressed_bytecode)
+            } else {
+                return Err("init failed".to_string());
+            };
+
+        let dictionary = match dictionary[0] {
+            0x00 => Dictionary::Empty,
+            0x01 => Dictionary::StylusProgram,
+            _ => unreachable!(),
+        };
+
+        let bytecode = brotli::decompress(compressed_bytecode, dictionary)
+            .or_else(|err| {
+                if dictionary == Dictionary::Empty {
+                    Ok(compressed_bytecode.to_vec())
+                } else {
+                    Err(err)
+                }
+            })
+            .unwrap();
+
+        let mut activation_gas = gas.remaining();
+        gas.spend_all();
+        let (module, stylus_data) = match native::activate(
+            bytecode.as_slice(),
+            &Bytes32::from(code_hash.0),
+            stylus_version,
+            arbos_version as u64,
+            page_limit,
+            debug,
+            &mut activation_gas,
+        ) {
+            Ok(res) => res,
+            Err(e) => return Err(e.to_string()),
+        };
+
+        gas.erase_cost(activation_gas);
+
+        let bytecode = native::compile(
+            bytecode.as_slice(),
+            compile_config.version,
+            compile_config.debug.debug_funcs,
+            wasmer_types::compilation::target::Target::default(),
+            false,
+        )
+        .unwrap();
+
+        return Ok((bytecode, module, stylus_data));
+    }
+
+    Err("init failed".to_string())
 }

@@ -37,6 +37,12 @@ impl Display for ArbosStateError {
     }
 }
 
+impl From<ArbosStateError> for String {
+    fn from(error: ArbosStateError) -> Self {
+        error.to_string()
+    }
+}
+
 impl From<ArbosStateError> for InterpreterAction {
     fn from(error: ArbosStateError) -> Self {
         Self::Return(error.into())
@@ -285,7 +291,7 @@ where
         map_address(&self.slot, &B256::from(U256::from(0u64)))
     }
 
-    pub fn len(&mut self) -> Result<usize, ArbosStateError> {
+    pub fn size(&mut self) -> Result<usize, ArbosStateError> {
         let size_slot = self.size_slot();
         StorageBackedU256::new(self.context, self.gas.as_deref_mut(), size_slot)
             .get()
@@ -293,7 +299,7 @@ where
     }
 
     pub fn all(&mut self) -> Result<Vec<Address>, ArbosStateError> {
-        let n = self.len()?;
+        let n = self.size()?;
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let slot = map_address(&self.slot, &B256::from(U256::from(i as u64 + 1)));

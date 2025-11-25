@@ -1,0 +1,396 @@
+use std::{
+    fmt::{self, Debug},
+    sync::Arc,
+};
+
+use revm::{
+    context::{Cfg, ContextTr, LocalContextTr},
+    handler::PrecompileProvider,
+    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
+    precompile::{PrecompileError, PrecompileId, PrecompileSpecId, Precompiles},
+    primitives::{
+        Address, Bytes, HashMap, HashSet, SHORT_ADDRESS_CAP, U256, hardfork::SpecId, short_address,
+    },
+};
+
+mod arb_address_table;
+mod arb_aggregator;
+mod arb_debug;
+mod arb_gas_info;
+mod arb_info;
+mod arb_native_token_manager;
+mod arb_owner;
+mod arb_owner_public;
+mod arb_retryable_tx;
+mod arb_statistics;
+mod arb_sys;
+mod arb_wasm;
+mod arb_wasm_cache;
+
+mod macros;
+
+use crate::{
+    ArbitrumContextTr,
+    precompiles::{arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile},
+};
+
+pub struct ArbitrumPrecompileProvider<CTX: ArbitrumContextTr> {
+    registry: Arc<PrecompileRegistry<CTX>>,
+    spec: SpecId,
+}
+
+impl<CTX: ArbitrumContextTr> ArbitrumPrecompileProvider<CTX> {
+    #[inline]
+    pub fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
+        Box::new(self.registry.address_iter().copied())
+    }
+
+    #[inline]
+    pub fn contains(&self, addr: &Address) -> bool {
+        self.registry.contains(addr)
+    }
+
+    pub fn new(spec: SpecId) -> Self {
+        let mut registry = PrecompileRegistry::new(PrecompileSpecId::from_spec_id(spec));
+
+        registry.register_many([
+            // Arbitrum specific precompiles can be added here
+            Precompile::Extended(arb_address_table::arb_address_table_precompile::<CTX>()),
+            Precompile::Extended(arb_aggregator::arb_aggregator_precompile::<CTX>()),
+            Precompile::Extended(arb_debug::arb_debug_precompile::<CTX>()),
+            Precompile::Extended(arb_gas_info::arb_gas_info_precompile::<CTX>()),
+            Precompile::Extended(arb_info::arb_info_precompile::<CTX>()),
+            Precompile::Extended(arb_native_token_manager::arb_native_token_manager_precompile::<
+                CTX,
+            >()),
+            Precompile::Extended(arb_owner_public::arb_owner_public_precompile::<CTX>()),
+            Precompile::Extended(arb_owner::arb_owner_precompile::<CTX>()),
+            Precompile::Extended(arb_retryable_tx::arb_retryable_tx_precompile::<CTX>()),
+            Precompile::Extended(arb_statistics::arb_statistics_precompile::<CTX>()),
+            Precompile::Extended(arb_sys::arb_sys_precompile::<CTX>()),
+            Precompile::Extended(arb_wasm_precompile::<CTX>()),
+            Precompile::Extended(arb_wasm_cache_precompile::<CTX>()),
+        ]);
+        Self { registry: Arc::new(registry), spec }
+    }
+}
+
+impl<CTX: ArbitrumContextTr> Clone for ArbitrumPrecompileProvider<CTX> {
+    fn clone(&self) -> Self {
+        Self { registry: Arc::clone(&self.registry), spec: self.spec }
+    }
+}
+
+impl<CTX: ArbitrumContextTr> Default for ArbitrumPrecompileProvider<CTX> {
+    fn default() -> Self {
+        let spec = SpecId::default();
+        let registry = PrecompileRegistry::new(PrecompileSpecId::from_spec_id(spec));
+
+        Self { registry: Arc::new(registry), spec }
+    }
+}
+
+impl<CTX: ArbitrumContextTr> PrecompileProvider<CTX> for ArbitrumPrecompileProvider<CTX> {
+    type Output = InterpreterResult;
+
+    /// Update spec and regenerate registry.
+    fn set_spec(&mut self, spec: <CTX::Cfg as Cfg>::Spec) -> bool {
+        let new_spec = spec.into();
+        if new_spec == self.spec {
+            return false;
+        }
+
+        self.registry = Arc::new(PrecompileRegistry::new(PrecompileSpecId::from_spec_id(new_spec)));
+        self.spec = new_spec;
+        true
+    }
+
+    /// Executes a precompile if one exists for the address.
+    fn run(
+        &mut self,
+        ctx: &mut CTX,
+        address: &Address,
+        inputs: &InputsImpl,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, String> {
+        let Some(precompile) = self.registry.get(address) else {
+            return Ok(None);
+        };
+
+        // revert for mutating calls to code addresses other than their own
+        if !is_static
+            && inputs.target_address != inputs.bytecode_address.expect("bytecode must be set")
+        {
+            return Ok(Some(InterpreterResult {
+                result: InstructionResult::Revert,
+                output: Bytes::default(),
+                gas: Gas::new(gas_limit),
+            }));
+        }
+
+        // extract input bytes
+        let input_bytes = match &inputs.input {
+            CallInput::SharedBuffer(range) => ctx
+                .local()
+                .shared_memory_buffer_slice(range.clone())
+                .map(|s| s.to_vec())
+                .unwrap_or_default(),
+            CallInput::Bytes(b) => b.to_vec(),
+        };
+
+        precompile.call(
+            ctx,
+            &input_bytes,
+            address,
+            inputs.caller_address,
+            inputs.call_value,
+            is_static,
+            gas_limit,
+        )
+    }
+
+    fn warm_addresses(&self) -> Box<impl Iterator<Item = Address>> {
+        self.warm_addresses()
+    }
+
+    fn contains(&self, address: &Address) -> bool {
+        self.contains(address)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PrecompileRegistry<CTX: ContextTr> {
+    map: HashMap<Address, Precompile<CTX>>,
+    address_set: HashSet<Address>,
+    fast_lookup: Vec<Option<Precompile<CTX>>>,
+    all_short: bool,
+}
+
+impl<CTX: ContextTr> Default for PrecompileRegistry<CTX> {
+    fn default() -> Self {
+        Self {
+            map: HashMap::default(),
+            address_set: HashSet::default(),
+            fast_lookup: vec![None; SHORT_ADDRESS_CAP],
+            all_short: true,
+        }
+    }
+}
+
+impl<CTX: ContextTr> PrecompileRegistry<CTX> {
+    pub fn new(spec: PrecompileSpecId) -> Self {
+        let mut reg = Self::default();
+
+        let precompiles = Precompiles::new(spec);
+
+        precompiles.addresses().for_each(|addr| {
+            if let Some(p) = precompiles.get(addr) {
+                reg.register(Precompile::Simple(p.clone()));
+            }
+        });
+
+        reg
+    }
+
+    #[inline]
+    pub fn contains(&self, address: &Address) -> bool {
+        self.map.contains_key(address)
+    }
+
+    #[inline]
+    pub fn get(&self, address: &Address) -> Option<&Precompile<CTX>> {
+        if let Some(idx) = short_address(address) {
+            return self.fast_lookup[idx].as_ref();
+        }
+        self.map.get(address)
+    }
+
+    #[inline]
+    pub fn address_iter(&self) -> impl ExactSizeIterator<Item = &Address> {
+        self.map.keys()
+    }
+
+    pub fn register(&mut self, item: Precompile<CTX>) {
+        self.register_many(std::iter::once(item));
+    }
+
+    pub fn register_many(&mut self, items: impl IntoIterator<Item = Precompile<CTX>>) {
+        let collected: Vec<_> = items.into_iter().collect();
+
+        for p in &collected {
+            if let Some(short) = short_address(p.address()) {
+                self.fast_lookup[short] = Some(p.clone());
+            } else {
+                self.all_short = false;
+            }
+            self.address_set.insert(*p.address());
+        }
+
+        for p in collected.into_iter() {
+            self.map.insert(*p.address(), p);
+        }
+    }
+
+    pub fn difference(&self, other: &Self) -> Self {
+        let mut out = Self::default();
+
+        let missing = self
+            .map
+            .iter()
+            .filter(|(addr, _)| !other.map.contains_key(*addr))
+            .map(|(_, p)| p.clone());
+
+        out.register_many(missing);
+        out
+    }
+
+    pub fn intersection(&self, other: &Self) -> Self {
+        let mut out = Self::default();
+
+        let common = self
+            .map
+            .iter()
+            .filter(|(addr, _)| other.map.contains_key(*addr))
+            .map(|(_, p)| p.clone());
+
+        out.register_many(common);
+        out
+    }
+}
+
+pub struct ExtendedPrecompile<CTX: ContextTr> {
+    id: PrecompileId,
+    address: Address,
+    handler: Arc<ExtendedPrecompileFn<CTX>>,
+}
+
+impl<CTX: ContextTr> Clone for ExtendedPrecompile<CTX> {
+    fn clone(&self) -> Self {
+        Self { id: self.id.clone(), address: self.address, handler: Arc::clone(&self.handler) }
+    }
+}
+
+impl<CTX: ContextTr> Debug for ExtendedPrecompile<CTX> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExtendedPrecompile")
+            .field("id", &self.id)
+            .field("address", &self.address)
+            .finish()
+    }
+}
+
+impl<CTX: ContextTr> ExtendedPrecompile<CTX> {
+    pub fn new(id: PrecompileId, address: Address, handler: ExtendedPrecompileFn<CTX>) -> Self {
+        Self { id, address, handler: Arc::new(handler) }
+    }
+
+    #[inline]
+    pub fn id(&self) -> &PrecompileId {
+        &self.id
+    }
+
+    #[inline]
+    pub fn address(&self) -> &Address {
+        &self.address
+    }
+
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn execute(
+        &self,
+        ctx: &mut CTX,
+        input: &[u8],
+        target: &Address,
+        caller: Address,
+        value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, String> {
+        (self.handler)(ctx, input, target, caller, value, is_static, gas_limit)
+    }
+}
+
+pub type ExtendedPrecompileFn<CTX> = fn(
+    &mut CTX,
+    &[u8],
+    &Address,
+    Address,
+    U256,
+    bool,
+    u64,
+) -> Result<Option<InterpreterResult>, String>;
+
+#[derive(Debug)]
+pub enum Precompile<CTX: ContextTr> {
+    Simple(revm::precompile::Precompile),
+    Extended(ExtendedPrecompile<CTX>),
+}
+
+impl<CTX: ContextTr> Clone for Precompile<CTX> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Simple(p) => Self::Simple(p.clone()),
+            Self::Extended(p) => Self::Extended(p.clone()),
+        }
+    }
+}
+
+impl<CTX: ContextTr> Precompile<CTX> {
+    #[inline]
+    pub fn address(&self) -> &Address {
+        match self {
+            Self::Simple(p) => p.address(),
+            Self::Extended(p) => p.address(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn call(
+        &self,
+        ctx: &mut CTX,
+        input: &[u8],
+        target: &Address,
+        caller: Address,
+        value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, String> {
+        match self {
+            Self::Simple(p) => {
+                let raw = p.execute(input, gas_limit);
+
+                let mut result = InterpreterResult {
+                    result: InstructionResult::Return,
+                    gas: Gas::new(gas_limit),
+                    output: Bytes::new(),
+                };
+
+                match raw {
+                    Ok(output) => {
+                        _ = result.gas.record_cost(output.gas_used);
+                        result.result = if output.reverted {
+                            InstructionResult::Revert
+                        } else {
+                            InstructionResult::Return
+                        };
+                        result.output = output.bytes;
+                    }
+                    Err(PrecompileError::Fatal(e)) => return Err(e),
+                    Err(e) => {
+                        result.result = if e.is_oog() {
+                            InstructionResult::PrecompileOOG
+                        } else {
+                            InstructionResult::PrecompileError
+                        };
+                    }
+                }
+
+                Ok(Some(result))
+            }
+            Self::Extended(ext) => {
+                ext.execute(ctx, input, target, caller, value, is_static, gas_limit)
+            }
+        }
+    }
+}
