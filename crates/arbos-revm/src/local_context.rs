@@ -1,12 +1,14 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use revm::context::LocalContextTr;
+use revm::primitives::B256;
 
 pub trait ArbitrumLocalContextTr: LocalContextTr {
     fn stylus_pages_ever(&self) -> u16;
     fn stylus_pages_open(&self) -> u16;
     fn add_stylus_pages_open(&mut self, pages: u16);
     fn set_stylus_pages_open(&mut self, pages: u16);
+    fn insert_recent_wasm(&mut self, code_hash: B256, retain: u16) -> bool;
 }
 
 /// Local context that is filled by execution.
@@ -18,6 +20,8 @@ pub struct ArbitrumLocalContext {
     pub stylus_pages_ever: u16,
     /// Stylus pages currently open.
     pub stylus_pages_open: u16,
+    /// Recently invoked Stylus wasm code hashes (block-local LRU).
+    pub recent_wasms: VecDeque<B256>,
 }
 
 impl Default for ArbitrumLocalContext {
@@ -26,6 +30,7 @@ impl Default for ArbitrumLocalContext {
             shared_memory_buffer: Rc::new(RefCell::new(Vec::with_capacity(1024 * 4))),
             stylus_pages_ever: 0,
             stylus_pages_open: 0,
+            recent_wasms: VecDeque::new(),
         }
     }
 }
@@ -62,6 +67,27 @@ impl ArbitrumLocalContextTr for ArbitrumLocalContext {
         if self.stylus_pages_open > self.stylus_pages_ever {
             self.stylus_pages_ever = self.stylus_pages_open;
         }
+    }
+
+    fn insert_recent_wasm(&mut self, code_hash: B256, retain: u16) -> bool {
+        if let Some(pos) = self.recent_wasms.iter().position(|existing| *existing == code_hash) {
+            // Move existing entry to the back to track recency.
+            if pos + 1 != self.recent_wasms.len() {
+                if let Some(found) = self.recent_wasms.remove(pos) {
+                    self.recent_wasms.push_back(found);
+                }
+            }
+            return true;
+        }
+
+        self.recent_wasms.push_back(code_hash);
+
+        let retain = retain as usize;
+        if retain > 0 && self.recent_wasms.len() > retain {
+            self.recent_wasms.pop_front();
+        }
+
+        false
     }
 }
 

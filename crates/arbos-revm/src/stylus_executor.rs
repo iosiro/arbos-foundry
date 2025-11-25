@@ -9,7 +9,7 @@ use arbutil::{
     Bytes20, Bytes32,
     evm::{
         EvmData,
-        api::{EvmApiMethod, Gas as ArbGas, VecReader},
+        api::{EvmApiMethod, Gas as ArbGas, Ink, VecReader},
         req::EvmApiRequestor,
         user::{UserOutcome, UserOutcomeKind},
     },
@@ -23,7 +23,7 @@ use revm::{
     inspector::{InspectorEvmTr, JournalExt},
     interpreter::{
         CallInput, FrameInput, Gas, InputsImpl, InstructionResult, InterpreterAction,
-        InterpreterResult, interpreter::EthInterpreter, interpreter_types::InputsTr,
+        InterpreterResult, gas::memory_gas, interpreter::EthInterpreter, interpreter_types::InputsTr,
     },
     primitives::{Address, B256, Bytes, FixedBytes, Log, U256, alloy_primitives::U64, keccak256},
 };
@@ -34,7 +34,7 @@ use stylus::{
         machine::Module,
         programs::{
             StylusData,
-            config::{CompileConfig, StylusConfig},
+            config::{CompileConfig, PricingParams, StylusConfig},
             meter::MeteredMachine,
         },
     },
@@ -45,12 +45,12 @@ use crate::{
     ArbitrumEvm,
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     constants::{
-        COST_SCALAR_PERCENT, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS,
-        STYLUS_DISCRIMINANT,
+        ARBOS_VERSION_STYLUS_FIXES, COST_SCALAR_PERCENT, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
+        MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
     },
     context::ArbitrumContextTr,
     local_context::ArbitrumLocalContextTr,
-    state::{ArbState, ArbStateGetter},
+    state::{ArbState, ArbStateGetter, program::ProgramInfo},
     stylus_api::StylusHandler,
 };
 
@@ -116,11 +116,13 @@ pub fn stylus_call_cost(new: u16, open: u16, ever: u16, free_pages: u16, page_ga
     let new_open = open.saturating_add(new);
     let new_ever = max(ever, new_open);
 
-    if new_ever < free_pages {
+    if new_ever <= free_pages {
         return 0;
     }
 
-    let adding = new_open.saturating_sub(open).saturating_sub(free_pages);
+    let sub_free = |pages: u16| pages.saturating_sub(free_pages);
+
+    let adding = sub_free(new_open).saturating_sub(sub_free(open));
     let linear = (adding as u64).saturating_mul(page_gas as u64);
     let exp = |x: u16| -> u64 {
         if x < MEMORY_EXPONENTS.len() as u16 {
@@ -351,6 +353,22 @@ where
             (stylus_config, compile_config, evm_data)
         };
 
+        let program_info = match self.ctx().arb_state(None).programs().program_info(&code_hash) {
+            Ok(Some(info)) => info,
+            Ok(None) => ProgramInfo {
+                version: stylus_params.version,
+                init_cost: stylus_data.init_cost,
+                cached_cost: stylus_data.cached_init_cost,
+                footprint: stylus_data.footprint,
+                asm_estimated_kb: stylus_data.asm_estimate,
+                age: 0,
+                cached: false,
+            },
+            Err(e) => return Some(e.into()),
+        };
+
+        let cached = program_info.cached || self.ctx().local_mut().insert_recent_wasm(code_hash, stylus_params.block_cache_size);
+
         let inputs = InputsImpl {
             target_address: stylus_ctx.target_address,
             caller_address: stylus_ctx.caller_address,
@@ -377,7 +395,20 @@ where
                 stylus_params.cached_cost_scalar,
             );
 
-            let cost = program_cost.saturating_add(page_grow_cost);
+            let init_cost = init_gas_cost(
+                stylus_data.init_cost,
+                stylus_params.min_init_gas,
+                stylus_params.init_cost_scalar,
+            );
+
+            let mut cost = page_grow_cost;
+            if cached || stylus_params.version > 1 {
+                cost = cost.saturating_add(program_cost);
+            }
+            if !cached {
+                cost = cost.saturating_add(init_cost);
+            }
+
             (cost, wasm_open_pages)
         };
 
@@ -433,6 +464,37 @@ where
 
         self.ctx().local_mut().set_stylus_pages_open(stylus_open_pages);
 
+        if data.len() > 0
+            && self
+                .ctx()
+                .cfg()
+                .stylus()
+                .arbos_version()
+                >= ARBOS_VERSION_STYLUS_FIXES
+        {
+            let evm_cost = memory_gas(data.len());
+
+            if gas.limit() < evm_cost {
+                gas.spend_all();
+                return Some(InterpreterAction::Return(InterpreterResult {
+                    result: InstructionResult::OutOfGas,
+                    output: Default::default(),
+                    gas,
+                }));
+            }
+
+            let max_gas_to_return = gas.limit().saturating_sub(evm_cost);
+            // gas.remaining = min(gas.remaining, max_gas_to_return)
+            // gas.spent = gas.limit - gas.remaining
+            if gas.remaining() > max_gas_to_return {
+                println!(
+                    "Stylus EVM gas adjustment: limiting from {} to {}",
+                    gas.remaining(),
+                    max_gas_to_return
+                );
+                gas.set_spent(gas.limit() - max_gas_to_return);
+            }
+        }
         Some(InterpreterAction::Return(InterpreterResult { result, output: data.into(), gas }))
     }
 
@@ -574,4 +636,8 @@ pub fn compile_stylus_bytecode(
     }
 
     Err("init failed".to_string())
+}
+
+pub fn ink_to_gas_ceil(pricing: PricingParams, ink: Ink) -> u64 {
+    ink.0.div_ceil(pricing.ink_price as u64)
 }

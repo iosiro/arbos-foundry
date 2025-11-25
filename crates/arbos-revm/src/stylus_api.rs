@@ -20,7 +20,7 @@ use revm::{
     primitives::{Address, Log, hardfork::SpecId},
 };
 
-use crate::{ArbitrumContextTr, ArbitrumEvm, buffer};
+use crate::{ArbitrumContextTr, ArbitrumEvm, buffer, local_context::ArbitrumLocalContextTr, state::{ArbState, ArbStateGetter}, stylus_executor::stylus_call_cost};
 
 pub(crate) type HostCallFunc = dyn Fn(
     arbutil::evm::api::EvmApiMethod,
@@ -456,8 +456,29 @@ where
             }
 
             EvmApiMethod::AddPages => {
-                let _count = buffer::take_u16(&mut data);
-                (Status::Success.into(), VecReader::new(vec![]), ArbGas(0))
+                
+                let count = buffer::take_u16(&mut data);
+                let open = context.local().stylus_pages_open();
+                let ever = context.local().stylus_pages_ever();
+
+                let stylus_params = context
+                    .arb_state(None)
+                    .programs()
+                    .get_stylus_params()
+                    .unwrap();
+        
+                let free_pages = stylus_params.free_pages;
+                let page_gas = stylus_params.page_gas;
+
+                let cost = stylus_call_cost(
+                    count,
+                    open,
+                    ever,
+                    free_pages,
+                    page_gas,
+                );
+                context.local_mut().add_stylus_pages_open(count);
+                (Status::Success.into(), VecReader::new(vec![]), ArbGas(cost))
             }
 
             EvmApiMethod::CaptureHostIO => {
