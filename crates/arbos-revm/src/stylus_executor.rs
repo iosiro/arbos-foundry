@@ -557,7 +557,7 @@ pub fn compile_stylus_bytecode(
             Err(e) => return Err(e.to_string()),
         };
 
-        if let Some(gas) = gas.as_deref_mut() {
+        if let Some(gas) = gas {
             gas.erase_cost(activation_gas);
         }
 
