@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success, try_state},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter},
 };
@@ -86,127 +86,159 @@ pub fn arb_address_table_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecomp
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbAddressTable")),
         address!("0x0000000000000000000000000000000000000066"),
-        arb_address_table_run::<CTX>,
+        precompile_impl!(ArbAddressTablePrecompile),
     )
 }
-/// Run the precompile with the given context and input data.
-/// Run the arb_address_table precompile with the given context and input data.
-fn arb_address_table_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
-    let mut gas = Gas::new(gas_limit);
 
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
+struct ArbAddressTablePrecompile;
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
-
-    match selector {
-        ArbAddressTable::addressExistsCall::SELECTOR => {
-            let call = ArbAddressTable::addressExistsCall::abi_decode(input).unwrap();
-
-            let exists = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).address_table().address_exists(call.addr)
-            );
-
-            let output = ArbAddressTable::addressExistsCall::abi_encode_returns(&exists);
-
-            return_success!(gas, Bytes::from(output));
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbAddressTable => {
+            addressExistsCall(View),
+            compressCall(NonPayable),
+            decompressCall(View),
+            lookupCall(View),
+            lookupIndexCall(View),
+            registerCall(NonPayable),
+            sizeCall(View),
         }
-        ArbAddressTable::compressCall::SELECTOR => {
-            let call = ArbAddressTable::compressCall::abi_decode(input).unwrap();
+    };
 
-            let compressed = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).address_table().compress(call.addr)
-            );
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        let mut gas = Gas::new(gas_limit);
 
-            return_success!(
-                gas,
-                Bytes::from(ArbAddressTable::compressCall::abi_encode_returns(&compressed))
-            );
+        // decode selector
+        if input.len() < 4 {
+            return_revert!(gas, Bytes::from("Input too short"));
         }
-        ArbAddressTable::decompressCall::SELECTOR => {
-            let call = ArbAddressTable::decompressCall::abi_decode(input).unwrap();
 
-            let offset: u64 = if let Ok(offset) = call.offset.try_into() {
-                offset
-            } else {
-                return Err("invalid offset in ArbAddressTable.Decompress".to_string());
-            };
+        // decode selector
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
-            if offset > call.buf.len() as u64 {
-                return Err("invalid offset in ArbAddressTable.Decompress".to_string());
+        match selector {
+            ArbAddressTable::addressExistsCall::SELECTOR => {
+                let call = ArbAddressTable::addressExistsCall::abi_decode(input).unwrap();
+
+                let exists = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().address_exists(call.addr)
+                );
+
+                let output = ArbAddressTable::addressExistsCall::abi_encode_returns(&exists);
+
+                return_success!(gas, Bytes::from(output));
             }
+            ArbAddressTable::compressCall::SELECTOR => {
+                let call = ArbAddressTable::compressCall::abi_decode(input).unwrap();
 
-            let data = &call.buf[offset as usize..];
+                let compressed = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().compress(call.addr)
+                );
 
-            let (decompressed, new_offset) =
-                try_state!(gas, context.arb_state(Some(&mut gas)).address_table().decompress(data));
+                return_success!(
+                    gas,
+                    Bytes::from(ArbAddressTable::compressCall::abi_encode_returns(&compressed))
+                );
+            }
+            ArbAddressTable::decompressCall::SELECTOR => {
+                let call = ArbAddressTable::decompressCall::abi_decode(input).unwrap();
 
-            let output = ArbAddressTable::decompressCall::abi_encode_returns(
-                &ArbAddressTable::decompressReturn::from((decompressed, U256::from(new_offset))),
-            );
-            return_success!(gas, Bytes::from(output));
+                let offset: u64 = if let Ok(offset) = call.offset.try_into() {
+                    offset
+                } else {
+                    return_revert!(
+                        gas,
+                        Bytes::from("invalid offset in ArbAddressTable.Decompress")
+                    );
+                };
+
+                if offset > call.buf.len() as u64 {
+                    return_revert!(
+                        gas,
+                        Bytes::from("invalid offset in ArbAddressTable.Decompress")
+                    );
+                }
+
+                let data = &call.buf[offset as usize..];
+
+                let (decompressed, new_offset) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().decompress(data)
+                );
+
+                let output = ArbAddressTable::decompressCall::abi_encode_returns(
+                    &ArbAddressTable::decompressReturn::from((
+                        decompressed,
+                        U256::from(new_offset),
+                    )),
+                );
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbAddressTable::lookupCall::SELECTOR => {
+                let call = ArbAddressTable::lookupCall::abi_decode(input).unwrap();
+                let index = if let Some(index) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().lookup(call.addr)
+                ) {
+                    index
+                } else {
+                    return_revert!(gas, Bytes::from("address does not exist in AddressTable"));
+                };
+
+                let output = ArbAddressTable::lookupCall::abi_encode_returns(&U256::from(index));
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbAddressTable::lookupIndexCall::SELECTOR => {
+                let call = ArbAddressTable::lookupIndexCall::abi_decode(input).unwrap();
+
+                let index = if let Ok(index) = call.index.try_into() {
+                    index
+                } else {
+                    return_revert!(
+                        gas,
+                        Bytes::from("invalid index in ArbAddressTable.LookupIndex")
+                    );
+                };
+                let addr = if let Some(addr) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().lookup_index(index)
+                ) {
+                    addr
+                } else {
+                    return_revert!(gas, Bytes::from("index does not exist in AddressTable"));
+                };
+
+                let output = ArbAddressTable::lookupIndexCall::abi_encode_returns(&addr);
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbAddressTable::registerCall::SELECTOR => {
+                let call = ArbAddressTable::registerCall::abi_decode(input).unwrap();
+                let index = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).address_table().register(call.addr)
+                );
+
+                let output = ArbAddressTable::registerCall::abi_encode_returns(&U256::from(index));
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbAddressTable::sizeCall::SELECTOR => {
+                let size =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).address_table().size());
+
+                let output = ArbAddressTable::sizeCall::abi_encode_returns(&U256::from(size));
+                return_success!(gas, Bytes::from(output));
+            }
+            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
         }
-        ArbAddressTable::lookupCall::SELECTOR => {
-            let call = ArbAddressTable::lookupCall::abi_decode(input).unwrap();
-            let index = if let Some(index) =
-                try_state!(gas, context.arb_state(Some(&mut gas)).address_table().lookup(call.addr))
-            {
-                index
-            } else {
-                return_revert!(gas, Bytes::from("address does not exist in AddressTable"));
-            };
-
-            let output = ArbAddressTable::lookupCall::abi_encode_returns(&U256::from(index));
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAddressTable::lookupIndexCall::SELECTOR => {
-            let call = ArbAddressTable::lookupIndexCall::abi_decode(input).unwrap();
-
-            let index = if let Ok(index) = call.index.try_into() {
-                index
-            } else {
-                return_revert!(gas, Bytes::from("invalid index in ArbAddressTable.LookupIndex"));
-            };
-            let addr = if let Some(addr) = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).address_table().lookup_index(index)
-            ) {
-                addr
-            } else {
-                return_revert!(gas, Bytes::from("index does not exist in AddressTable"));
-            };
-
-            let output = ArbAddressTable::lookupIndexCall::abi_encode_returns(&addr);
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAddressTable::registerCall::SELECTOR => {
-            let call = ArbAddressTable::registerCall::abi_decode(input).unwrap();
-            let index = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).address_table().register(call.addr)
-            );
-            let output = ArbAddressTable::registerCall::abi_encode_returns(&U256::from(index));
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAddressTable::sizeCall::SELECTOR => {
-            let _ = ArbAddressTable::sizeCall::abi_decode(input).unwrap();
-            let size = try_state!(gas, context.arb_state(Some(&mut gas)).address_table().size());
-            let output = ArbAddressTable::sizeCall::abi_encode_returns(&U256::from(size));
-            return_success!(gas, Bytes::from(output));
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }

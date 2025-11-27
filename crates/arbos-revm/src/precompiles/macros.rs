@@ -22,7 +22,11 @@ pub(crate) fn revert_result_with_output(gas: &mut Gas, output: Bytes) -> Interpr
 }
 
 pub(crate) fn burnout_return_result() -> InterpreterResult {
-    InterpreterResult { result: InstructionResult::Revert, gas: Gas::new(0), output: Bytes::default() }
+    InterpreterResult {
+        result: InstructionResult::Revert,
+        gas: Gas::new(0),
+        output: Bytes::default(),
+    }
 }
 
 pub(crate) fn out_of_gas_result(gas: &mut Gas) -> InterpreterResult {
@@ -35,11 +39,7 @@ pub(crate) fn out_of_gas_result(gas: &mut Gas) -> InterpreterResult {
 }
 
 pub(crate) fn record_cost_return(gas: &mut Gas, cost: u64) -> Option<InterpreterResult> {
-    if !gas.record_cost(cost) {
-        Some(out_of_gas_result(gas))
-    } else {
-        None
-    }
+    if !gas.record_cost(cost) { Some(out_of_gas_result(gas)) } else { None }
 }
 
 #[macro_export]
@@ -76,7 +76,10 @@ pub(crate) use burnout_return;
 
 macro_rules! return_revert {
     ($gas:expr, $output:expr) => {
-        return Ok(Some(crate::precompiles::macros::revert_result_with_output(&mut $gas, $output.into())))
+        return Ok(Some(crate::precompiles::macros::revert_result_with_output(
+            &mut $gas,
+            $output.into(),
+        )))
     };
     ($gas:expr) => {
         return Ok(Some(crate::precompiles::macros::revert_result(&mut $gas)))
@@ -154,13 +157,7 @@ pub enum StateMutability {
 #[macro_export]
 macro_rules! precompile_impl {
     ($logic:ty) => {
-        |context,
-         input,
-         target_address,
-         caller_address,
-         call_value,
-         is_static,
-         gas_limit| {
+        |context, input, target_address, caller_address, call_value, is_static, gas_limit| {
             <$logic>::run(
                 context,
                 input,

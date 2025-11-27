@@ -1,8 +1,12 @@
+use core::panic;
+
 use crate::{
-    ArbitrumContextTr, precompiles::{
-        ExtendedPrecompile,
-        macros::{record_cost, return_revert, return_success, try_state},
-    }, state::{ArbState, ArbStateGetter, types::ArbosStateError}
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
+    precompiles::{
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, record_cost, return_revert, return_success, try_state},
+    },
+    state::{ArbState, ArbStateGetter, types::ArbosStateError},
 };
 use alloy_sol_types::{SolCall, sol};
 use revm::{
@@ -53,12 +57,43 @@ pub fn arb_native_token_manager_precompile<CTX: ArbitrumContextTr>() -> Extended
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbNativeTokenManager")),
         address!("0x0000000000000000000000000000000000000073"),
-        arb_native_token_manager_run::<CTX>,
+        precompile_impl!(ArbNativeTokenManagerPrecompile),
     )
 }
 
 const MINT_BURN_GAS_COST: u64 =
     revm::interpreter::gas::WARM_STORAGE_READ_COST + revm::interpreter::gas::CALLVALUE;
+
+struct ArbNativeTokenManagerPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbNativeTokenManagerPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbNativeTokenManager => {
+            mintNativeTokenCall(NonPayable),
+            burnNativeTokenCall(NonPayable),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_native_token_manager_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
+}
 
 /// Run the precompile with the given context and input data.
 /// Run the arb_native_token_manager precompile with the given context and input data.
@@ -70,7 +105,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
@@ -126,7 +161,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                     gas,
                     output: Bytes::default(),
                 })),
-                Err(e) => Err(format!("transfer failed: {e}")),
+                Err(e) => panic!("Failed to burn native token: {}", e),
             }
         }
         _ => return_revert!(gas, Bytes::from("Unknown function selector")),

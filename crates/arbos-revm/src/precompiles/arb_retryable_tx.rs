@@ -9,10 +9,15 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, precompiles::{
-        ExtendedPrecompile,
-        macros::{emit_event, return_revert, return_success, try_state},
-    }, record_cost, state::{ArbState, ArbStateGetter, types::StorageBackedTr}
+    ArbitrumContextTr,
+    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    generate_state_mut_table, precompile_impl,
+    precompiles::{
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, emit_event, return_revert, return_success, try_state},
+    },
+    record_cost,
+    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
 };
 
 const ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60; // 1 week
@@ -130,8 +135,45 @@ pub fn arb_retryable_tx_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompi
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbRetryableTx")),
         address!("0x000000000000000000000000000000000000006e"),
-        arb_retryable_tx_run::<CTX>,
+        precompile_impl!(ArbRetryableTxPrecompile),
     )
+}
+
+struct ArbRetryableTxPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbRetryableTx => {
+            redeemCall(NonPayable),
+            getLifetimeCall(View),
+            getTimeoutCall(View),
+            keepaliveCall(NonPayable),
+            getBeneficiaryCall(View),
+            cancelCall(NonPayable),
+            getCurrentRedeemerCall(View),
+            submitRetryableCall(NonPayable),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_retryable_tx_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
 }
 /// Run the precompile with the given context and input data.
 /// Run the arb_retryable_tx precompile with the given context and input data.
@@ -143,7 +185,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
 
     // decode selector

@@ -8,9 +8,10 @@ use revm::{
 use crate::{
     ArbitrumContextTr,
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success},
     },
 };
 
@@ -166,8 +167,48 @@ pub fn arb_sys_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbSys")),
         address!("0x0000000000000000000000000000000000000064"),
-        arb_sys_run::<CTX>,
+        precompile_impl!(ArbSysPrecompile),
     )
+}
+struct ArbSysPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbSys => {
+            arbBlockNumberCall(View),
+            arbBlockHashCall(View),
+            arbChainIDCall(View),
+            arbOSVersionCall(View),
+            getStorageGasAvailableCall(View),
+            isTopLevelCallCall(View),
+            mapL1SenderContractAddressToL2AliasCall(Pure),
+            wasMyCallersAddressAliasedCall(View),
+            myCallersAddressWithoutAliasingCall(View),
+            withdrawEthCall(Payable),
+            sendTxToL1Call(Payable),
+            sendMerkleTreeStateCall(View),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_sys_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
 }
 /// Run the precompile with the given context and input data.
 /// Run the arb_sys precompile with the given context and input data.
@@ -179,7 +220,7 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {

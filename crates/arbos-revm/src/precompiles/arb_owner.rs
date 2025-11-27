@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success, try_state},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter},
 };
@@ -263,8 +263,81 @@ pub fn arb_owner_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX>
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbOwner")),
         address!("0x0000000000000000000000000000000000000070"),
-        arb_owner_run::<CTX>,
+        precompile_impl!(ArbOwnerPrecompile),
     )
+}
+struct ArbOwnerPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbOwner => {
+            addChainOwnerCall(NonPayable),
+            removeChainOwnerCall(NonPayable),
+            isChainOwnerCall(View),
+            getAllChainOwnersCall(View),
+            setNativeTokenManagementFromCall(NonPayable),
+            addNativeTokenOwnerCall(NonPayable),
+            removeNativeTokenOwnerCall(NonPayable),
+            isNativeTokenOwnerCall(View),
+            getAllNativeTokenOwnersCall(View),
+            setL1BaseFeeEstimateInertiaCall(NonPayable),
+            setL2BaseFeeCall(NonPayable),
+            setMinimumL2BaseFeeCall(NonPayable),
+            setSpeedLimitCall(NonPayable),
+            setMaxTxGasLimitCall(NonPayable),
+            setL2GasPricingInertiaCall(NonPayable),
+            setL2GasBacklogToleranceCall(NonPayable),
+            getNetworkFeeAccountCall(View),
+            getInfraFeeAccountCall(View),
+            setNetworkFeeAccountCall(NonPayable),
+            setInfraFeeAccountCall(NonPayable),
+            scheduleArbOSUpgradeCall(NonPayable),
+            setL1PricingEquilibrationUnitsCall(NonPayable),
+            setL1PricingInertiaCall(NonPayable),
+            setL1PricingRewardRecipientCall(NonPayable),
+            setL1PricingRewardRateCall(NonPayable),
+            setL1PricePerUnitCall(NonPayable),
+            setPerBatchGasChargeCall(NonPayable),
+            setBrotliCompressionLevelCall(NonPayable),
+            setAmortizedCostCapBipsCall(NonPayable),
+            releaseL1PricerSurplusFundsCall(NonPayable),
+            setInkPriceCall(NonPayable),
+            setWasmMaxStackDepthCall(NonPayable),
+            setWasmFreePagesCall(NonPayable),
+            setWasmPageGasCall(NonPayable),
+            setWasmPageLimitCall(NonPayable),
+            setWasmMaxSizeCall(NonPayable),
+            setWasmMinInitGasCall(NonPayable),
+            setWasmInitCostScalarCall(NonPayable),
+            setWasmExpiryDaysCall(NonPayable),
+            setWasmKeepaliveDaysCall(NonPayable),
+            setWasmBlockCacheSizeCall(NonPayable),
+            addWasmCacheManagerCall(NonPayable),
+            removeWasmCacheManagerCall(NonPayable),
+            setChainConfigCall(NonPayable),
+            setCalldataPriceIncreaseCall(NonPayable),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_owner_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
 }
 /// Run the precompile with the given context and input data.
 fn arb_owner_run<CTX: ArbitrumContextTr>(
@@ -275,7 +348,7 @@ fn arb_owner_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {

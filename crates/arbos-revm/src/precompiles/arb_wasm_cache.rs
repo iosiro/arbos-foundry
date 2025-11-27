@@ -1,17 +1,22 @@
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
+    context::JournalTr,
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, Bytes, U256, address},
+    primitives::{Address, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
 use crate::{
     ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
         ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success, try_state},
+        macros::{StateMutability, emit_event, return_revert, return_success, try_state},
     },
-    state::{ArbState, ArbStateGetter, types::ArbosStateError},
+    record_cost,
+    state::{
+        ArbState, ArbStateGetter,
+        types::{ArbosStateError, StorageBackedTr},
+    },
 };
 
 sol! {
@@ -92,8 +97,8 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
     fn inner(
         context: &mut CTX,
         input: &[u8],
-        _target_address: &Address,
-        _caller_address: Address,
+        target_address: &Address,
+        caller_address: Address,
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
@@ -134,7 +139,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 return_success!(gas, Bytes::from(output));
             }
             IArbWasmCache::cacheCodehashCall::SELECTOR => {
-                if !try_state!(gas, has_access(context, &mut gas)) {
+                if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
                     return_revert!(gas);
                 }
 
@@ -185,7 +190,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 return_success!(gas, Bytes::from(output));
             }
             IArbWasmCache::cacheProgramCall::SELECTOR => {
-                if !try_state!(gas, has_access(context, &mut gas)) {
+                if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
                     return_revert!(gas);
                 }
 
@@ -197,34 +202,32 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                     context.arb_state(Some(&mut gas)).programs().get_stylus_params()
                 );
 
-                let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
-                    code_hash.data
-                } else {
-                    return_revert!(
-                        gas,
-                        IArbWasmCache::ProgramNeedsUpgrade {
-                            version: 0,
-                            stylusVersion: params.version
-                        }
-                        .abi_encode()
-                    );
-                };
+                let code_hash = try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(addr));
 
-                let mut program_info = if let Some(program_info) = try_state!(
+                let mut program_info = try_state!(
                     gas,
                     context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
-                ) {
-                    program_info
-                } else {
+                )
+                .unwrap_or_default();
+
+                if program_info.version != params.version {
                     return_revert!(
                         gas,
                         IArbWasmCache::ProgramNeedsUpgrade {
-                            version: 0,
+                            version: program_info.version,
                             stylusVersion: params.version
                         }
                         .abi_encode()
                     );
-                };
+                }
+
+                if program_info.age > params.expiry_days as u32 * 86400 {
+                    return_revert!(
+                        gas,
+                        IArbWasmCache::ProgramExpired { ageInSeconds: program_info.age as u64 }
+                            .abi_encode()
+                    );
+                }
 
                 let output = IArbWasmCache::cacheProgramCall::abi_encode_returns(
                     &IArbWasmCache::cacheProgramReturn {},
@@ -235,7 +238,27 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                     return_success!(gas, Bytes::from(output));
                 }
 
-                // TODO: burn cache cost
+                // emit event cost
+                emit_event!(
+                    context,
+                    Log {
+                        address: *target_address,
+                        data: IArbWasmCache::UpdateProgramCache {
+                            manager: caller_address,
+                            codehash: code_hash,
+                            cached: true
+                        }
+                        .into_log_data()
+                    },
+                    gas
+                );
+
+                record_cost!(gas, program_info.init_cost as u64);
+
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().module_hash(&code_hash).get()
+                );
 
                 program_info.cached = true;
 
@@ -250,7 +273,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 return_success!(gas, Bytes::from(output));
             }
             IArbWasmCache::evictCodehashCall::SELECTOR => {
-                if !try_state!(gas, has_access(context, &mut gas)) {
+                if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
                     return_revert!(gas);
                 }
 
@@ -327,14 +350,89 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
 fn has_access<CTX: ArbitrumContextTr>(
     context: &mut CTX,
+    caller: Address,
     gas: &mut Gas,
 ) -> Result<bool, ArbosStateError> {
-    let caller = context.caller();
     let mut arb_state = context.arb_state(Some(gas));
-
     if arb_state.cache_managers().contains(caller)? {
         return Ok(true);
     }
 
     arb_state.is_chain_owner(caller)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use alloy_sol_types::SolCall;
+    use revm::{
+        Journal,
+        context::{BlockEnv, JournalTr, TxEnv},
+        database::EmptyDBTyped,
+        primitives::{U256, address},
+    };
+
+    use crate::{
+        ArbitrumContext,
+        config::ArbitrumConfig,
+        local_context::ArbitrumLocalContext,
+        precompiles::{ArbPrecompileLogic, arb_wasm_cache::ArbWasmCache},
+    };
+
+    fn setup_evm() -> ArbitrumContext<EmptyDBTyped<Infallible>> {
+        let db = EmptyDBTyped::<Infallible>::default();
+
+        let context = ArbitrumContext {
+            journaled_state: {
+                let journal = Journal::new(db);
+                journal
+            },
+            block: BlockEnv::default(),
+            cfg: ArbitrumConfig::default(),
+            tx: TxEnv::default(),
+            chain: (),
+            local: ArbitrumLocalContext::default(),
+            error: Ok(()),
+        };
+
+        context
+    }
+
+    #[test]
+    fn test_wasm_cache_code_hash_is_cached() {
+        let mut context = setup_evm();
+
+        let codehash = [0u8; 32];
+
+        let input =
+            crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_encode(
+                &crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall {
+                    codehash: codehash.into(),
+                },
+            );
+
+        let result = ArbWasmCache::run(
+            &mut context,
+            &input,
+            &crate::precompiles::arb_wasm_cache::arb_wasm_cache_precompile::<
+                ArbitrumContext<EmptyDBTyped<Infallible>>,
+            >()
+            .address,
+            address!("0x0000000000000000000000000000000000000001"),
+            U256::ZERO,
+            true,
+            1_000_000,
+        )
+        .unwrap();
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        let output = result.output;
+        let decoded = crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_decode_returns(&output).unwrap();
+        assert_eq!(decoded, false);
+
+        // gas cost should be 1606
+        assert_eq!(result.gas.spent(), 1606);
+    }
 }

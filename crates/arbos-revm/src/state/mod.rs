@@ -1,6 +1,6 @@
 use revm::{
     context::JournalTr,
-    interpreter::Gas,
+    interpreter::{Gas, gas::COLD_ACCOUNT_ACCESS_COST},
     primitives::{Address, B256, U256},
 };
 
@@ -55,6 +55,7 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
     fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
     fn is_native_token_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
+    fn code_hash(&mut self, address: Address) -> Result<B256, ArbosStateError>;
     fn upgrade_timestamp(&mut self) -> StorageBackedU64<'_, CTX>;
     fn upgrade_version(&mut self) -> StorageBackedU64<'_, CTX>;
     fn network_fee_account(&mut self) -> StorageBackedAddress<'_, CTX>;
@@ -238,5 +239,15 @@ where
         let root = state_subkey(ARBOS_STATE_RETRYABLES_KEY);
         let slot = substorage(&root, &[0]);
         StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), slot)
+    }
+
+    fn code_hash(&mut self, address: Address) -> Result<B256, ArbosStateError> {
+        let code_hash = self.context.load_account_code_hash(address).unwrap();
+        if let Some(gas) = self.gas.as_deref_mut() {
+            if !gas.record_cost(COLD_ACCOUNT_ACCESS_COST) {
+                return Err(ArbosStateError::OutOfGas);
+            }
+        }
+        Ok(code_hash.data)
     }
 }

@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success, try_state},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter, types::StorageBackedTr},
 };
@@ -78,8 +78,47 @@ pub fn arb_owner_public_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompi
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbOwnerPublic")),
         address!("0x000000000000000000000000000000000000006b"),
-        arb_owner_public_run::<CTX>,
+        precompile_impl!(ArbOwnerPublicPrecompile),
     )
+}
+
+struct ArbOwnerPublicPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbOwnerPublic => {
+            isChainOwnerCall(View),
+            rectifyChainOwnerCall(NonPayable),
+            getAllChainOwnersCall(View),
+            isNativeTokenOwnerCall(View),
+            getAllNativeTokenOwnersCall(View),
+            getNetworkFeeAccountCall(View),
+            getInfraFeeAccountCall(View),
+            getBrotliCompressionLevelCall(View),
+            getScheduledUpgradeCall(View),
+            isCalldataPriceIncreaseEnabledCall(View),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_owner_public_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
 }
 /// Run the precompile with the given context and input data.
 /// Run the arb_owner_public precompile with the given context and input data.
@@ -91,7 +130,7 @@ fn arb_owner_public_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {

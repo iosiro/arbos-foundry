@@ -5,15 +5,21 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, buffer, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
+    ArbitrumContextTr, buffer,
+    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    constants::{
         ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
         ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
         ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY,
         INITIAL_MAX_WASM_SIZE,
-    }, precompiles::arb_wasm::IArbWasm::{IArbWasmErrors, ProgramExpired, ProgramNeedsUpgrade, ProgramNotActivated}, state::types::{
+    },
+    precompiles::arb_wasm::IArbWasm::{
+        IArbWasmErrors, ProgramExpired, ProgramNeedsUpgrade, ProgramNotActivated,
+    },
+    state::types::{
         ArbosStateError, StorageBackedAddressSet, StorageBackedB256, StorageBackedTr,
         StorageBackedU32, StorageBackedU64, map_address, substorage,
-    }
+    },
 };
 
 // stylus params type
@@ -140,7 +146,7 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct ProgramInfo {
     pub version: u16,
     pub init_cost: u16,
@@ -236,12 +242,8 @@ where
         data[4..6].copy_from_slice(&info.cached_cost.to_be_bytes());
         data[6..8].copy_from_slice(&info.footprint.to_be_bytes());
         data[8..11].copy_from_slice(&info.asm_estimated_kb.to_be_bytes()[1..4]);
-        let activated_at = self
-            .context
-            .timestamp()
-            .to::<u32>()
-            .saturating_sub(ARBOS_GENESIS_TIMESTAMP)
-            / 3600;
+        let activated_at =
+            self.context.timestamp().to::<u32>().saturating_sub(ARBOS_GENESIS_TIMESTAMP) / 3600;
         data[11..14].copy_from_slice(&activated_at.to_be_bytes()[1..4]);
         data[14] = if info.cached { 1 } else { 0 };
 
@@ -258,24 +260,25 @@ where
 
         if let Some(program) = program {
             if program.version == 0 {
-                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNotActivated(ProgramNotActivated {})));
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNotActivated(
+                    ProgramNotActivated {},
+                )));
             }
 
             // check that the program is up to date
             let stylus_version = stylus_params.version;
             if program.version != stylus_version {
-                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNeedsUpgrade(ProgramNeedsUpgrade {
-                    version: program.version,
-                    stylusVersion: stylus_version,
-                })));
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNeedsUpgrade(
+                    ProgramNeedsUpgrade { version: program.version, stylusVersion: stylus_version },
+                )));
             }
 
             // ensure the program hasn't expired
             let max_age_seconds = (stylus_params.expiry_days as u32).saturating_mul(86400);
             if program.age > max_age_seconds {
-                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramExpired(ProgramExpired {
-                    ageInSeconds: program.age as u64,
-                })));
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramExpired(
+                    ProgramExpired { ageInSeconds: program.age as u64 },
+                )));
             }
 
             Ok(Some(program))
@@ -294,7 +297,7 @@ where
                 return Err(ArbosStateError::OutOfGas);
             }
         }
-        
+
         let data = StorageBackedB256::new(self.context, None, slot).get()?;
 
         let mut params = StylusParams::zero();

@@ -1,7 +1,6 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use revm::context::LocalContextTr;
-use revm::primitives::B256;
+use revm::{context::LocalContextTr, primitives::B256};
 
 pub trait ArbitrumLocalContextTr: LocalContextTr {
     fn stylus_pages_ever(&self) -> u16;

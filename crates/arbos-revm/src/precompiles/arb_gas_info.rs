@@ -10,9 +10,10 @@ use crate::{
     ArbitrumContextTr,
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
+    generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success, try_state},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter, types::StorageBackedTr},
 };
@@ -139,423 +140,465 @@ pub fn arb_gas_info_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<C
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbGasInfo")),
         address!("0x000000000000000000000000000000000000006c"),
-        arb_gas_info_run::<CTX>,
+        precompile_impl!(ArbGasInfoPrecompile),
     )
 }
-/// Run the precompile with the given context and input data.
-/// Run the arb_info precompile with the given context and input data.
-fn arb_gas_info_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+struct ArbGasInfoPrecompile;
 
-    match selector {
-        ArbGasInfo::getAmortizedCostCapBipsCall::SELECTOR => {
-            let amortized_cost_cap_bips = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().amortized_cost_cap_bips().get())
-            };
-
-            let output = ArbGasInfo::getAmortizedCostCapBipsCall::abi_encode_returns(
-                &amortized_cost_cap_bips,
-            );
-
-            return_success!(gas, Bytes::from(output));
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbGasInfo => {
+            getPricesInWeiWithAggregatorCall(View),
+            getPricesInWeiCall(View),
+            getPricesInArbGasWithAggregatorCall(View),
+            getPricesInArbGasCall(View),
+            getGasAccountingParamsCall(View),
+            getMinimumGasPriceCall(View),
+            getL1BaseFeeEstimateCall(View),
+            getL1BaseFeeEstimateInertiaCall(View),
+            getL1RewardRateCall(View),
+            getL1RewardRecipientCall(View),
+            getL1GasPriceEstimateCall(View),
+            getCurrentTxL1GasFeesCall(View),
+            getGasBacklogCall(View),
+            getPricingInertiaCall(View),
+            getGasBacklogToleranceCall(View),
+            getL1PricingSurplusCall(View),
+            getPerBatchGasChargeCall(View),
+            getAmortizedCostCapBipsCall(View),
+            getL1FeesAvailableCall(View),
+            getL1PricingEquilibrationUnitsCall(View),
+            getLastL1PricingUpdateTimeCall(View),
+            getL1PricingFundsDueForRewardsCall(View),
+            getL1PricingUnitsSinceUpdateCall(View),
+            getLastL1PricingSurplusCall(View),
         }
-        ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {
-            let (speed_limit_per_second, max_tx_gas_limit) = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                let mut l2_pricing = arb_state.l2_pricing();
+    };
 
-                let speed_limit_per_second =
-                    try_state!(gas, l2_pricing.speed_limit_per_second().get());
-                let max_tx_gas_limit = try_state!(gas, l2_pricing.per_block_gas_limit().get());
-
-                (speed_limit_per_second, max_tx_gas_limit)
-            };
-
-            let output = ArbGasInfo::getGasAccountingParamsCall::abi_encode_returns(
-                &ArbGasInfo::getGasAccountingParamsReturn::from((
-                    U256::from(speed_limit_per_second),
-                    U256::from(max_tx_gas_limit),
-                    U256::from(max_tx_gas_limit),
-                )),
-            );
-
-            return_success!(gas, Bytes::from(output));
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        let mut gas = Gas::new(gas_limit);
+        // decode selector
+        if input.len() < 4 {
+            return_revert!(gas, Bytes::from("Input too short"));
         }
-        ArbGasInfo::getGasBacklogCall::SELECTOR => {
-            let gas_backlog = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l2_pricing().gas_backlog().get())
-            };
 
-            let output = ArbGasInfo::getGasBacklogCall::abi_encode_returns(&gas_backlog);
+        // decode selector
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {
-            let l1_base_fee_estimate = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
+        match selector {
+            ArbGasInfo::getAmortizedCostCapBipsCall::SELECTOR => {
+                let amortized_cost_cap_bips = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().amortized_cost_cap_bips().get())
+                };
 
-            let output =
-                ArbGasInfo::getL1BaseFeeEstimateCall::abi_encode_returns(&l1_base_fee_estimate);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {
-            let pricing_inertia = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().inertia().get())
-            };
-
-            let output =
-                ArbGasInfo::getL1BaseFeeEstimateInertiaCall::abi_encode_returns(&pricing_inertia);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {
-            let l1_fees_available = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
-            };
-
-            let output = ArbGasInfo::getL1FeesAvailableCall::abi_encode_returns(&l1_fees_available);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {
-            let equilibration_units = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().equilibration_units().get())
-            };
-
-            let output = ArbGasInfo::getL1PricingEquilibrationUnitsCall::abi_encode_returns(
-                &equilibration_units,
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {
-            let funds_due_for_rewards = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
-            };
-
-            let output = ArbGasInfo::getL1PricingFundsDueForRewardsCall::abi_encode_returns(
-                &U256::from(funds_due_for_rewards),
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {
-            let l1_pricing_surplus = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().last_surplus().get())
-            };
-
-            let output =
-                ArbGasInfo::getL1PricingSurplusCall::abi_encode_returns(&l1_pricing_surplus);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {
-            let funds_due_for_refund = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().batch_poster_table().total_funds_due().get())
-            };
-
-            let funds_due_for_rewards = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
-            };
-
-            let need_funds = funds_due_for_refund.wrapping_add(funds_due_for_rewards);
-
-            let have_funds = if context.cfg().stylus().arbos_version() < 10 {
-                let arb_pricer_funds =
-                    context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default();
-                arb_pricer_funds.data
-            } else {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
-            };
-
-            let surplus = I256::from(have_funds) - need_funds;
-
-            let output = ArbGasInfo::getLastL1PricingSurplusCall::abi_encode_returns(&surplus);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {
-            let last_update_time = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().last_update_time().get())
-            };
-
-            let output =
-                ArbGasInfo::getLastL1PricingUpdateTimeCall::abi_encode_returns(&last_update_time);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {
-            let minimum_gas_price = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l2_pricing().min_base_fee_wei().get())
-            };
-
-            let output = ArbGasInfo::getMinimumGasPriceCall::abi_encode_returns(&minimum_gas_price);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {
-            let per_batch_gas_charge = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().per_batch_gas_cost().get())
-            };
-
-            let output = ArbGasInfo::getPerBatchGasChargeCall::abi_encode_returns(
-                &(per_batch_gas_charge as i64),
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getPricesInArbGasCall::SELECTOR => {
-            let l1_gas_price = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
-
-            let l2_gas_price = { context.block().basefee() };
-
-            let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
-                revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
-            ));
-
-            if context.cfg().stylus().arbos_version() < 4 {
-                let mut gas_for_l1_calldata = U256::ZERO;
-                if l2_gas_price > 0 {
-                    gas_for_l1_calldata =
-                        wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
-                }
-
-                let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
-
-                let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn::from((
-                        per_l2_tx,
-                        gas_for_l1_calldata,
-                        U256::from(revm::interpreter::gas::SSTORE_SET),
-                    )),
+                let output = ArbGasInfo::getAmortizedCostCapBipsCall::abi_encode_returns(
+                    &amortized_cost_cap_bips,
                 );
 
                 return_success!(gas, Bytes::from(output));
-            } else {
-                let wei_per_l2_tx = wei_for_l1_calldata
-                    .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
-                let mut gas_for_l1_calldata = U256::ZERO;
-                let mut gas_per_l2_tx = U256::ZERO;
-                if l2_gas_price > 0 {
-                    gas_for_l1_calldata =
-                        wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
-                    gas_per_l2_tx = wei_per_l2_tx.wrapping_div(U256::from(l2_gas_price));
-                }
+            }
+            ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {
+                let (speed_limit_per_second, max_tx_gas_limit) = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut l2_pricing = arb_state.l2_pricing();
 
-                let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn::from((
-                        gas_per_l2_tx,
-                        gas_for_l1_calldata,
-                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                    let speed_limit_per_second =
+                        try_state!(gas, l2_pricing.speed_limit_per_second().get());
+                    let max_tx_gas_limit = try_state!(gas, l2_pricing.per_block_gas_limit().get());
+
+                    (speed_limit_per_second, max_tx_gas_limit)
+                };
+
+                let output = ArbGasInfo::getGasAccountingParamsCall::abi_encode_returns(
+                    &ArbGasInfo::getGasAccountingParamsReturn::from((
+                        U256::from(speed_limit_per_second),
+                        U256::from(max_tx_gas_limit),
+                        U256::from(max_tx_gas_limit),
                     )),
                 );
 
                 return_success!(gas, Bytes::from(output));
             }
-        }
-        ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {
-            let l1_gas_price = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
+            ArbGasInfo::getGasBacklogCall::SELECTOR => {
+                let gas_backlog = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l2_pricing().gas_backlog().get())
+                };
 
-            let l2_gas_price = { context.block().basefee() };
+                let output = ArbGasInfo::getGasBacklogCall::abi_encode_returns(&gas_backlog);
 
-            let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
-                revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
-            ));
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {
+                let l1_base_fee_estimate = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
 
-            if context.cfg().stylus().arbos_version() < 4 {
-                let mut gas_for_l1_calldata = U256::ZERO;
-                if l2_gas_price > 0 {
-                    gas_for_l1_calldata =
-                        wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
-                }
+                let output =
+                    ArbGasInfo::getL1BaseFeeEstimateCall::abi_encode_returns(&l1_base_fee_estimate);
 
-                let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {
+                let pricing_inertia = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().inertia().get())
+                };
 
-                let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasReturn::from((
-                        per_l2_tx,
-                        gas_for_l1_calldata,
-                        U256::from(revm::interpreter::gas::SSTORE_SET),
-                    )),
+                let output = ArbGasInfo::getL1BaseFeeEstimateInertiaCall::abi_encode_returns(
+                    &pricing_inertia,
                 );
 
                 return_success!(gas, Bytes::from(output));
-            } else {
+            }
+            ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {
+                let l1_fees_available = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
+                };
+
+                let output =
+                    ArbGasInfo::getL1FeesAvailableCall::abi_encode_returns(&l1_fees_available);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {
+                let equilibration_units = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().equilibration_units().get())
+                };
+
+                let output = ArbGasInfo::getL1PricingEquilibrationUnitsCall::abi_encode_returns(
+                    &equilibration_units,
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {
+                let funds_due_for_rewards = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
+                };
+
+                let output = ArbGasInfo::getL1PricingFundsDueForRewardsCall::abi_encode_returns(
+                    &U256::from(funds_due_for_rewards),
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {
+                let l1_pricing_surplus = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().last_surplus().get())
+                };
+
+                let output =
+                    ArbGasInfo::getL1PricingSurplusCall::abi_encode_returns(&l1_pricing_surplus);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {
+                let funds_due_for_refund = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(
+                        gas,
+                        arb_state.l1_pricing().batch_poster_table().total_funds_due().get()
+                    )
+                };
+
+                let funds_due_for_rewards = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
+                };
+
+                let need_funds = funds_due_for_refund.wrapping_add(funds_due_for_rewards);
+
+                let have_funds = if context.cfg().stylus().arbos_version() < 10 {
+                    let arb_pricer_funds =
+                        context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default();
+                    arb_pricer_funds.data
+                } else {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
+                };
+
+                let surplus = I256::from(have_funds) - need_funds;
+
+                let output = ArbGasInfo::getLastL1PricingSurplusCall::abi_encode_returns(&surplus);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {
+                let last_update_time = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().last_update_time().get())
+                };
+
+                let output = ArbGasInfo::getLastL1PricingUpdateTimeCall::abi_encode_returns(
+                    &last_update_time,
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {
+                let minimum_gas_price = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l2_pricing().min_base_fee_wei().get())
+                };
+
+                let output =
+                    ArbGasInfo::getMinimumGasPriceCall::abi_encode_returns(&minimum_gas_price);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {
+                let per_batch_gas_charge = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().per_batch_gas_cost().get())
+                };
+
+                let output = ArbGasInfo::getPerBatchGasChargeCall::abi_encode_returns(
+                    &(per_batch_gas_charge as i64),
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getPricesInArbGasCall::SELECTOR => {
+                let l1_gas_price = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
+
+                let l2_gas_price = { context.block().basefee() };
+
+                let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
+                    revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
+                ));
+
+                if context.cfg().stylus().arbos_version() < 4 {
+                    let mut gas_for_l1_calldata = U256::ZERO;
+                    if l2_gas_price > 0 {
+                        gas_for_l1_calldata =
+                            wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
+                    }
+
+                    let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
+
+                    let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
+                        &ArbGasInfo::getPricesInArbGasReturn::from((
+                            per_l2_tx,
+                            gas_for_l1_calldata,
+                            U256::from(revm::interpreter::gas::SSTORE_SET),
+                        )),
+                    );
+
+                    return_success!(gas, Bytes::from(output));
+                } else {
+                    let wei_per_l2_tx = wei_for_l1_calldata
+                        .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
+                    let mut gas_for_l1_calldata = U256::ZERO;
+                    let mut gas_per_l2_tx = U256::ZERO;
+                    if l2_gas_price > 0 {
+                        gas_for_l1_calldata =
+                            wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
+                        gas_per_l2_tx = wei_per_l2_tx.wrapping_div(U256::from(l2_gas_price));
+                    }
+
+                    let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
+                        &ArbGasInfo::getPricesInArbGasReturn::from((
+                            gas_per_l2_tx,
+                            gas_for_l1_calldata,
+                            U256::from(revm::interpreter::gas::SSTORE_SET),
+                        )),
+                    );
+
+                    return_success!(gas, Bytes::from(output));
+                }
+            }
+            ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {
+                let l1_gas_price = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
+
+                let l2_gas_price = { context.block().basefee() };
+
+                let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
+                    revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
+                ));
+
+                if context.cfg().stylus().arbos_version() < 4 {
+                    let mut gas_for_l1_calldata = U256::ZERO;
+                    if l2_gas_price > 0 {
+                        gas_for_l1_calldata =
+                            wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
+                    }
+
+                    let per_l2_tx = U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE);
+
+                    let output = ArbGasInfo::getPricesInArbGasCall::abi_encode_returns(
+                        &ArbGasInfo::getPricesInArbGasReturn::from((
+                            per_l2_tx,
+                            gas_for_l1_calldata,
+                            U256::from(revm::interpreter::gas::SSTORE_SET),
+                        )),
+                    );
+
+                    return_success!(gas, Bytes::from(output));
+                } else {
+                    let wei_per_l2_tx = wei_for_l1_calldata
+                        .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
+                    let mut gas_for_l1_calldata = U256::ZERO;
+                    let mut gas_per_l2_tx = U256::ZERO;
+                    if l2_gas_price > 0 {
+                        gas_for_l1_calldata =
+                            wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
+                        gas_per_l2_tx = wei_per_l2_tx.wrapping_div(U256::from(l2_gas_price));
+                    }
+
+                    let output =
+                        ArbGasInfo::getPricesInArbGasWithAggregatorCall::abi_encode_returns(
+                            &ArbGasInfo::getPricesInArbGasWithAggregatorReturn::from((
+                                gas_per_l2_tx,
+                                gas_for_l1_calldata,
+                                U256::from(revm::interpreter::gas::SSTORE_SET),
+                            )),
+                        );
+
+                    return_success!(gas, Bytes::from(output));
+                }
+            }
+            ArbGasInfo::getPricesInWeiCall::SELECTOR => {
+                let l1_gas_price = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
+
+                let l2_gas_price = { context.block().basefee() };
+
+                let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
+                    revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
+                ));
+
                 let wei_per_l2_tx = wei_for_l1_calldata
                     .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
-                let mut gas_for_l1_calldata = U256::ZERO;
-                let mut gas_per_l2_tx = U256::ZERO;
-                if l2_gas_price > 0 {
-                    gas_for_l1_calldata =
-                        wei_for_l1_calldata.wrapping_div(U256::from(l2_gas_price));
-                    gas_per_l2_tx = wei_per_l2_tx.wrapping_div(U256::from(l2_gas_price));
-                }
 
-                let output = ArbGasInfo::getPricesInArbGasWithAggregatorCall::abi_encode_returns(
-                    &ArbGasInfo::getPricesInArbGasWithAggregatorReturn::from((
-                        gas_per_l2_tx,
-                        gas_for_l1_calldata,
-                        U256::from(revm::interpreter::gas::SSTORE_SET),
+                let per_arb_gas_base = l2_gas_price;
+                let per_arb_gas_congestion = U256::ZERO;
+                let per_arb_gas_total = l2_gas_price;
+
+                let wei_for_l2_storage = U256::from(revm::interpreter::gas::SSTORE_SET)
+                    .saturating_mul(U256::from(l2_gas_price));
+
+                let output = ArbGasInfo::getPricesInWeiCall::abi_encode_returns(
+                    &ArbGasInfo::getPricesInWeiReturn::from((
+                        wei_per_l2_tx,
+                        wei_for_l1_calldata,
+                        wei_for_l2_storage,
+                        U256::from(per_arb_gas_base),
+                        per_arb_gas_congestion,
+                        U256::from(per_arb_gas_total),
                     )),
                 );
 
                 return_success!(gas, Bytes::from(output));
             }
+            ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {
+                let l1_gas_price = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
+
+                let l2_gas_price = { context.block().basefee() };
+
+                let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
+                    revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
+                ));
+
+                let wei_per_l2_tx = wei_for_l1_calldata
+                    .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
+
+                let per_arb_gas_base = l2_gas_price;
+                let per_arb_gas_congestion = U256::ZERO;
+                let per_arb_gas_total = l2_gas_price;
+
+                let wei_for_l2_storage = U256::from(revm::interpreter::gas::SSTORE_SET)
+                    .saturating_mul(U256::from(l2_gas_price));
+
+                let output = ArbGasInfo::getPricesInWeiWithAggregatorCall::abi_encode_returns(
+                    &ArbGasInfo::getPricesInWeiWithAggregatorReturn::from((
+                        wei_per_l2_tx,
+                        wei_for_l1_calldata,
+                        wei_for_l2_storage,
+                        U256::from(per_arb_gas_base),
+                        per_arb_gas_congestion,
+                        U256::from(per_arb_gas_total),
+                    )),
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {
+                let output = ArbGasInfo::getCurrentTxL1GasFeesCall::abi_encode_returns(&U256::ZERO);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getPricingInertiaCall::SELECTOR => {
+                let pricing_inertia = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l2_pricing().pricing_inertia().get())
+                };
+
+                let output =
+                    ArbGasInfo::getPricingInertiaCall::abi_encode_returns(&pricing_inertia);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1RewardRateCall::SELECTOR => {
+                let l1_reward_rate = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().per_unit_reward().get())
+                };
+
+                let output = ArbGasInfo::getL1RewardRateCall::abi_encode_returns(&l1_reward_rate);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {
+                let l1_reward_recipient = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().reward_recipient().get())
+                };
+
+                let output =
+                    ArbGasInfo::getL1RewardRecipientCall::abi_encode_returns(&l1_reward_recipient);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {
+                let l1_gas_price_estimate = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
+                };
+
+                let output = ArbGasInfo::getL1GasPriceEstimateCall::abi_encode_returns(
+                    &l1_gas_price_estimate,
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
         }
-        ArbGasInfo::getPricesInWeiCall::SELECTOR => {
-            let l1_gas_price = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
-
-            let l2_gas_price = { context.block().basefee() };
-
-            let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
-                revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
-            ));
-
-            let wei_per_l2_tx = wei_for_l1_calldata
-                .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
-
-            let per_arb_gas_base = l2_gas_price;
-            let per_arb_gas_congestion = U256::ZERO;
-            let per_arb_gas_total = l2_gas_price;
-
-            let wei_for_l2_storage = U256::from(revm::interpreter::gas::SSTORE_SET)
-                .saturating_mul(U256::from(l2_gas_price));
-
-            let output = ArbGasInfo::getPricesInWeiCall::abi_encode_returns(
-                &ArbGasInfo::getPricesInWeiReturn::from((
-                    wei_per_l2_tx,
-                    wei_for_l1_calldata,
-                    wei_for_l2_storage,
-                    U256::from(per_arb_gas_base),
-                    per_arb_gas_congestion,
-                    U256::from(per_arb_gas_total),
-                )),
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {
-            let l1_gas_price = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
-
-            let l2_gas_price = { context.block().basefee() };
-
-            let wei_for_l1_calldata = l1_gas_price.saturating_mul(U256::from(
-                revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
-            ));
-
-            let wei_per_l2_tx = wei_for_l1_calldata
-                .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
-
-            let per_arb_gas_base = l2_gas_price;
-            let per_arb_gas_congestion = U256::ZERO;
-            let per_arb_gas_total = l2_gas_price;
-
-            let wei_for_l2_storage = U256::from(revm::interpreter::gas::SSTORE_SET)
-                .saturating_mul(U256::from(l2_gas_price));
-
-            let output = ArbGasInfo::getPricesInWeiWithAggregatorCall::abi_encode_returns(
-                &ArbGasInfo::getPricesInWeiWithAggregatorReturn::from((
-                    wei_per_l2_tx,
-                    wei_for_l1_calldata,
-                    wei_for_l2_storage,
-                    U256::from(per_arb_gas_base),
-                    per_arb_gas_congestion,
-                    U256::from(per_arb_gas_total),
-                )),
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {
-            let output = ArbGasInfo::getCurrentTxL1GasFeesCall::abi_encode_returns(&U256::ZERO);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getPricingInertiaCall::SELECTOR => {
-            let pricing_inertia = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l2_pricing().pricing_inertia().get())
-            };
-
-            let output = ArbGasInfo::getPricingInertiaCall::abi_encode_returns(&pricing_inertia);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1RewardRateCall::SELECTOR => {
-            let l1_reward_rate = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().per_unit_reward().get())
-            };
-
-            let output = ArbGasInfo::getL1RewardRateCall::abi_encode_returns(&l1_reward_rate);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {
-            let l1_reward_recipient = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().reward_recipient().get())
-            };
-
-            let output =
-                ArbGasInfo::getL1RewardRecipientCall::abi_encode_returns(&l1_reward_recipient);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {
-            let l1_gas_price_estimate = {
-                let mut arb_state = context.arb_state(Some(&mut gas));
-                try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
-            };
-
-            let output =
-                ArbGasInfo::getL1GasPriceEstimateCall::abi_encode_returns(&l1_gas_price_estimate);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }

@@ -6,10 +6,12 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, precompiles::{
-        ExtendedPrecompile,
-        macros::{record_cost, return_revert, return_success, try_state},
-    }, state::{ArbState, ArbStateGetter}
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
+    precompiles::{
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, record_cost, return_revert, return_success, try_state},
+    },
+    state::{ArbState, ArbStateGetter},
 };
 
 sol! {
@@ -55,8 +57,43 @@ pub fn arb_debug_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX>
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbDebug")),
         address!("0x00000000000000000000000000000000000000ff"),
-        arb_debug_run::<CTX>,
+        precompile_impl!(ArbDebugPrecompile),
     )
+}
+
+struct ArbDebugPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbDebugPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbDebug => {
+            becomeChainOwnerCall(NonPayable),
+            eventsCall(Payable),
+            eventsViewCall(View),
+            customRevertCall(Pure),
+            panicCall(NonPayable),
+            legacyErrorCall(Pure),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        arb_debug_run(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas_limit,
+        )
+    }
 }
 /// Run the precompile with the given context and input data.
 /// Run the arb_debug precompile with the given context and input data.
@@ -68,7 +105,7 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
@@ -143,7 +180,7 @@ fn events<CTX: ArbitrumContextTr>(
     gas_limit: u64,
     flag: bool,
     value: B256,
-) -> Result<Option<InterpreterResult>, String> {
+) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
     let mut gas = Gas::new(gas_limit);
 
     if is_static {

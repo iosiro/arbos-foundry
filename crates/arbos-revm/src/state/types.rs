@@ -15,7 +15,10 @@ use revm::{
     },
 };
 
-use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS, precompiles::arb_wasm::IArbWasm::IArbWasmErrors};
+use crate::{
+    ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS,
+    precompiles::arb_wasm::IArbWasm::IArbWasmErrors,
+};
 #[derive(Debug)]
 pub enum ArbosStateError {
     OutOfGas,

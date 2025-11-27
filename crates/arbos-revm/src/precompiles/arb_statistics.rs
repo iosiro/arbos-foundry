@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success},
     },
 };
 
@@ -45,44 +45,53 @@ pub fn arb_statistics_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbStatistics")),
         address!("0x000000000000000000000000000000000000006f"),
-        arb_statistics_run::<CTX>,
+        precompile_impl!(ArbStatisticsPrecompile),
     )
 }
-/// Run the precompile with the given context and input data.
-/// Run the arb_statistics precompile with the given context and input data.
-fn arb_statistics_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+struct ArbStatisticsPrecompile;
 
-    match selector {
-        ArbStatistics::getStatsCall::SELECTOR => {
-            let output = ArbStatistics::getStatsCall::abi_encode_returns(
-                &ArbStatistics::getStatsReturn::from((
-                    context.block_number(),
-                    U256::ZERO,
-                    U256::ZERO,
-                    U256::ZERO,
-                    U256::ZERO,
-                    U256::ZERO,
-                )),
-            );
-
-            return_success!(gas, Bytes::from(output));
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbStatisticsPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbStatistics => {
+            getStatsCall(View),
         }
-        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        let mut gas = Gas::new(gas_limit);
+        // decode selector
+        if input.len() < 4 {
+            return_revert!(gas, Bytes::from("Input too short"));
+        }
+
+        // decode selector
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+
+        match selector {
+            ArbStatistics::getStatsCall::SELECTOR => {
+                let output = ArbStatistics::getStatsCall::abi_encode_returns(
+                    &ArbStatistics::getStatsReturn::from((
+                        context.block_number(),
+                        U256::ZERO,
+                        U256::ZERO,
+                        U256::ZERO,
+                        U256::ZERO,
+                        U256::ZERO,
+                    )),
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+        }
     }
 }

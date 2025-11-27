@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success},
     },
 };
 
@@ -30,48 +30,58 @@ pub fn arb_info_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> 
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbInfo")),
         address!("0x0000000000000000000000000000000000000065"),
-        arb_info_run::<CTX>,
+        precompile_impl!(ArbInfoPrecompile),
     )
 }
-/// Run the precompile with the given context and input data.
-/// Run the arb_info precompile with the given context and input data.
-fn arb_info_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+struct ArbInfoPrecompile;
 
-    match selector {
-        ArbInfo::getBalanceCall::SELECTOR => {
-            let call = ArbInfo::getBalanceCall::abi_decode(input).unwrap();
-
-            let balance = context.balance(call.account).unwrap_or_default().data;
-
-            let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
-
-            return_success!(gas, Bytes::from(output));
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbInfoPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbInfo => {
+            getBalanceCall(View),
+            getCodeCall(View),
         }
-        ArbInfo::getCodeCall::SELECTOR => {
-            let call = ArbInfo::getCodeCall::abi_decode(input).unwrap();
+    };
 
-            let code = context.load_account_code(call.account).unwrap_or_default().data;
-
-            let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
-
-            return_success!(gas, Bytes::from(output));
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        let mut gas = Gas::new(gas_limit);
+        // decode selector
+        if input.len() < 4 {
+            return_revert!(gas, Bytes::from("Input too short"));
         }
-        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+
+        // decode selector
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+
+        match selector {
+            ArbInfo::getBalanceCall::SELECTOR => {
+                let call = ArbInfo::getBalanceCall::abi_decode(input).unwrap();
+
+                let balance = context.balance(call.account).unwrap_or_default().data;
+
+                let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            ArbInfo::getCodeCall::SELECTOR => {
+                let call = ArbInfo::getCodeCall::abi_decode(input).unwrap();
+
+                let code = context.load_account_code(call.account).unwrap_or_default().data;
+
+                let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+        }
     }
 }

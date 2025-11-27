@@ -6,7 +6,9 @@ use std::{
 use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
-    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS},
+    interpreter::{
+        CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS,
+    },
     precompile::{PrecompileError, PrecompileId, PrecompileSpecId, Precompiles},
     primitives::{
         Address, Bytes, HashMap, HashSet, SHORT_ADDRESS_CAP, U256, hardfork::SpecId, short_address,
@@ -27,12 +29,17 @@ mod arb_sys;
 pub mod arb_wasm;
 mod arb_wasm_cache;
 
-
-
 mod macros;
 
 use crate::{
-    ArbitrumContextTr, precompiles::{arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile, macros::{StateMutability, burnout_return, return_revert, try_state}}, record_cost, state::{ArbState, ArbStateGetter, types::StorageBackedTr}
+    ArbitrumContextTr,
+    precompiles::{
+        arb_wasm::arb_wasm_precompile,
+        arb_wasm_cache::arb_wasm_cache_precompile,
+        macros::{StateMutability, burnout_return, return_revert, try_state},
+    },
+    record_cost,
+    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
 };
 
 pub struct ArbitrumPrecompileProvider<CTX: ArbitrumContextTr> {
@@ -425,7 +432,6 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         is_static: bool,
         gas_limit: u64,
     ) -> Result<Option<InterpreterResult>, String> {
-
         let mut gas = Gas::new(gas_limit);
 
         if input.len() < 4 {
@@ -434,8 +440,7 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         }
 
         let args_cost =
-            revm::interpreter::gas::VERYLOW *
-            (((input.len() as u64).saturating_sub(4) + 31) / 32);
+            revm::interpreter::gas::VERYLOW * (((input.len() as u64).saturating_sub(4) + 31) / 32);
 
         record_cost!(gas, args_cost);
 
@@ -473,12 +478,10 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
                 gas.spend_all();
                 gas.erase_cost(result.gas.remaining());
                 (result.result, result.output)
-            },
+            }
             Ok(None) => return Ok(None),
             Err(ArbPrecompileError::ProgramActivation) => burnout_return!(),
         };
-
-        
 
         let result_data_cost =
             revm::interpreter::gas::VERYLOW * (((output.len() as u64) + 31) / 32);
