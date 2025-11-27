@@ -1,10 +1,8 @@
 use crate::{
-    ArbitrumContextTr,
-    precompiles::{
+    ArbitrumContextTr, precompiles::{
         ExtendedPrecompile,
-        macros::{gas, return_revert, return_success, try_state},
-    },
-    state::{ArbState, ArbStateGetter, types::ArbosStateError},
+        macros::{record_cost, return_revert, return_success, try_state},
+    }, state::{ArbState, ArbStateGetter, types::ArbosStateError}
 };
 use alloy_sol_types::{SolCall, sol};
 use revm::{
@@ -88,7 +86,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 return_revert!(gas);
             }
 
-            gas!(gas, MINT_BURN_GAS_COST);
+            record_cost!(gas, MINT_BURN_GAS_COST);
 
             let call = ArbNativeTokenManager::mintNativeTokenCall::abi_decode(input).unwrap();
             context
@@ -107,7 +105,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                 return_revert!(gas);
             }
 
-            gas!(gas, MINT_BURN_GAS_COST);
+            record_cost!(gas, MINT_BURN_GAS_COST);
 
             let call = ArbNativeTokenManager::burnNativeTokenCall::abi_decode(input).unwrap();
             let balance = context.balance(caller_address).unwrap_or_default().data;

@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
+    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ExtendedPrecompile,
-        macros::{return_revert, return_success, try_state},
+        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+        macros::{StateMutability, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter, types::ArbosStateError},
 };
@@ -21,7 +21,7 @@ sol! {
 /// @notice Precompiled contract that exists in every Arbitrum chain at 0x0000000000000000000000000000000000000072.
 /// @notice Available in ArbOS version 30 and above
 ///
-interface ArbWasmCache {
+interface IArbWasmCache {
     /// @notice See if the user is a cache manager.
     function isCacheManager(
         address manager
@@ -71,222 +71,257 @@ pub fn arb_wasm_cache_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile
     ExtendedPrecompile::new(
         PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbWasmCache")),
         address!("0x0000000000000000000000000000000000000072"),
-        arbos_wasm_cache_run::<CTX>,
+        precompile_impl!(ArbWasmCache),
     )
 }
-/// Run the precompile with the given context and input data.
-fn arbos_wasm_cache_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> Result<Option<InterpreterResult>, String> {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+struct ArbWasmCache {}
 
-    match selector {
-        ArbWasmCache::isCacheManagerCall::SELECTOR => {
-            let call = ArbWasmCache::isCacheManagerCall::abi_decode(input).unwrap();
-            let manager = call.manager;
-
-            let is_manager = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).cache_managers().contains(manager)
-            );
-
-            let output = ArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
-
-            return_success!(gas, Bytes::from(output));
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        IArbWasmCache => {
+            isCacheManagerCall(View),
+            allCacheManagersCall(View),
+            cacheCodehashCall(NonPayable),
+            cacheProgramCall(NonPayable),
+            evictCodehashCall(NonPayable),
+            codehashIsCachedCall(View),
         }
-        ArbWasmCache::allCacheManagersCall::SELECTOR => {
-            let _call = ArbWasmCache::allCacheManagersCall::abi_decode(input).unwrap();
+    };
 
-            let managers =
-                try_state!(gas, context.arb_state(Some(&mut gas)).cache_managers().all());
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+        let mut gas = Gas::new(gas_limit);
 
-            let output = ArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
-
-            return_success!(gas, Bytes::from(output));
+        // decode selector
+        if input.len() < 4 {
+            gas.spend_all();
+            return_revert!(gas, Bytes::from("Input too short"));
         }
-        ArbWasmCache::cacheCodehashCall::SELECTOR => {
-            if !try_state!(gas, has_access(context, &mut gas)) {
-                return_revert!(gas);
-            }
 
-            let call = ArbWasmCache::cacheCodehashCall::abi_decode(input).unwrap();
-            let codehash = call.codehash;
+        // decode selector
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
 
-            let params =
-                try_state!(gas, context.arb_state(Some(&mut gas)).programs().get_stylus_params());
+        match selector {
+            IArbWasmCache::isCacheManagerCall::SELECTOR => {
+                let call = IArbWasmCache::isCacheManagerCall::abi_decode(input).unwrap();
+                let manager = call.manager;
 
-            let mut program_info = if let Some(program_info) = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
-            ) {
-                program_info
-            } else {
-                return_revert!(
+                let is_manager = try_state!(
                     gas,
-                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
-                        .abi_encode()
+                    context.arb_state(Some(&mut gas)).cache_managers().contains(manager)
                 );
-            };
 
-            let output = ArbWasmCache::cacheCodehashCall::abi_encode_returns(
-                &ArbWasmCache::cacheCodehashReturn {},
-            );
+                let output = IArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
 
-            if program_info.cached {
-                // already cached, no-op
                 return_success!(gas, Bytes::from(output));
             }
+            IArbWasmCache::allCacheManagersCall::SELECTOR => {
+                let _call = IArbWasmCache::allCacheManagersCall::abi_decode(input).unwrap();
 
-            // TODO: burn cache cost
-            program_info.cached = true;
+                let managers =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).cache_managers().all());
 
-            try_state!(
-                gas,
-                context
-                    .arb_state(Some(&mut gas))
-                    .programs()
-                    .save_program_info(&codehash, &program_info)
-            );
+                let output = IArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
 
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbWasmCache::cacheProgramCall::SELECTOR => {
-            if !try_state!(gas, has_access(context, &mut gas)) {
-                return_revert!(gas);
-            }
-
-            let call = ArbWasmCache::cacheProgramCall::abi_decode(input).unwrap();
-            let addr = call.addr;
-
-            let params =
-                try_state!(gas, context.arb_state(Some(&mut gas)).programs().get_stylus_params());
-
-            let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
-                code_hash.data
-            } else {
-                return_revert!(
-                    gas,
-                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
-                        .abi_encode()
-                );
-            };
-
-            let mut program_info = if let Some(program_info) = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
-            ) {
-                program_info
-            } else {
-                return_revert!(
-                    gas,
-                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
-                        .abi_encode()
-                );
-            };
-
-            let output = ArbWasmCache::cacheProgramCall::abi_encode_returns(
-                &ArbWasmCache::cacheProgramReturn {},
-            );
-
-            if program_info.cached {
-                // already cached, no-op
                 return_success!(gas, Bytes::from(output));
             }
+            IArbWasmCache::cacheCodehashCall::SELECTOR => {
+                if !try_state!(gas, has_access(context, &mut gas)) {
+                    return_revert!(gas);
+                }
 
-            // TODO: burn cache cost
+                let call = IArbWasmCache::cacheCodehashCall::abi_decode(input).unwrap();
+                let codehash = call.codehash;
 
-            program_info.cached = true;
-
-            try_state!(
-                gas,
-                context
-                    .arb_state(Some(&mut gas))
-                    .programs()
-                    .save_program_info(&code_hash, &program_info)
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbWasmCache::evictCodehashCall::SELECTOR => {
-            if !try_state!(gas, has_access(context, &mut gas)) {
-                return_revert!(gas);
-            }
-
-            let call = ArbWasmCache::evictCodehashCall::abi_decode(input).unwrap();
-            let codehash = call.codehash;
-
-            let params =
-                try_state!(gas, context.arb_state(Some(&mut gas)).programs().get_stylus_params());
-
-            let mut program_info = if let Some(program_info) = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
-            ) {
-                program_info
-            } else {
-                return_revert!(
+                let params = try_state!(
                     gas,
-                    ArbWasmCache::ProgramNeedsUpgrade { version: 0, stylusVersion: params.version }
-                        .abi_encode()
+                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
                 );
-            };
 
-            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(
-                &ArbWasmCache::evictCodehashReturn {},
-            );
+                let mut program_info = if let Some(program_info) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
+                ) {
+                    program_info
+                } else {
+                    return_revert!(
+                        gas,
+                        IArbWasmCache::ProgramNeedsUpgrade {
+                            version: 0,
+                            stylusVersion: params.version
+                        }
+                        .abi_encode()
+                    );
+                };
 
-            if !program_info.cached {
-                // already not cached, no-op
+                let output = IArbWasmCache::cacheCodehashCall::abi_encode_returns(
+                    &IArbWasmCache::cacheCodehashReturn {},
+                );
+
+                if program_info.cached {
+                    // already cached, no-op
+                    return_success!(gas, Bytes::from(output));
+                }
+
+                // TODO: burn cache cost
+                program_info.cached = true;
+
+                try_state!(
+                    gas,
+                    context
+                        .arb_state(Some(&mut gas))
+                        .programs()
+                        .save_program_info(&codehash, &program_info)
+                );
+
                 return_success!(gas, Bytes::from(output));
             }
+            IArbWasmCache::cacheProgramCall::SELECTOR => {
+                if !try_state!(gas, has_access(context, &mut gas)) {
+                    return_revert!(gas);
+                }
 
-            program_info.cached = false;
+                let call = IArbWasmCache::cacheProgramCall::abi_decode(input).unwrap();
+                let addr = call.addr;
 
-            try_state!(
-                gas,
-                context
-                    .arb_state(Some(&mut gas))
-                    .programs()
-                    .save_program_info(&codehash, &program_info)
-            );
+                let params = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
+                );
 
-            let output = ArbWasmCache::evictCodehashCall::abi_encode_returns(
-                &ArbWasmCache::evictCodehashReturn {},
-            );
+                let code_hash = if let Some(code_hash) = context.load_account_code_hash(addr) {
+                    code_hash.data
+                } else {
+                    return_revert!(
+                        gas,
+                        IArbWasmCache::ProgramNeedsUpgrade {
+                            version: 0,
+                            stylusVersion: params.version
+                        }
+                        .abi_encode()
+                    );
+                };
 
-            return_success!(gas, Bytes::from(output));
+                let mut program_info = if let Some(program_info) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
+                ) {
+                    program_info
+                } else {
+                    return_revert!(
+                        gas,
+                        IArbWasmCache::ProgramNeedsUpgrade {
+                            version: 0,
+                            stylusVersion: params.version
+                        }
+                        .abi_encode()
+                    );
+                };
+
+                let output = IArbWasmCache::cacheProgramCall::abi_encode_returns(
+                    &IArbWasmCache::cacheProgramReturn {},
+                );
+
+                if program_info.cached {
+                    // already cached, no-op
+                    return_success!(gas, Bytes::from(output));
+                }
+
+                // TODO: burn cache cost
+
+                program_info.cached = true;
+
+                try_state!(
+                    gas,
+                    context
+                        .arb_state(Some(&mut gas))
+                        .programs()
+                        .save_program_info(&code_hash, &program_info)
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            IArbWasmCache::evictCodehashCall::SELECTOR => {
+                if !try_state!(gas, has_access(context, &mut gas)) {
+                    return_revert!(gas);
+                }
+
+                let call = IArbWasmCache::evictCodehashCall::abi_decode(input).unwrap();
+                let codehash = call.codehash;
+
+                let params = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
+                );
+
+                let mut program_info = if let Some(program_info) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
+                ) {
+                    program_info
+                } else {
+                    return_revert!(
+                        gas,
+                        IArbWasmCache::ProgramNeedsUpgrade {
+                            version: 0,
+                            stylusVersion: params.version
+                        }
+                        .abi_encode()
+                    );
+                };
+
+                let output = IArbWasmCache::evictCodehashCall::abi_encode_returns(
+                    &IArbWasmCache::evictCodehashReturn {},
+                );
+
+                if !program_info.cached {
+                    // already not cached, no-op
+                    return_success!(gas, Bytes::from(output));
+                }
+
+                program_info.cached = false;
+
+                try_state!(
+                    gas,
+                    context
+                        .arb_state(Some(&mut gas))
+                        .programs()
+                        .save_program_info(&codehash, &program_info)
+                );
+
+                let output = IArbWasmCache::evictCodehashCall::abi_encode_returns(
+                    &IArbWasmCache::evictCodehashReturn {},
+                );
+
+                return_success!(gas, Bytes::from(output));
+            }
+            IArbWasmCache::codehashIsCachedCall::SELECTOR => {
+                let call = IArbWasmCache::codehashIsCachedCall::abi_decode(input).unwrap();
+                let codehash = call.codehash;
+
+                let is_cached = if let Some(program_info) = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
+                ) {
+                    program_info.cached
+                } else {
+                    false
+                };
+
+                let output = IArbWasmCache::codehashIsCachedCall::abi_encode_returns(&is_cached);
+
+                return_success!(gas, Bytes::from(output));
+            }
+            _ => return_revert!(gas, Bytes::from("Unknown selector")),
         }
-        ArbWasmCache::codehashIsCachedCall::SELECTOR => {
-            let call = ArbWasmCache::codehashIsCachedCall::abi_decode(input).unwrap();
-            let codehash = call.codehash;
-
-            let is_cached = if let Some(program_info) = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
-            ) {
-                program_info.cached
-            } else {
-                false
-            };
-
-            let output = ArbWasmCache::codehashIsCachedCall::abi_encode_returns(&is_cached);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }
 

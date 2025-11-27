@@ -6,12 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
-    precompiles::{
+    ArbitrumContextTr, precompiles::{
         ExtendedPrecompile,
-        macros::{gas, return_revert, return_success, try_state},
-    },
-    state::{ArbState, ArbStateGetter},
+        macros::{record_cost, return_revert, return_success, try_state},
+    }, state::{ArbState, ArbStateGetter}
 };
 
 sol! {
@@ -160,7 +158,8 @@ fn events<CTX: ArbitrumContextTr>(
     if let Some(gas_cost) =
         revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
     {
-        gas!(gas, gas_cost);
+        let mut gas = &mut gas;
+        record_cost!(gas, gas_cost);
     }
 
     context.log(
@@ -184,7 +183,7 @@ fn events<CTX: ArbitrumContextTr>(
     if let Some(gas_cost) =
         revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
     {
-        gas!(gas, gas_cost);
+        record_cost!(gas, gas_cost);
     }
 
     context.log(

@@ -1,5 +1,6 @@
 use std::fmt::Display;
 
+use alloy_sol_types::SolInterface;
 use revm::{
     context::JournalTr,
     interpreter::{
@@ -14,13 +15,13 @@ use revm::{
     },
 };
 
-use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS};
-
+use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS, precompiles::arb_wasm::IArbWasm::IArbWasmErrors};
 #[derive(Debug)]
 pub enum ArbosStateError {
     OutOfGas,
     StateChangeDuringStaticCall,
     DecompressError(String),
+    ProgramError(IArbWasmErrors),
 }
 
 impl Display for ArbosStateError {
@@ -33,6 +34,9 @@ impl Display for ArbosStateError {
             Self::DecompressError(msg) => {
                 write!(f, "Decompression error: {msg}")
             }
+            Self::ProgramError(err) => {
+                write!(f, "Program error: {:?}", err.abi_encode())
+            }
         }
     }
 }
@@ -40,6 +44,12 @@ impl Display for ArbosStateError {
 impl From<ArbosStateError> for String {
     fn from(error: ArbosStateError) -> Self {
         error.to_string()
+    }
+}
+
+impl From<ArbosStateError> for Bytes {
+    fn from(error: ArbosStateError) -> Self {
+        Bytes::from(error.to_string().into_bytes())
     }
 }
 
@@ -71,6 +81,11 @@ impl From<ArbosStateError> for InterpreterResult {
                 result: InstructionResult::StateChangeDuringStaticCall,
                 gas: Gas::default(),
                 output: Bytes::default(),
+            },
+            ArbosStateError::ProgramError(e) => Self {
+                result: InstructionResult::Revert,
+                gas: Gas::default(),
+                output: e.abi_encode().into(),
             },
             _ => Self {
                 result: InstructionResult::Revert,

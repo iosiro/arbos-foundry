@@ -59,7 +59,7 @@ fn arb_statistics_run<CTX: ArbitrumContextTr>(
     _is_static: bool,
     gas_limit: u64,
 ) -> Result<Option<InterpreterResult>, String> {
-    let gas = Gas::new(gas_limit);
+    let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
         return_revert!(gas, Bytes::from("Input too short"));

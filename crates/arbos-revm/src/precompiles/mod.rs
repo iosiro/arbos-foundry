@@ -6,7 +6,7 @@ use std::{
 use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
-    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
+    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS},
     precompile::{PrecompileError, PrecompileId, PrecompileSpecId, Precompiles},
     primitives::{
         Address, Bytes, HashMap, HashSet, SHORT_ADDRESS_CAP, U256, hardfork::SpecId, short_address,
@@ -24,14 +24,15 @@ mod arb_owner_public;
 mod arb_retryable_tx;
 mod arb_statistics;
 mod arb_sys;
-mod arb_wasm;
+pub mod arb_wasm;
 mod arb_wasm_cache;
+
+
 
 mod macros;
 
 use crate::{
-    ArbitrumContextTr,
-    precompiles::{arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile},
+    ArbitrumContextTr, precompiles::{arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile, macros::{StateMutability, burnout_return, return_revert, try_state}}, record_cost, state::{ArbState, ArbStateGetter, types::StorageBackedTr}
 };
 
 pub struct ArbitrumPrecompileProvider<CTX: ArbitrumContextTr> {
@@ -392,5 +393,97 @@ impl<CTX: ContextTr> Precompile<CTX> {
                 ext.execute(ctx, input, target, caller, value, is_static, gas_limit)
             }
         }
+    }
+}
+
+pub enum ArbPrecompileError {
+    ProgramActivation,
+}
+
+pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
+    /// File-local state mutability table
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)];
+
+    /// Inner execution
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, ArbPrecompileError>;
+
+    /// Wrapper logic (formerly arbos_wasm_cache_run)
+    fn run(
+        context: &mut CTX,
+        input: &[u8],
+        target_address: &Address,
+        caller_address: Address,
+        call_value: U256,
+        is_static: bool,
+        gas_limit: u64,
+    ) -> Result<Option<InterpreterResult>, String> {
+
+        let mut gas = Gas::new(gas_limit);
+
+        if input.len() < 4 {
+            gas.spend_all();
+            return_revert!(gas, Bytes::from("Input too short"));
+        }
+
+        let args_cost =
+            revm::interpreter::gas::VERYLOW *
+            (((input.len() as u64).saturating_sub(4) + 31) / 32);
+
+        record_cost!(gas, args_cost);
+
+        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+
+        let purity = match Self::STATE_MUT_TABLE.iter().find(|(sel, _)| *sel == selector) {
+            Some((_, p)) => *p,
+            None => return_revert!(gas, Bytes::from("Unknown selector")),
+        };
+
+        if purity != StateMutability::Pure {
+            record_cost!(gas, ISTANBUL_SLOAD_GAS);
+        }
+
+        if purity >= StateMutability::NonPayable && is_static {
+            let _ = try_state!(
+                gas,
+                context.arb_state(Some(&mut gas)).l2_pricing().per_tx_gas_limit().get()
+            );
+        }
+
+        // call the inner logic
+        let result = Self::inner(
+            context,
+            input,
+            target_address,
+            caller_address,
+            call_value,
+            is_static,
+            gas.remaining(),
+        );
+
+        let (result, output) = match result {
+            Ok(Some(result)) => {
+                gas.spend_all();
+                gas.erase_cost(result.gas.remaining());
+                (result.result, result.output)
+            },
+            Ok(None) => return Ok(None),
+            Err(ArbPrecompileError::ProgramActivation) => burnout_return!(),
+        };
+
+        
+
+        let result_data_cost =
+            revm::interpreter::gas::VERYLOW * (((output.len() as u64) + 31) / 32);
+        record_cost!(gas, result_data_cost);
+
+        Ok(Some(InterpreterResult { result, gas, output }))
     }
 }

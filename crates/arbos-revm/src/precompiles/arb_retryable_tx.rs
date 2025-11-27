@@ -9,13 +9,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
-    precompiles::{
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, precompiles::{
         ExtendedPrecompile,
-        macros::{emit_event, gas, return_revert, return_success, try_state},
-    },
-    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
+        macros::{emit_event, return_revert, return_success, try_state},
+    }, record_cost, state::{ArbState, ArbStateGetter, types::StorageBackedTr}
 };
 
 const ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60; // 1 week
@@ -282,7 +279,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
 
             let update_cost = nbytes.div_ceil(32) as u64 * revm::interpreter::gas::SSTORE_SET / 100;
 
-            gas!(gas, update_cost);
+            record_cost!(gas, update_cost);
 
             let current_time = context.block().timestamp().saturating_to::<u64>();
             let window = current_time + ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;

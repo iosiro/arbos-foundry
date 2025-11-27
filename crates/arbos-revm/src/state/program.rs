@@ -1,21 +1,19 @@
+use arbutil::evm::WARM_SLOAD_GAS;
 use revm::{
     interpreter::Gas,
     primitives::{B256, U256},
 };
 
 use crate::{
-    ArbitrumContextTr, buffer,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
-    constants::{
+    ArbitrumContextTr, buffer, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
         ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
         ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
         ARBOS_PROGRAMS_STATE_PARAMS_KEY, ARBOS_PROGRAMS_STATE_PROGRAM_DATA_KEY,
         INITIAL_MAX_WASM_SIZE,
-    },
-    state::types::{
+    }, precompiles::arb_wasm::IArbWasm::{IArbWasmErrors, ProgramExpired, ProgramNeedsUpgrade, ProgramNotActivated}, state::types::{
         ArbosStateError, StorageBackedAddressSet, StorageBackedB256, StorageBackedTr,
         StorageBackedU32, StorageBackedU64, map_address, substorage,
-    },
+    }
 };
 
 // stylus params type
@@ -186,18 +184,9 @@ where
         substorage(&self.subkey, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY)
     }
 
-    pub fn get_module_hash(&mut self, code_hash: &B256) -> Result<B256, ArbosStateError> {
+    pub fn module_hash(&mut self, code_hash: &B256) -> StorageBackedB256<'_, CTX> {
         let slot = map_address(&self.module_hashes_subkey(), code_hash);
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).get()
-    }
-
-    pub fn save_module_hash(
-        &mut self,
-        code_hash: &B256,
-        module_hash: B256,
-    ) -> Result<(), ArbosStateError> {
-        let slot = map_address(&self.module_hashes_subkey(), code_hash);
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(module_hash)
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot)
     }
 
     pub fn program_info(
@@ -213,8 +202,8 @@ where
             let init_cost = u16::from_be_bytes([data[2], data[3]]);
             let cached_cost = u16::from_be_bytes([data[4], data[5]]);
             let footprint = u16::from_be_bytes([data[6], data[7]]);
-            let asm_estimated_kb = u32::from_be_bytes([0, data[8], data[9], data[10]]);
-            let activated_at = u32::from_be_bytes([0, data[11], data[12], data[13]]);
+            let activated_at = u32::from_be_bytes([0, data[8], data[9], data[10]]);
+            let asm_estimated_kb = u32::from_be_bytes([0, data[11], data[12], data[13]]);
             let cached = data[14] != 0;
 
             return Ok(Some(ProgramInfo {
@@ -227,7 +216,7 @@ where
                     .context
                     .timestamp()
                     .to::<u32>()
-                    .saturating_sub(activated_at.saturating_sub(ARBOS_GENESIS_TIMESTAMP) * 3600),
+                    .saturating_sub(activated_at * 3600 + ARBOS_GENESIS_TIMESTAMP),
                 cached,
             }));
         }
@@ -247,7 +236,12 @@ where
         data[4..6].copy_from_slice(&info.cached_cost.to_be_bytes());
         data[6..8].copy_from_slice(&info.footprint.to_be_bytes());
         data[8..11].copy_from_slice(&info.asm_estimated_kb.to_be_bytes()[1..4]);
-        let activated_at = info.age / 3600 + ARBOS_GENESIS_TIMESTAMP; // convert to hours
+        let activated_at = self
+            .context
+            .timestamp()
+            .to::<u32>()
+            .saturating_sub(ARBOS_GENESIS_TIMESTAMP)
+            / 3600;
         data[11..14].copy_from_slice(&activated_at.to_be_bytes()[1..4]);
         data[14] = if info.cached { 1 } else { 0 };
 
@@ -255,16 +249,52 @@ where
         StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(B256::from(value))
     }
 
+    pub fn get_active_program(
+        &mut self,
+        stylus_params: &StylusParams,
+        code_hash: &B256,
+    ) -> Result<Option<ProgramInfo>, ArbosStateError> {
+        let program = self.program_info(code_hash)?;
+
+        if let Some(program) = program {
+            if program.version == 0 {
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNotActivated(ProgramNotActivated {})));
+            }
+
+            // check that the program is up to date
+            let stylus_version = stylus_params.version;
+            if program.version != stylus_version {
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramNeedsUpgrade(ProgramNeedsUpgrade {
+                    version: program.version,
+                    stylusVersion: stylus_version,
+                })));
+            }
+
+            // ensure the program hasn't expired
+            let max_age_seconds = (stylus_params.expiry_days as u32).saturating_mul(86400);
+            if program.age > max_age_seconds {
+                return Err(ArbosStateError::ProgramError(IArbWasmErrors::ProgramExpired(ProgramExpired {
+                    ageInSeconds: program.age as u64,
+                })));
+            }
+
+            Ok(Some(program))
+        } else {
+            Ok(None)
+        }
+    }
+
     // stylus params read/write
     pub fn get_stylus_params(&mut self) -> Result<StylusParams, ArbosStateError> {
         let subkey = self.params_subkey();
         let slot = map_address(&subkey, &B256::ZERO);
 
-        // if let Some(gas) = self.gas.as_deref_mut() {
-        //     if !gas.record_cost(WARM_SLOAD_GAS.0) {
-        //         return Err(ArbosStateError::OutOfGas);
-        //     }
-        // }
+        if let Some(gas) = self.gas.as_deref_mut() {
+            if !gas.record_cost(WARM_SLOAD_GAS.0) {
+                return Err(ArbosStateError::OutOfGas);
+            }
+        }
+        
         let data = StorageBackedB256::new(self.context, None, slot).get()?;
 
         let mut params = StylusParams::zero();
