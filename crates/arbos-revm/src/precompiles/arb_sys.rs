@@ -10,7 +10,7 @@ use crate::{
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     generate_state_mut_table, precompile_impl,
     precompiles::{
-        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+         ArbPrecompileLogic, ExtendedPrecompile,
         macros::{StateMutability, return_revert, return_success},
     },
 };
@@ -198,7 +198,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+    ) -> InterpreterResult {
         arb_sys_run(
             context,
             input,
@@ -220,7 +220,7 @@ fn arb_sys_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+) -> InterpreterResult {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {

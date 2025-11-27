@@ -13,7 +13,7 @@ use crate::{
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     generate_state_mut_table, precompile_impl,
     precompiles::{
-        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+         ArbPrecompileLogic, ExtendedPrecompile,
         macros::{StateMutability, emit_event, return_revert, return_success, try_state},
     },
     record_cost,
@@ -163,7 +163,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+    ) -> InterpreterResult {
         arb_retryable_tx_run(
             context,
             input,
@@ -185,7 +185,7 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+) -> InterpreterResult {
     let mut gas = Gas::new(gas_limit);
 
     // decode selector
@@ -221,11 +221,11 @@ fn arb_retryable_tx_run<CTX: ArbitrumContextTr>(
                     .transfer(escrow_address, beneficiary, escrow_balance)
                     .unwrap()
             {
-                return Ok(Some(InterpreterResult {
+                return InterpreterResult {
                     result: error.into(),
                     gas,
                     output: Bytes::default(),
-                }));
+                };
             }
 
             let mut arb_state = context.arb_state(Some(&mut gas));

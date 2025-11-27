@@ -46,7 +46,7 @@ pub(crate) fn record_cost_return(gas: &mut Gas, cost: u64) -> Option<Interpreter
 macro_rules! record_cost {
     ($gas:expr, $cost:expr) => {{
         if let Some(result) = crate::precompiles::macros::record_cost_return(&mut $gas, $cost) {
-            return Ok(Some(result));
+            return result;
         }
     }};
 }
@@ -55,38 +55,44 @@ pub(crate) use record_cost;
 
 macro_rules! return_success {
     ($gas:expr, $output:expr) => {
-        return Ok(Some(crate::precompiles::macros::success_result_with_output(
+        return crate::precompiles::macros::success_result_with_output(
             &mut $gas,
             $output.into(),
-        )))
+        )
     };
     ($gas:expr) => {
-        return Ok(Some(crate::precompiles::macros::success_result(&mut $gas)))
+        return crate::precompiles::macros::success_result(&mut $gas)
     };
 }
 pub(crate) use return_success;
 
-macro_rules! burnout_return {
-    () => {
-        return Ok(Some(crate::precompiles::macros::burnout_return_result()))
-    };
+macro_rules! try_burnout {
+    ($expr:expr) => {{
+        match $expr {
+            Ok(value) => value,
+            Err(_) => {
+                return crate::precompiles::macros::burnout_return_result();
+            }
+        }
+    }};
 }
 
-pub(crate) use burnout_return;
+pub(crate) use try_burnout;
 
 macro_rules! return_revert {
     ($gas:expr, $output:expr) => {
-        return Ok(Some(crate::precompiles::macros::revert_result_with_output(
+        return crate::precompiles::macros::revert_result_with_output(
             &mut $gas,
             $output.into(),
-        )))
+        )
     };
     ($gas:expr) => {
-        return Ok(Some(crate::precompiles::macros::revert_result(&mut $gas)))
+        return crate::precompiles::macros::revert_result(&mut $gas)
     };
 }
 
 pub(crate) use return_revert;
+
 
 macro_rules! emit_event {
     ($context:expr, $log:expr, $gas:expr) => {
@@ -97,7 +103,7 @@ macro_rules! emit_event {
         if let Some(log_cost) = log_cost {
             crate::precompiles::macros::record_cost!(&mut $gas, log_cost)
         } else {
-            return Ok(Some(crate::precompiles::macros::out_of_gas_result(&mut $gas)));
+            return crate::precompiles::macros::out_of_gas_result(&mut $gas);
         }
 
         $context.journal_mut().log($log);
@@ -111,13 +117,13 @@ macro_rules! try_state {
         match $expr {
             Ok(value) => value,
             Err(crate::state::types::ArbosStateError::OutOfGas) => {
-                return Ok(Some(crate::precompiles::macros::out_of_gas_result(&mut $gas)));
+                return crate::precompiles::macros::out_of_gas_result(&mut $gas);
             }
             Err(err) => {
-                return Ok(Some(crate::precompiles::macros::revert_result_with_output(
+                return crate::precompiles::macros::revert_result_with_output(
                     &mut $gas,
                     err.into(),
-                )));
+                );
             }
         }
     }};
@@ -158,7 +164,7 @@ pub enum StateMutability {
 macro_rules! precompile_impl {
     ($logic:ty) => {
         |context, input, target_address, caller_address, call_value, is_static, gas_limit| {
-            <$logic>::run(
+            Ok(Some(<$logic>::run(
                 context,
                 input,
                 target_address,
@@ -166,7 +172,7 @@ macro_rules! precompile_impl {
                 call_value,
                 is_static,
                 gas_limit,
-            )
+            )))
         }
     };
 }

@@ -8,7 +8,7 @@ use revm::{
 use crate::{
     ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+         ArbPrecompileLogic, ExtendedPrecompile,
         macros::{StateMutability, record_cost, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter},
@@ -83,7 +83,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbDebugPrecompile {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+    ) -> InterpreterResult {
         arb_debug_run(
             context,
             input,
@@ -105,7 +105,7 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+) -> InterpreterResult {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
@@ -136,7 +136,7 @@ fn arb_debug_run<CTX: ArbitrumContextTr>(
                 gas_limit,
                 call.flag,
                 B256::from(call.value),
-            )?;
+            );
 
             return_success!(
                 gas,
@@ -180,15 +180,15 @@ fn events<CTX: ArbitrumContextTr>(
     gas_limit: u64,
     flag: bool,
     value: B256,
-) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+) -> InterpreterResult {
     let mut gas = Gas::new(gas_limit);
 
     if is_static {
-        return Ok(Some(InterpreterResult {
+        return InterpreterResult {
             result: InstructionResult::StateChangeDuringStaticCall,
             gas,
             output: Bytes::default(),
-        }));
+        };
     }
 
     let log_data = ArbDebug::Basic { flag, value }.to_log_data();

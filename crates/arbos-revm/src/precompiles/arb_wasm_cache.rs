@@ -9,7 +9,7 @@ use revm::{
 use crate::{
     ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+         ArbPrecompileLogic, ExtendedPrecompile,
         macros::{StateMutability, emit_event, return_revert, return_success, try_state},
     },
     record_cost,
@@ -102,7 +102,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+    ) -> InterpreterResult {
         let mut gas = Gas::new(gas_limit);
 
         // decode selector
@@ -278,37 +278,49 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 }
 
                 let call = IArbWasmCache::evictCodehashCall::abi_decode(input).unwrap();
-                let codehash = call.codehash;
+                let code_hash = call.codehash;
 
-                let params = try_state!(
+                let _ = try_state!(
                     gas,
                     context.arb_state(Some(&mut gas)).programs().get_stylus_params()
                 );
 
-                let mut program_info = if let Some(program_info) = try_state!(
+                let mut program_info = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
-                ) {
-                    program_info
-                } else {
-                    return_revert!(
-                        gas,
-                        IArbWasmCache::ProgramNeedsUpgrade {
-                            version: 0,
-                            stylusVersion: params.version
-                        }
-                        .abi_encode()
-                    );
-                };
+                    context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
+                )
+                .unwrap_or_default();
 
                 let output = IArbWasmCache::evictCodehashCall::abi_encode_returns(
                     &IArbWasmCache::evictCodehashReturn {},
                 );
 
                 if !program_info.cached {
-                    // already not cached, no-op
+                    // if not cached, no-op
                     return_success!(gas, Bytes::from(output));
                 }
+
+                // emit event cost
+                emit_event!(
+                    context,
+                    Log {
+                        address: *target_address,
+                        data: IArbWasmCache::UpdateProgramCache {
+                            manager: caller_address,
+                            codehash: code_hash,
+                            cached: false
+                        }
+                        .into_log_data()
+                    },
+                    gas
+                );
+
+                record_cost!(gas, program_info.init_cost as u64);
+
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().module_hash(&code_hash).get()
+                );
 
                 program_info.cached = false;
 
@@ -317,11 +329,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                     context
                         .arb_state(Some(&mut gas))
                         .programs()
-                        .save_program_info(&codehash, &program_info)
-                );
-
-                let output = IArbWasmCache::evictCodehashCall::abi_encode_returns(
-                    &IArbWasmCache::evictCodehashReturn {},
+                        .save_program_info(&code_hash, &program_info)
                 );
 
                 return_success!(gas, Bytes::from(output));
@@ -380,7 +388,7 @@ mod tests {
         precompiles::{ArbPrecompileLogic, arb_wasm_cache::ArbWasmCache},
     };
 
-    fn setup_evm() -> ArbitrumContext<EmptyDBTyped<Infallible>> {
+    fn setup() -> ArbitrumContext<EmptyDBTyped<Infallible>> {
         let db = EmptyDBTyped::<Infallible>::default();
 
         let context = ArbitrumContext {
@@ -401,7 +409,7 @@ mod tests {
 
     #[test]
     fn test_wasm_cache_code_hash_is_cached() {
-        let mut context = setup_evm();
+        let mut context = setup();
 
         let codehash = [0u8; 32];
 

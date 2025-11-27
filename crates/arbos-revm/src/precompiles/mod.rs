@@ -36,7 +36,7 @@ use crate::{
     precompiles::{
         arb_wasm::arb_wasm_precompile,
         arb_wasm_cache::arb_wasm_cache_precompile,
-        macros::{StateMutability, burnout_return, return_revert, try_state},
+        macros::{StateMutability, return_revert, try_state},
     },
     record_cost,
     state::{ArbState, ArbStateGetter, types::StorageBackedTr},
@@ -403,10 +403,6 @@ impl<CTX: ContextTr> Precompile<CTX> {
     }
 }
 
-pub enum ArbPrecompileError {
-    ProgramActivation,
-}
-
 pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
     /// File-local state mutability table
     const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)];
@@ -420,7 +416,7 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError>;
+    ) -> InterpreterResult;
 
     /// Wrapper logic (formerly arbos_wasm_cache_run)
     fn run(
@@ -431,7 +427,7 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, String> {
+    ) -> InterpreterResult {
         let mut gas = Gas::new(gas_limit);
 
         if input.len() < 4 {
@@ -463,7 +459,7 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         }
 
         // call the inner logic
-        let result = Self::inner(
+        let outcome = Self::inner(
             context,
             input,
             target_address,
@@ -473,20 +469,13 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
             gas.remaining(),
         );
 
-        let (result, output) = match result {
-            Ok(Some(result)) => {
-                gas.spend_all();
-                gas.erase_cost(result.gas.remaining());
-                (result.result, result.output)
-            }
-            Ok(None) => return Ok(None),
-            Err(ArbPrecompileError::ProgramActivation) => burnout_return!(),
-        };
+        gas.spend_all();
+        gas.erase_cost(outcome.gas.remaining());
 
         let result_data_cost =
-            revm::interpreter::gas::VERYLOW * (((output.len() as u64) + 31) / 32);
+            revm::interpreter::gas::VERYLOW * (((outcome.output.len() as u64) + 31) / 32);
         record_cost!(gas, result_data_cost);
 
-        Ok(Some(InterpreterResult { result, gas, output }))
+        InterpreterResult { result: outcome.result, gas, output: outcome.output }
     }
 }

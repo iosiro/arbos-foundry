@@ -3,7 +3,7 @@ use core::panic;
 use crate::{
     ArbitrumContextTr, generate_state_mut_table, precompile_impl,
     precompiles::{
-        ArbPrecompileError, ArbPrecompileLogic, ExtendedPrecompile,
+         ArbPrecompileLogic, ExtendedPrecompile,
         macros::{StateMutability, record_cost, return_revert, return_success, try_state},
     },
     state::{ArbState, ArbStateGetter, types::ArbosStateError},
@@ -82,7 +82,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbNativeTokenManagerPr
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+    ) -> InterpreterResult {
         arb_native_token_manager_run(
             context,
             input,
@@ -105,7 +105,7 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
     _call_value: U256,
     _is_static: bool,
     gas_limit: u64,
-) -> Result<Option<InterpreterResult>, ArbPrecompileError> {
+) -> InterpreterResult {
     let mut gas = Gas::new(gas_limit);
     // decode selector
     if input.len() < 4 {
@@ -156,11 +156,11 @@ fn arb_native_token_manager_run<CTX: ArbitrumContextTr>(
                     );
                     return_success!(gas, Bytes::from(output));
                 }
-                Ok(Some(err)) => Ok(Some(InterpreterResult {
+                Ok(Some(err)) => InterpreterResult {
                     result: err.into(),
                     gas,
                     output: Bytes::default(),
-                })),
+                },
                 Err(e) => panic!("Failed to burn native token: {}", e),
             }
         }
