@@ -1,10 +1,10 @@
-use revm::primitives::{B256, U256};
+use revm::primitives::{Address, B256, Bytes, U256};
 
 use crate::{
     ArbitrumContextTr,
     state::types::{
-        StorageBackedAddress, StorageBackedBytes, StorageBackedQueue, StorageBackedTr,
-        StorageBackedU64, StorageBackedU256, map_address, substorage,
+        ArbosStateError, StorageBackedAddress, StorageBackedBytes, StorageBackedQueue,
+        StorageBackedTr, StorageBackedU64, StorageBackedU256, map_address, substorage,
     },
 };
 
@@ -17,6 +17,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut revm::interpreter::Gas>,
+    pub is_static: bool,
     slot: B256,
 }
 
@@ -24,19 +25,20 @@ impl<'a, CTX: ArbitrumContextTr> RetryableState<'a, CTX> {
     pub fn new(
         context: &'a mut CTX,
         gas: Option<&'a mut revm::interpreter::Gas>,
+        is_static: bool,
         subkey: B256,
     ) -> Self {
-        Self { context, gas, slot: subkey }
+        Self { context, gas, is_static, slot: subkey }
     }
 
     pub fn timeout_queue(&mut self) -> StorageBackedQueue<'_, CTX> {
         let slot = substorage(&self.slot, ARBOS_STATE_RETRYABLE_TIMEOUT_QUEUE_KEY);
-        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn retryable(&mut self, id: B256) -> Retryable<'_, CTX> {
         let slot = substorage(&self.slot, id.as_slice());
-        Retryable::new(self.context, self.gas.as_deref_mut(), slot)
+        Retryable::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 }
 
@@ -46,6 +48,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut revm::interpreter::Gas>,
+    is_static: bool,
     slot: B256,
 }
 
@@ -53,48 +56,65 @@ impl<'a, CTX: ArbitrumContextTr> Retryable<'a, CTX> {
     pub fn new(
         context: &'a mut CTX,
         gas: Option<&'a mut revm::interpreter::Gas>,
+        is_static: bool,
         subkey: B256,
     ) -> Self {
-        Self { context, gas, slot: subkey }
+        Self { context, gas, is_static, slot: subkey }
+    }
+
+    #[inline]
+    fn slot(&self, offset: u64) -> B256 {
+        map_address(&self.slot, &B256::from(U256::from(offset)))
     }
 
     pub fn num_tries(&mut self) -> StorageBackedU64<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(0u64)));
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(0);
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn from(&mut self) -> StorageBackedAddress<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(1u64)));
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(1);
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn to(&mut self) -> StorageBackedAddress<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(2u64)));
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(2);
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn callvalue(&mut self) -> StorageBackedU256<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(3u64)));
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(3);
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn beneficiary(&mut self) -> StorageBackedAddress<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(4u64)));
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(4);
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn calldata(&mut self) -> StorageBackedBytes<'_, CTX> {
         let slot = substorage(&self.slot, ARBOS_STATE_RETRYABLE_CALLDATA_KEY);
-        StorageBackedBytes::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedBytes::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn timeout(&mut self) -> StorageBackedU64<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(5u64)));
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(5);
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn timeout_windows_left(&mut self) -> StorageBackedU64<'_, CTX> {
-        let slot = map_address(&self.slot, &B256::from(U256::from(6u64)));
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        let slot = self.slot(6);
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+    }
+
+    pub fn clear(&mut self) -> Result<(), ArbosStateError> {
+        self.num_tries().set(0)?;
+        self.timeout().set(0)?;
+        self.callvalue().set(U256::ZERO)?;
+        self.to().set(Address::ZERO)?;
+        self.from().set(Address::ZERO)?;
+        self.calldata().set(&Bytes::new())?;
+        self.beneficiary().set(Address::ZERO)?;
+        self.timeout_windows_left().set(0)
     }
 }

@@ -23,6 +23,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
     slot: B256,
 }
 
@@ -31,8 +32,13 @@ where
     CTX: ArbitrumContextTr,
 {
     /// Open an AddressTable rooted at `slot`
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        slot: B256,
+    ) -> Self {
+        Self { context, gas, is_static, slot }
     }
 
     fn backing_slot(&self) -> B256 {
@@ -56,7 +62,8 @@ where
         let key = B256::left_padding_from(address.as_slice());
         let slot = map_address(&by_addr, &key);
 
-        StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), slot).get()
+        StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), self.is_static, slot)
+            .get()
     }
 
     /// Register `address` if not present and return zero-based index.
@@ -72,20 +79,35 @@ where
         // not present: increment size and append into backing_storage at new index (1-based)
         let size_slot = self.size_slot();
 
-        let size_u256 =
-            StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), size_slot).get()?;
+        let size_u256 = StorageBackedU256::new(
+            &mut self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            size_slot,
+        )
+        .get()?;
 
         let size = size_u256.saturating_to::<u64>();
         let new_num = size + 1;
 
         // store address into backing storage at element index new_num (map(backing, new_num))
         let elem_slot = map_address(&self.backing_slot(), &B256::from(U256::from(new_num)));
-        StorageBackedB256::new(&mut self.context, self.gas.as_deref_mut(), elem_slot)
-            .set(B256::left_padding_from(address.as_slice()))?;
+        StorageBackedB256::new(
+            &mut self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            elem_slot,
+        )
+        .set(B256::left_padding_from(address.as_slice()))?;
 
         // update size
-        StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), elem_slot)
-            .set(U256::from(new_num))?;
+        StorageBackedU256::new(
+            &mut self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            size_slot,
+        )
+        .set(U256::from(new_num))?;
 
         // record by-address -> new_num (1-based)
         let by_addr = self.by_address_substorage();
@@ -94,6 +116,7 @@ where
         StorageBackedB256::new(
             &mut self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             map_address(&by_addr, &by_key),
         )
         .set(B256::from(U256::from(new_num)))?;
@@ -116,7 +139,8 @@ where
     /// number of items (size)
     pub fn size(&mut self) -> Result<u64, ArbosStateError> {
         let size_slot = self.size_slot();
-        StorageBackedU64::new(&mut self.context, self.gas.as_deref_mut(), size_slot).get()
+        StorageBackedU64::new(&mut self.context, self.gas.as_deref_mut(), self.is_static, size_slot)
+            .get()
     }
 
     /// Lookup by zero-based index.
@@ -128,9 +152,14 @@ where
         // stored at 1-based index
         let elem_slot = map_address(&self.backing_slot(), &B256::from(U256::from(index + 1)));
 
-        StorageBackedAddress::new(&mut self.context, self.gas.as_deref_mut(), elem_slot)
-            .get()
-            .map(Some)
+        StorageBackedAddress::new(
+            &mut self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            elem_slot,
+        )
+        .get()
+        .map(Some)
     }
 
     pub fn compress(&mut self, address: Address) -> Result<Bytes, ArbosStateError> {
@@ -150,37 +179,44 @@ where
     }
 
     pub fn decompress(&mut self, data: &[u8]) -> Result<(Address, u64), ArbosStateError> {
-        let slice = data;
-        let mut stream = alloy_rlp::Rlp::new(slice)
-            .map_err(|e| ArbosStateError::DecompressError(format!("Invalid RLP: {e:?}")))?;
-        stream
-            .get_next::<RLPItem>()
-            .map_err(|e| ArbosStateError::DecompressError(format!("RLP decode error: {e:?}")))
-            .and_then(|item| match item {
-                Some(RLPItem::Address(addr)) => Ok((addr, (data.len() - slice.len()) as u64)),
-                Some(RLPItem::Index(idx)) => {
-                    let addr = self.lookup_index(idx)?.ok_or_else(|| {
-                        ArbosStateError::DecompressError(
-                            "invalid index in compressed address".to_string(),
-                        )
-                    })?;
-                    Ok((addr, (data.len() - slice.len()) as u64))
-                }
-                None => Err(ArbosStateError::DecompressError("empty RLP item".to_string())),
-            })
+        let mut remaining = data;
+        let item = RLPItem::decode(&mut remaining)
+            .map_err(|e| ArbosStateError::DecompressError(format!("RLP decode error: {e:?}")))?;
+        let consumed = data.len().saturating_sub(remaining.len()) as u64;
+
+        match item {
+            RLPItem::Address(addr) => Ok((addr, consumed)),
+            RLPItem::Index(idx) => {
+                let addr = self.lookup_index(idx)?.ok_or_else(|| {
+                    ArbosStateError::DecompressError(
+                        "invalid index in compressed address".to_string(),
+                    )
+                })?;
+                Ok((addr, consumed))
+            }
+        }
     }
 }
 
 impl Encodable for RLPItem {
     fn encode(&self, out: &mut dyn BufMut) {
+        let mut payload = Vec::new();
         match self {
             Self::Address(addr) => {
-                out.put_slice(addr.as_slice());
+                // prefix discriminant then the address RLP
+                0u8.encode(&mut payload);
+                addr.encode(&mut payload);
             }
             Self::Index(idx) => {
-                out.put_u64(*idx);
+                // prefix discriminant then the index RLP
+                1u8.encode(&mut payload);
+                idx.encode(&mut payload);
             }
         }
+        // wrap the payload with a bytes header so decode_bytes can parse it
+        let header = Header { list: false, payload_length: payload.len() };
+        header.encode(out);
+        out.put_slice(&payload);
     }
 }
 

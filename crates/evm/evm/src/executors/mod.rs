@@ -20,6 +20,11 @@ use alloy_primitives::{
     map::{AddressHashMap, HashMap},
 };
 use alloy_sol_types::{SolCall, sol};
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use foundry_evm_core::{
     backend::{Backend, BackendError, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
@@ -33,7 +38,9 @@ use foundry_evm_core::{
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
+    Journal,
     bytecode::Bytecode,
+    context::JournalTr,
     context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,
@@ -135,7 +142,11 @@ impl Executor {
             },
         );
 
-        Self { backend, env, inspector, gas_limit, legacy_assertions }
+        let mut res = Self { backend, env, inspector, gas_limit, legacy_assertions };
+
+        res.apply_arbitrum_state_overrides(|_| {});
+
+        res
     }
 
     fn clone_with_backend(&self, backend: Backend) -> Self {
@@ -321,6 +332,27 @@ impl Executor {
     #[inline]
     pub fn create2_deployer(&self) -> Address {
         self.inspector().create2_deployer
+    }
+
+    #[inline]
+    pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let mut context = ArbitrumContext {
+            block: self.env.evm_env.block_env.clone(),
+            tx: self.env.tx.clone(),
+            cfg: self.env.evm_env.cfg_env.clone(),
+            journaled_state: { Journal::new(self.backend.db_mut()) },
+            chain: (),
+            local: ArbitrumLocalContext::default(),
+            error: Ok(()),
+        };
+
+        let mut state = context.arb_state(None, false);
+
+        let mut params: ArbosStateParams = state.get().unwrap_or_default();
+
+        f(&mut params);
+
+        _ = state.initialize(&params);
     }
 
     /// Deploys a contract and commits the new state to the underlying database.

@@ -8,6 +8,7 @@ pub const STYLUS_DISCRIMINANT: &[u8] =
     &[STYLUS_EOF_MAGIC, STYLUS_EOF_MAGIC_SUFFIX, STYLUS_EOF_VERSION];
 
 pub const INITIAL_ARBOS_VERSION: u16 = 42;
+pub const ARBOS_VERSION_STYLUS_FIXES: u16 = 31;
 pub const INITIAL_STYLUS_VERSION: u16 = 2;
 pub const INITIAL_MAX_WASM_SIZE: u32 = 128 * 1024; // max decompressed wasm size (programs are also bounded by compressed size)
 pub const INITIAL_MAX_STACK_DEPTH: u32 = 4 * 65536; // 4 page stack.
@@ -23,6 +24,12 @@ pub const INITIAL_CACHED_COST_SCALAR: u8 = 50; // scale costs
 pub const INITIAL_EXPIRY_DAYS: u16 = 365; // deactivate after 1 year.
 pub const INITIAL_KEEPALIVE_DAYS: u16 = 31; // wait a month
 pub const INITIAL_RECENT_CACHE_SIZE: u16 = 32; // cache the 32 most recent programs.
+
+pub const INITIAL_DATA_PRICER_DEMAND: u32 = 0;
+pub const INITIAL_DATA_PRICER_BYTES_PER_SECOND: u32 = ((1_u64 << 40) / (365 * 24 * 60 * 60)) as u32; // 1 TB p/a
+pub const INITIAL_DATA_PRICER_LAST_UPDATE_TIME: u64 = ARBOS_GENESIS_TIMESTAMP as u64;
+pub const INITIAL_DATA_PRICER_MIN_PRICE: u32 = 82928201;
+pub const INITIAL_DATA_PRICER_INERTIA: u32 = 21360419;
 
 pub const MIN_INIT_GAS_UNITS: u64 = 128;
 pub const MIN_CACHED_GAS_UNITS: u64 = 32;
