@@ -9,13 +9,9 @@ use crate::{
     macros::{emit_event, interpreter_return, interpreter_revert, try_or_halt},
     precompile_impl,
     precompiles::{
-        ArbPrecompileLogic, ExtendedPrecompile, decode_call,
-        StateMutability, selector_or_revert,
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
     },
-    state::{
-        ArbState, ArbStateGetter, program::ProgramInfo, try_state,
-        types::StorageBackedTr,
-    },
+    state::{ArbState, ArbStateGetter, program::ProgramInfo, try_state, types::StorageBackedTr},
     stylus_executor::{cache_program, stylus_code},
     try_record_cost,
 };
@@ -890,7 +886,8 @@ mod tests {
             call_value,
             false,
             10_000_000,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(result.is_ok());
     }

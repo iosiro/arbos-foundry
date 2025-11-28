@@ -3,10 +3,10 @@ use crate::{
     macros::{interpreter_return, interpreter_revert},
     precompile_impl,
     precompiles::{
-        ArbPrecompileLogic, ExtendedPrecompile, decode_call,
-        StateMutability, selector_or_revert,
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
     },
-    state::{ArbState, ArbStateGetter, try_state}, try_record_cost,
+    state::{ArbState, ArbStateGetter, try_state},
+    try_record_cost,
 };
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{

@@ -26,7 +26,8 @@ pub const INITIAL_KEEPALIVE_DAYS: u16 = 31; // wait a month
 pub const INITIAL_RECENT_CACHE_SIZE: u16 = 32; // cache the 32 most recent programs.
 
 pub const INITIAL_DATA_PRICER_DEMAND: u32 = 0;
-pub const INITIAL_DATA_PRICER_BYTES_PER_SECOND: u32 = (((1 as u64) << 40) / (365 * 24 * 60 * 60)) as u32; // 1 TB p/a
+pub const INITIAL_DATA_PRICER_BYTES_PER_SECOND: u32 =
+    (((1 as u64) << 40) / (365 * 24 * 60 * 60)) as u32; // 1 TB p/a
 pub const INITIAL_DATA_PRICER_LAST_UPDATE_TIME: u64 = ARBOS_GENESIS_TIMESTAMP as u64;
 pub const INITIAL_DATA_PRICER_MIN_PRICE: u32 = 82928201;
 pub const INITIAL_DATA_PRICER_INERTIA: u32 = 21360419;

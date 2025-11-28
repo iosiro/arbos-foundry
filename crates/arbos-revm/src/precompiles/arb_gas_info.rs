@@ -1,14 +1,19 @@
+use crate::{
+    ArbitrumContextTr,
+    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
+    generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
+    precompiles::{ArbPrecompileLogic, ExtendedPrecompile, StateMutability},
+    state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr},
+};
 use alloy_sol_types::{SolCall, sol};
 use revm::{
     context::Block,
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, Bytes, I256, U256, address},
-};
-use crate::{
-    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::ARBOS_L1_PRICER_FUNDS_ADDRESS, generate_state_mut_table, macros::{interpreter_return, interpreter_revert}, precompile_impl, precompiles::{
-        ArbPrecompileLogic, ExtendedPrecompile, StateMutability,
-    }, state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr}
 };
 
 const ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE: u64 = 140;

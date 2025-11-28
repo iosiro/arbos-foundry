@@ -14,9 +14,8 @@ use revm::{
     },
 };
 
-use crate::{
-    ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS,
-};
+use crate::{ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS};
+use tracing::trace;
 #[derive(Debug)]
 pub enum ArbosStateError {
     OutOfGas,
@@ -78,18 +77,29 @@ impl From<ArbosStateError> for InterpreterAction {
 
 impl From<ArbosStateError> for InstructionResult {
     fn from(error: ArbosStateError) -> Self {
-        match error {
+        let description = error.to_string();
+        let result = match error {
             ArbosStateError::OutOfGas => Self::OutOfGas,
-            ArbosStateError::StateChangeDuringStaticCall => Self::StateChangeDuringStaticCall,            
+            ArbosStateError::StateChangeDuringStaticCall => Self::StateChangeDuringStaticCall,
             ArbosStateError::Context(_) => Self::Revert,
             _ => Self::Revert,
-        }
+        };
+
+        trace!(
+            target: "arbos-revm::arbos_state",
+            %description,
+            ?result,
+            "Converted ArbosStateError into InstructionResult"
+        );
+
+        result
     }
 }
 
 impl From<ArbosStateError> for InterpreterResult {
     fn from(error: ArbosStateError) -> Self {
-        match error {
+        let description = error.to_string();
+        let result = match error {
             ArbosStateError::OutOfGas => Self {
                 result: InstructionResult::OutOfGas,
                 gas: Gas::default(),
@@ -105,7 +115,17 @@ impl From<ArbosStateError> for InterpreterResult {
                 gas: Gas::default(),
                 output: Bytes::default(),
             },
-        }
+        };
+
+        trace!(
+            target: "arbos-revm::arbos_state",
+            %description,
+            result = ?result.result,
+            output_len = result.output.len(),
+            "Converted ArbosStateError into InterpreterResult"
+        );
+
+        result
     }
 }
 

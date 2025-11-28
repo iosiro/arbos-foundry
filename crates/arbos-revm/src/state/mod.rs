@@ -1,12 +1,11 @@
-
 pub mod address_table;
+pub mod arbos_state;
 pub mod block_hashes;
 pub mod l1_pricing;
 pub mod l2_pricing;
 pub mod program;
 pub mod retryable;
 pub mod types;
-pub mod arbos_state;
 pub use arbos_state::{ArbState, ArbStateGetter, ArbStateWrapper, ArbosStateParams};
 pub use types::ArbosStateError;
 

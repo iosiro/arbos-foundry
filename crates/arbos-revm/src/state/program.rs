@@ -142,7 +142,6 @@ where
 
         Ok(params)
     }
-
 }
 
 const DATA_PRICER_DEMAND_OFFSET: u8 = 0;

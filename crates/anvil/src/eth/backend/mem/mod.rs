@@ -91,7 +91,6 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
-use arbos_revm::{ArbitrumContext, config::ArbitrumConfig, local_context::ArbitrumLocalContext};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -113,10 +112,17 @@ use foundry_evm::{
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    DatabaseCommit, Inspector, Journal, context::{Block as RevmBlock, Cfg, JournalTr, TxEnv, result::HaltReason}, context_interface::{
+    DatabaseCommit, Inspector,
+    context::{Block as RevmBlock, Cfg, TxEnv, result::HaltReason},
+    context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
-    }, database::{CacheDB, DbAccount, WrapDatabaseRef}, interpreter::InstructionResult, precompile::{PrecompileSpecId, Precompiles}, primitives::{KECCAK_EMPTY, hardfork::SpecId}, state::AccountInfo
+    },
+    database::{CacheDB, DbAccount, WrapDatabaseRef},
+    interpreter::InstructionResult,
+    precompile::{PrecompileSpecId, Precompiles},
+    primitives::{KECCAK_EMPTY, hardfork::SpecId},
+    state::AccountInfo,
 };
 use std::{
     collections::BTreeMap,
@@ -1347,7 +1353,7 @@ impl Backend {
                     cheats: self.cheats().clone(),
                 };
 
-                executor.apply_arbitrum_state_overrides(|state| {                    
+                executor.apply_arbitrum_state_overrides(|state| {
                     println!(
                         "Applied Arbitrum state overrides for mined block at parent hash {:?}",
                         best_hash

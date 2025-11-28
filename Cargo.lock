@@ -1195,6 +1195,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stylus",
+ "tracing",
  "wasmer-types",
 ]
 

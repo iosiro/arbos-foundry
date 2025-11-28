@@ -6,10 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, generate_state_mut_table, macros::{interpreter_return, interpreter_revert}, precompile_impl, precompiles::{
-        ArbPrecompileLogic, ExtendedPrecompile,
-            StateMutability, selector_or_revert, 
-    }
+    ArbitrumContextTr, generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
+    precompiles::{ArbPrecompileLogic, ExtendedPrecompile, StateMutability, selector_or_revert},
 };
 
 sol! {
@@ -67,7 +67,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbStatisticsPrecompile
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
-        
+
         let selector = selector_or_revert!(gas, input);
 
         match selector {

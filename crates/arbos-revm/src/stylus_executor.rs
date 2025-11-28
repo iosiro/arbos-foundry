@@ -13,7 +13,6 @@ use arbutil::{
         req::EvmApiRequestor,
         user::{UserOutcome, UserOutcomeKind},
     },
-    format::DebugBytes,
 };
 
 use lru::LruCache;
@@ -23,7 +22,9 @@ use revm::{
     handler::{EvmTr, PrecompileProvider, instructions::InstructionProvider},
     inspector::{InspectorEvmTr, JournalExt},
     interpreter::{
-        CallInput, FrameInput, Gas, InputsImpl, InstructionResult, InterpreterAction, InterpreterResult, gas::memory_gas, interpreter::EthInterpreter, interpreter_types::InputsTr
+        CallInput, FrameInput, Gas, InputsImpl, InstructionResult, InterpreterAction,
+        InterpreterResult, gas::memory_gas, interpreter::EthInterpreter,
+        interpreter_types::InputsTr,
     },
     primitives::{Address, B256, Bytes, FixedBytes, Log, U256, alloy_primitives::U64, keccak256},
 };
@@ -41,8 +42,10 @@ use stylus::{
     run::RunProgram,
 };
 
+use tracing::{debug, trace, warn};
+
 use crate::{
-    ArbitrumEvm, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
+    ArbitrumEvm, Utf8OrHex, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
         ARBOS_VERSION_STYLUS_FIXES, COST_SCALAR_PERCENT, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
         MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
     }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, state::{ArbState, ArbStateGetter, program::ProgramInfo, types::ArbosStateError}, stylus_api::StylusHandler
@@ -243,7 +246,16 @@ where
             Vec<u8>,
         ) -> (Vec<u8>, VecReader, ArbGas),
     ) -> Option<InterpreterAction> {
-        println!("Executing Stylus program at address: {:?}", stylus_ctx.bytecode_address);
+        debug!(
+            target: "arbos-revm::stylus",
+            bytecode_address = %stylus_ctx.bytecode_address,
+            target_address = %stylus_ctx.target_address,
+            caller_address = %stylus_ctx.caller_address,
+            gas_limit = stylus_ctx.gas_limit,
+            is_static = stylus_ctx.is_static,
+            calldata_len = stylus_ctx.calldata.len(),
+            "Executing Stylus program",
+        );
         let mut gas = Gas::new(stylus_ctx.gas_limit);
 
         let (serialized, _module, stylus_data, stylus_params) = {
@@ -252,6 +264,11 @@ where
             let maybe_cached = {
                 let mut cache = PROGRAM_CACHE.lock().unwrap();
                 if let Some((serialized, module, stylus_data)) = cache.get(&code_hash).cloned() {
+                    trace!(
+                        target: "arbos-revm::stylus",
+                        code_hash = %code_hash,
+                        "Using cached Stylus program"
+                    );
                     Some((serialized, module, stylus_data))
                 } else {
                     None
@@ -278,6 +295,12 @@ where
                     Ok(Some(code)) => code,
                     Ok(None) => return None,
                     Err(e) => {
+                        debug!(
+                            target: "arbos-revm::stylus",
+                            bytecode_address = %stylus_ctx.bytecode_address,
+                            error = %String::from_utf8_or_hex(e.clone()),
+                            "Stylus bytecode decode failed"
+                        );
                         return Some(InterpreterAction::Return(InterpreterResult {
                             result: InstructionResult::Revert,
                             output: e.into(),
@@ -289,7 +312,15 @@ where
                 let stylus_params = {
                     match context.arb_state(None).programs().stylus_params().get() {
                         Ok(params) => params,
-                        Err(e) => return Some(e.into()),
+                        Err(e) => {
+                            debug!(
+                                target: "arbos-revm::stylus",
+                                bytecode_address = %stylus_ctx.bytecode_address,
+                                error = ?e,
+                                "Failed to fetch Stylus parameters"
+                            );
+                            return Some(e.into());
+                        }
                     }
                 };
 
@@ -301,11 +332,11 @@ where
                 let debug = context.cfg().stylus().debug_mode();
 
                 let mut cache = PROGRAM_CACHE.lock().unwrap();
-                match cache.try_get_or_insert::<_, Vec<u8>>(code_hash, || {
+                match cache.try_get_or_insert::<_, String>(code_hash, || {
                     let serialized = stylus_compile(&bytecode, &compile_config)?;
 
                     let (module, stylus_data) = stylus_activate(
-                        Some(&mut gas),
+                        None,
                         &bytecode,
                         code_hash,
                         context.cfg().stylus().arbos_version(),
@@ -320,9 +351,16 @@ where
                         (serialized.clone(), module.clone(), stylus_data.clone(), stylus_params)
                     }
                     Err(e) => {
+                        warn!(
+                            target: "arbos-revm::stylus",
+                            bytecode_address = %stylus_ctx.bytecode_address,
+                            target_address = %stylus_ctx.target_address,
+                            error = %e,
+                            "Stylus compile/activate failed"
+                        );
                         return Some(InterpreterAction::Return(InterpreterResult {
                             result: InstructionResult::Revert,
-                            output: e.into(),
+                            output: e.as_bytes().to_vec().into(),
                             gas,
                         }));
                     }
@@ -365,6 +403,12 @@ where
             Ok(info) => info,
             Err(e) => {
                 if !self.ctx().cfg().stylus().disable_auto_activate() {
+                    trace!(
+                        target: "arbos-revm::stylus",
+                        bytecode_address = %stylus_ctx.bytecode_address,
+                        code_hash = %code_hash,
+                        "Program not active, building auto-activation info"
+                    );
                     ProgramInfo {
                         version: stylus_params.version,
                         init_cost: stylus_data.init_cost,
@@ -377,6 +421,12 @@ where
                 } else {
                     match e {
                         ArbosStateError::ProgramNotActivated => {
+                            debug!(
+                                target: "arbos-revm::stylus",
+                                bytecode_address = %stylus_ctx.bytecode_address,
+                                code_hash = %code_hash,
+                                "Stylus program not activated"
+                            );
                             gas.spend_all();
                             return Some(InterpreterAction::Return(InterpreterResult {
                                 result: InstructionResult::OutOfGas,
@@ -385,6 +435,13 @@ where
                             }));
                         }
                         _ => {
+                            debug!(
+                                target: "arbos-revm::stylus",
+                                bytecode_address = %stylus_ctx.bytecode_address,
+                                code_hash = %code_hash,
+                                error = ?e,
+                                "Stylus program unavailable"
+                            );
                             return Some(InterpreterAction::Return(InterpreterResult {
                                 result: InstructionResult::Revert,
                                 output: e.into(),
@@ -443,6 +500,13 @@ where
         };
 
         if !gas.record_cost(call_cost) {
+            debug!(
+                target: "arbos-revm::stylus",
+                bytecode_address = %stylus_ctx.bytecode_address,
+                call_cost,
+                gas_limit = gas.limit(),
+                "Not enough gas to begin Stylus program"
+            );
             return Some(InterpreterAction::Return(InterpreterResult {
                 result: InstructionResult::OutOfGas,
                 output: Default::default(),
@@ -471,13 +535,35 @@ where
         };
 
         let outcome = match instance.run_main(bytecode, stylus_config, ink_limit) {
-            Err(e) | Ok(UserOutcome::Failure(e)) => UserOutcome::Failure(e.wrap_err("call failed")),
+            Err(e) | Ok(UserOutcome::Failure(e)) => {
+                debug!(
+                    target: "arbos-revm::stylus",
+                    bytecode_address = %stylus_ctx.bytecode_address,
+                    target_address = %stylus_ctx.target_address,
+                    error = ?e,
+                    "Stylus runtime returned failure"
+                );
+                UserOutcome::Failure(e.wrap_err("call failed"))
+            }
             Ok(outcome) => outcome,
         };
 
-        let mut gas_left = stylus_config.pricing.ink_to_gas(instance.ink_left().into()).0;
+        let ink_left = instance.ink_left().into();
+        let mut gas_left = stylus_config.pricing.ink_to_gas(ink_left).0;
 
         let (kind, data) = outcome.into_data();
+
+        trace!(
+            target: "arbos-revm::stylus",
+            bytecode_address = %stylus_ctx.bytecode_address,
+            target_address = %stylus_ctx.target_address,
+            outcome = ?kind,
+            output_len = data.len(),
+            output = %String::from_utf8_or_hex(data.clone()),
+            ink_left = ink_left.0,
+            gas_left,
+            "Stylus program finished"
+        );
 
         let result = match kind {
             UserOutcomeKind::Success => revm::interpreter::InstructionResult::Return,
@@ -499,6 +585,15 @@ where
             let evm_cost = memory_gas(data.len());
 
             if gas.limit() < evm_cost {
+                debug!(
+                    target: "arbos-revm::stylus",
+                    bytecode_address = %stylus_ctx.bytecode_address,
+                    target_address = %stylus_ctx.target_address,
+                    output_len = data.len(),
+                    evm_cost,
+                    gas_limit = gas.limit(),
+                    "Not enough gas to return Stylus output"
+                );
                 gas.spend_all();
                 return Some(InterpreterAction::Return(InterpreterResult {
                     result: InstructionResult::OutOfGas,
@@ -612,10 +707,7 @@ pub fn stylus_code(bytecode: &[u8]) -> Result<Option<Bytes>, Vec<u8>> {
 }
 
 /// Compile Stylus bytecode
-pub fn stylus_compile(
-    bytecode: &Bytes,
-    compile_config: &CompileConfig,
-) -> Result<Vec<u8>, Vec<u8>> {
+pub fn stylus_compile(bytecode: &Bytes, compile_config: &CompileConfig) -> Result<Vec<u8>, String> {
     let serialized = native::compile(
         &bytecode,
         compile_config.version,
@@ -623,7 +715,7 @@ pub fn stylus_compile(
         wasmer_types::compilation::target::Target::default(),
         false,
     )
-    .map_err(|e| e.debug_bytes())?;
+    .map_err(|e| e.to_string())?;
 
     Ok(serialized)
 }
@@ -636,7 +728,7 @@ pub fn stylus_activate(
     stylus_version: u16,
     page_limit: u16,
     debug: bool,
-) -> Result<(Module, StylusData), Vec<u8>> {
+) -> Result<(Module, StylusData), String> {
     let mut activation_gas = if let Some(gas) = gas.as_deref_mut() {
         let remaining = gas.remaining();
         gas.spend_all();
@@ -655,7 +747,7 @@ pub fn stylus_activate(
         &mut activation_gas,
     ) {
         Ok(res) => res,
-        Err(e) => return Err(e.debug_bytes()),
+        Err(e) => return Err(e.to_string()),
     };
 
     if let Some(gas) = gas {
@@ -663,7 +755,6 @@ pub fn stylus_activate(
     }
 
     return Ok((module, stylus_data));
-    
 }
 
 pub fn ink_to_gas_ceil(pricing: PricingParams, ink: Ink) -> u64 {

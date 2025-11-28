@@ -20,7 +20,11 @@ use alloy_primitives::{
     map::{AddressHashMap, HashMap},
 };
 use alloy_sol_types::{SolCall, sol};
-use arbos_revm::{ArbitrumContext, local_context::ArbitrumLocalContext, state::{ArbState, ArbosStateParams}};
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use foundry_evm_core::{
     backend::{Backend, BackendError, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
@@ -34,10 +38,16 @@ use foundry_evm_core::{
 use foundry_evm_coverage::HitMaps;
 use foundry_evm_traces::{SparsedTraceArena, TraceMode};
 use revm::{
-    Journal, bytecode::Bytecode, context::JournalTr, context_interface::{
+    Journal,
+    bytecode::Bytecode,
+    context::JournalTr,
+    context_interface::{
         result::{ExecutionResult, Output, ResultAndState},
         transaction::SignedAuthorization,
-    }, database::{DatabaseCommit, DatabaseRef}, interpreter::{InstructionResult, return_ok}, primitives::hardfork::SpecId
+    },
+    database::{DatabaseCommit, DatabaseRef},
+    interpreter::{InstructionResult, return_ok},
+    primitives::hardfork::SpecId,
 };
 use std::{
     borrow::Cow,
@@ -321,17 +331,12 @@ impl Executor {
     }
 
     #[inline]
-    pub fn apply_arbitrum_state_overrides(
-        &mut self,
-        f: impl FnOnce(&mut ArbosStateParams)
-    )  {
+    pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
         let mut context = ArbitrumContext {
             block: self.env.evm_env.block_env.clone(),
             tx: self.env.tx.clone(),
             cfg: self.env.evm_env.cfg_env.clone(),
-            journaled_state: {
-                Journal::new(self.backend.db_mut())
-            },
+            journaled_state: { Journal::new(self.backend.db_mut()) },
             chain: (),
             local: ArbitrumLocalContext::default(),
             error: Ok(()),
@@ -341,7 +346,7 @@ impl Executor {
 
         let mut params = match state.get() {
             Ok(params) => params,
-            Err(_) => ArbosStateParams::default()
+            Err(_) => ArbosStateParams::default(),
         };
 
         f(&mut params);

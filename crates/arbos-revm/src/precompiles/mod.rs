@@ -30,11 +30,12 @@ pub mod arb_wasm;
 mod arb_wasm_cache;
 
 use crate::{
-    ArbitrumContextTr, macros::{interpreter_return, interpreter_revert}, precompiles::{
-        arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile
-    }, state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr}, try_record_cost
+    ArbitrumContextTr,
+    macros::{interpreter_return, interpreter_revert},
+    precompiles::{arb_wasm::arb_wasm_precompile, arb_wasm_cache::arb_wasm_cache_precompile},
+    state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr},
+    try_record_cost,
 };
-
 
 macro_rules! selector_or_revert {
     ($gas:expr, $input:expr) => {{
@@ -457,7 +458,7 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
 
         let purity = match Self::STATE_MUT_TABLE.iter().find(|(sel, _)| *sel == selector) {
             Some((_, p)) => *p,
-            None => interpreter_return!(gas)
+            None => interpreter_return!(gas),
         };
 
         if purity != StateMutability::Pure {
@@ -497,7 +498,6 @@ pub(crate) trait ArbPrecompileLogic<CTX: ArbitrumContextTr> {
         Some(InterpreterResult { result: outcome.result, gas, output: outcome.output })
     }
 }
-
 
 macro_rules! decode_call {
     ($gas:expr, $call:path, $input:expr) => {{
@@ -561,8 +561,6 @@ macro_rules! precompile_impl {
     };
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -586,7 +584,8 @@ mod tests {
             arb_address_table, arb_aggregator, arb_debug, arb_gas_info, arb_info,
             arb_native_token_manager, arb_owner, arb_owner_public, arb_retryable_tx,
             arb_statistics, arb_sys,
-        }, state::{ArbState, ArbStateGetter},
+        },
+        state::{ArbState, ArbStateGetter},
     };
 
     type TestContext = ArbitrumContext<EmptyDBTyped<Infallible>>;
@@ -624,10 +623,17 @@ mod tests {
     fn arb_address_table_size_defaults_to_zero() {
         let mut context = setup();
         let precompile = arb_address_table::arb_address_table_precompile::<TestContext>();
-        let input =
-            arb_address_table::ArbAddressTable::sizeCall::abi_encode(&arb_address_table::ArbAddressTable::sizeCall {});
+        let input = arb_address_table::ArbAddressTable::sizeCall::abi_encode(
+            &arb_address_table::ArbAddressTable::sizeCall {},
+        );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000001"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000001"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
         let size = arb_address_table::ArbAddressTable::sizeCall::abi_decode_returns(&result.output)
@@ -643,7 +649,13 @@ mod tests {
             &arb_aggregator::ArbAggregator::getDefaultAggregatorCall {},
         );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000002"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000002"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
         let default_agg =
@@ -680,13 +692,18 @@ mod tests {
             &arb_gas_info::ArbGasInfo::getPricesInWeiCall {},
         );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000003"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000003"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
-        let prices = arb_gas_info::ArbGasInfo::getPricesInWeiCall::abi_decode_returns(
-            &result.output,
-        )
-        .expect("decode getPricesInWei()");
+        let prices =
+            arb_gas_info::ArbGasInfo::getPricesInWeiCall::abi_decode_returns(&result.output)
+                .expect("decode getPricesInWei()");
         //let (_, _, _, base, _, total) = prices;
         assert!(prices._5 >= prices._3);
     }
@@ -695,11 +712,18 @@ mod tests {
     fn arb_info_reads_zero_balance() {
         let mut context = setup();
         let precompile = arb_info::arb_info_precompile::<TestContext>();
-        let input = arb_info::ArbInfo::getBalanceCall::abi_encode(&arb_info::ArbInfo::getBalanceCall {
-            account: address!("0xaa00000000000000000000000000000000000000"),
-        });
+        let input =
+            arb_info::ArbInfo::getBalanceCall::abi_encode(&arb_info::ArbInfo::getBalanceCall {
+                account: address!("0xaa00000000000000000000000000000000000000"),
+            });
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000004"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000004"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
         let balance =
@@ -712,11 +736,7 @@ mod tests {
         let mut context = setup();
         let owner = address!("0xaa00000000000000000000000000000000000005");
         let mut gas = Gas::new(100_000);
-        context
-            .arb_state(Some(&mut gas))
-            .chain_owners()
-            .add(owner)
-            .expect("set owner");
+        context.arb_state(Some(&mut gas)).chain_owners().add(owner).expect("set owner");
 
         let precompile = arb_owner::arb_owner_precompile::<TestContext>();
         let input = arb_owner::ArbOwner::isChainOwnerCall::abi_encode(
@@ -726,8 +746,8 @@ mod tests {
         let result = exec(precompile, &mut context, input, owner, true);
         assert_eq!(result.result, InstructionResult::Return);
 
-        let is_owner =
-            arb_owner::ArbOwner::isChainOwnerCall::abi_decode_returns(&result.output).expect("decode");
+        let is_owner = arb_owner::ArbOwner::isChainOwnerCall::abi_decode_returns(&result.output)
+            .expect("decode");
         assert!(is_owner);
     }
 
@@ -736,17 +756,12 @@ mod tests {
         let mut context = setup();
         let owner = address!("0xaa00000000000000000000000000000000000006");
         let mut gas = Gas::new(100_000);
-        context
-            .arb_state(Some(&mut gas))
-            .chain_owners()
-            .add(owner)
-            .expect("set owner");
+        context.arb_state(Some(&mut gas)).chain_owners().add(owner).expect("set owner");
 
         let precompile = arb_owner_public::arb_owner_public_precompile::<TestContext>();
-        let input =
-            arb_owner_public::ArbOwnerPublic::getAllChainOwnersCall::abi_encode(
-                &arb_owner_public::ArbOwnerPublic::getAllChainOwnersCall {},
-            );
+        let input = arb_owner_public::ArbOwnerPublic::getAllChainOwnersCall::abi_encode(
+            &arb_owner_public::ArbOwnerPublic::getAllChainOwnersCall {},
+        );
 
         let result = exec(precompile, &mut context, input, owner, true);
         assert_eq!(result.result, InstructionResult::Return);
@@ -766,7 +781,13 @@ mod tests {
             &arb_retryable_tx::ArbRetryableTx::getLifetimeCall {},
         );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000007"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000007"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
         let lifetime =
@@ -783,12 +804,17 @@ mod tests {
             &arb_statistics::ArbStatistics::getStatsCall {},
         );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000008"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000008"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
-        let stats =
-            arb_statistics::ArbStatistics::getStatsCall::abi_decode_returns(&result.output)
-                .expect("decode stats");
+        let stats = arb_statistics::ArbStatistics::getStatsCall::abi_decode_returns(&result.output)
+            .expect("decode stats");
         assert_eq!(stats._0, context.block().number);
     }
 
@@ -796,9 +822,16 @@ mod tests {
     fn arb_sys_chain_id_matches_context() {
         let mut context = setup();
         let precompile = arb_sys::arb_sys_precompile::<TestContext>();
-        let input = arb_sys::ArbSys::arbChainIDCall::abi_encode(&arb_sys::ArbSys::arbChainIDCall {});
+        let input =
+            arb_sys::ArbSys::arbChainIDCall::abi_encode(&arb_sys::ArbSys::arbChainIDCall {});
 
-        let result = exec(precompile, &mut context, input, address!("0xaa00000000000000000000000000000000000009"), true);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa00000000000000000000000000000000000009"),
+            true,
+        );
         assert_eq!(result.result, InstructionResult::Return);
 
         let chain_id =
@@ -809,14 +842,22 @@ mod tests {
     #[test]
     fn arb_native_token_manager_rejects_unknown_caller() {
         let mut context = setup();
-        let precompile = arb_native_token_manager::arb_native_token_manager_precompile::<TestContext>();
-        let input = arb_native_token_manager::ArbNativeTokenManager::mintNativeTokenCall::abi_encode(
-            &arb_native_token_manager::ArbNativeTokenManager::mintNativeTokenCall {
-                amount: U256::from(10),
-            },
-        );
+        let precompile =
+            arb_native_token_manager::arb_native_token_manager_precompile::<TestContext>();
+        let input =
+            arb_native_token_manager::ArbNativeTokenManager::mintNativeTokenCall::abi_encode(
+                &arb_native_token_manager::ArbNativeTokenManager::mintNativeTokenCall {
+                    amount: U256::from(10),
+                },
+            );
 
-        let result = exec(precompile, &mut context, input, address!("0xaa0000000000000000000000000000000000000a"), false);
+        let result = exec(
+            precompile,
+            &mut context,
+            input,
+            address!("0xaa0000000000000000000000000000000000000a"),
+            false,
+        );
         assert_eq!(result.result, InstructionResult::Revert);
     }
 }

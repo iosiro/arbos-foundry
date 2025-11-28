@@ -1,14 +1,14 @@
 use core::panic;
 
 use crate::{
-    ArbitrumContextTr,
-    generate_state_mut_table,
+    ArbitrumContextTr, generate_state_mut_table,
     macros::{interpreter_return, interpreter_revert},
     precompile_impl,
     precompiles::{
         ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
     },
-    state::{ArbState, ArbStateGetter, ArbosStateError, try_state}, try_record_cost,
+    state::{ArbState, ArbStateGetter, ArbosStateError, try_state},
+    try_record_cost,
 };
 
 use alloy_sol_types::{SolCall, sol};
@@ -130,9 +130,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbNativeTokenManagerPr
                         );
                         interpreter_return!(gas, Bytes::from(output));
                     }
-                    Ok(Some(err)) => {
-                        Some(InterpreterResult { result: err.into(), gas, output: Bytes::default() })
-                    }
+                    Ok(Some(err)) => Some(InterpreterResult {
+                        result: err.into(),
+                        gas,
+                        output: Bytes::default(),
+                    }),
                     Err(e) => panic!("Failed to burn native token: {}", e),
                 }
             }
@@ -140,7 +142,6 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbNativeTokenManagerPr
         }
     }
 }
-
 
 fn has_access<CTX: ArbitrumContextTr>(
     context: &mut CTX,

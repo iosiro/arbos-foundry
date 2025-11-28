@@ -266,25 +266,21 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
     where
         F: FnOnce(&mut arbos_revm::state::ArbosStateParams),
     {
-    
-
         let mut context = EthEvmContext {
             block: BlockEnv::default(),
             tx: TxEnv::default(),
             cfg: CfgEnv::default(),
-            journaled_state: {
-                Journal::new(&mut self.db)
-            },
+            journaled_state: { Journal::new(&mut self.db) },
             chain: (),
             local: LocalContext::default(),
             error: Ok(()),
         };
 
-         let mut state = context.arb_state(None);
+        let mut state = context.arb_state(None);
 
         let mut params = match state.get() {
             Ok(params) => params,
-            Err(_) => arbos_revm::state::ArbosStateParams::default()
+            Err(_) => arbos_revm::state::ArbosStateParams::default(),
         };
 
         f(&mut params);

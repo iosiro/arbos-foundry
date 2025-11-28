@@ -6,8 +6,16 @@ use revm::{
     primitives::{Address, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
-use crate::{ArbitrumContextTr, generate_state_mut_table, macros::{emit_event, interpreter_return, interpreter_revert}, precompile_impl, precompiles::{ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert}, state::{ArbState, ArbStateGetter, ArbosStateError, try_state, types::StorageBackedTr}, try_record_cost};
-
+use crate::{
+    ArbitrumContextTr, generate_state_mut_table,
+    macros::{emit_event, interpreter_return, interpreter_revert},
+    precompile_impl,
+    precompiles::{
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
+    },
+    state::{ArbState, ArbStateGetter, ArbosStateError, try_state, types::StorageBackedTr},
+    try_record_cost,
+};
 
 sol! {
 
@@ -188,10 +196,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let mut program_info = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().get_active_program(&params, &code_hash)
+                    context
+                        .arb_state(Some(&mut gas))
+                        .programs()
+                        .get_active_program(&params, &code_hash)
                 );
 
-                
                 let output = IArbWasmCache::cacheProgramCall::abi_encode_returns(
                     &IArbWasmCache::cacheProgramReturn {},
                 );
@@ -394,7 +404,8 @@ mod tests {
             U256::ZERO,
             true,
             1_000_000,
-        ).unwrap();
+        )
+        .unwrap();
         let output = result.output;
         let decoded = crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_decode_returns(&output)
             .expect("decode precompile output");
