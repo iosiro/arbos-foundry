@@ -91,6 +91,7 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::{ArbitrumContext, config::ArbitrumConfig, local_context::ArbitrumLocalContext};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -112,17 +113,10 @@ use foundry_evm::{
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, Cfg, TxEnv, result::HaltReason},
-    context_interface::{
+    DatabaseCommit, Inspector, Journal, context::{Block as RevmBlock, Cfg, JournalTr, TxEnv, result::HaltReason}, context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
-    },
-    database::{CacheDB, DbAccount, WrapDatabaseRef},
-    interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
-    primitives::{KECCAK_EMPTY, hardfork::SpecId},
-    state::AccountInfo,
+    }, database::{CacheDB, DbAccount, WrapDatabaseRef}, interpreter::InstructionResult, precompile::{PrecompileSpecId, Precompiles}, primitives::{KECCAK_EMPTY, hardfork::SpecId}, state::AccountInfo
 };
 use std::{
     collections::BTreeMap,
@@ -1238,7 +1232,7 @@ impl Backend {
 
         let storage = self.blockchain.storage.read();
 
-        let executor = TransactionExecutor {
+        let mut executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
             pending: pool_transactions.into_iter(),
@@ -1256,6 +1250,13 @@ impl Backend {
             blob_params: self.blob_params(),
             cheats: self.cheats().clone(),
         };
+
+        executor.apply_arbitrum_state_overrides(|state| {
+            println!(
+                "Applied Arbitrum state overrides for pending block at parent hash {:?}",
+                storage.best_hash
+            );
+        });
 
         // create a new pending block
         let executed = executor.execute();
@@ -1327,7 +1328,7 @@ impl Backend {
                 // to ensure the timestamp is as close as possible to the actual execution.
                 env.evm_env.block_env.timestamp = U256::from(self.time.next_timestamp());
 
-                let executor = TransactionExecutor {
+                let mut executor = TransactionExecutor {
                     db: &mut **db,
                     validator: self,
                     pending: pool_transactions.into_iter(),
@@ -1345,6 +1346,14 @@ impl Backend {
                     blob_params: self.blob_params(),
                     cheats: self.cheats().clone(),
                 };
+
+                executor.apply_arbitrum_state_overrides(|state| {                    
+                    println!(
+                        "Applied Arbitrum state overrides for mined block at parent hash {:?}",
+                        best_hash
+                    );
+                });
+
                 let executed_tx = executor.execute();
 
                 // we also need to update the new blockhash in the db itself
@@ -2664,7 +2673,6 @@ impl Backend {
 
         let trace = |parent_state: &StateDb| -> Result<T, BlockchainError> {
             let mut cache_db = CacheDB::new(Box::new(parent_state));
-
             // configure the blockenv for the block of the transaction
             let mut env = self.env.read().clone();
 
@@ -2679,7 +2687,7 @@ impl Backend {
                 ..Default::default()
             };
 
-            let executor = TransactionExecutor {
+            let mut executor = TransactionExecutor {
                 db: &mut cache_db,
                 validator: self,
                 pending: pool_txs.into_iter(),
@@ -2697,6 +2705,10 @@ impl Backend {
                 blob_params: self.blob_params(),
                 cheats: self.cheats().clone(),
             };
+
+            executor.apply_arbitrum_state_overrides(|state| {
+                println!("Applying Arbitrum state overrides for tracing");
+            });
 
             let _ = executor.execute();
 

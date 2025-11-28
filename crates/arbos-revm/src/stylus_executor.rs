@@ -243,6 +243,7 @@ where
             Vec<u8>,
         ) -> (Vec<u8>, VecReader, ArbGas),
     ) -> Option<InterpreterAction> {
+        println!("Executing Stylus program at address: {:?}", stylus_ctx.bytecode_address);
         let mut gas = Gas::new(stylus_ctx.gas_limit);
 
         let (serialized, _module, stylus_data, stylus_params) = {

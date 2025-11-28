@@ -140,23 +140,6 @@ where
             return Ok(params);
         }
 
-        // Load defaults
-        params.version = self.context.cfg().stylus().stylus_version();
-        params.ink_price = self.context.cfg().stylus().ink_price();
-        params.max_stack_depth = self.context.cfg().stylus().max_stack_depth();
-        params.free_pages = self.context.cfg().stylus().free_pages();
-        params.page_gas = self.context.cfg().stylus().page_gas();
-        params.page_ramp = self.context.cfg().stylus().page_ramp();
-        params.page_limit = self.context.cfg().stylus().page_limit();
-        params.min_init_gas = self.context.cfg().stylus().min_init_gas();
-        params.min_cached_init_gas = self.context.cfg().stylus().min_cached_init_gas();
-        params.init_cost_scalar = self.context.cfg().stylus().init_cost_scalar();
-        params.cached_cost_scalar = self.context.cfg().stylus().cached_cost_scalar();
-        params.expiry_days = self.context.cfg().stylus().expiry_days();
-        params.keepalive_days = self.context.cfg().stylus().keepalive_days();
-        params.block_cache_size = self.context.cfg().stylus().block_cache_size();
-        params.max_wasm_size = self.context.cfg().stylus().max_wasm_size();
-
         Ok(params)
     }
 
