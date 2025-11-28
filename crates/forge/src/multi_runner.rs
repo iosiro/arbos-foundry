@@ -16,7 +16,7 @@ use foundry_compilers::{
     artifacts::{Contract, Libraries},
     compilers::Compiler,
 };
-use foundry_config::{Config, InlineConfig};
+use foundry_config::{Config, InlineConfig, apply_stylus_config};
 use foundry_evm::{
     Env,
     backend::Backend,
@@ -360,7 +360,7 @@ impl TestRunnerConfig {
             Some(known_contracts),
             Some(artifact_id.clone()),
         ));
-        ExecutorBuilder::new()
+        let mut executor = ExecutorBuilder::new()
             .inspectors(|stack| {
                 stack
                     .cheatcodes(cheats_config)
@@ -373,7 +373,15 @@ impl TestRunnerConfig {
             .spec_id(self.spec_id)
             .gas_limit(self.evm_opts.gas_limit())
             .legacy_assertions(self.config.legacy_assertions)
-            .build(self.env.clone(), db)
+            .build(self.env.clone(), db);
+
+        executor.apply_arbitrum_state_overrides(|params| {
+            if let Some(stylus_config) = self.evm_opts.stylus_config.clone() {
+                apply_stylus_config(params, &stylus_config);
+            }
+        });
+
+        executor
     }
 
     fn trace_mode(&self) -> TraceMode {
