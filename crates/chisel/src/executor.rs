@@ -11,6 +11,7 @@ use alloy_json_abi::EventParam;
 use alloy_primitives::{Address, B256, U256, hex};
 use eyre::{Result, WrapErr};
 use foundry_compilers::Artifact;
+use foundry_config::apply_stylus_config;
 use foundry_evm::{
     backend::Backend, decode::decode_console_logs, executors::ExecutorBuilder,
     inspectors::CheatsConfig, traces::TraceMode,
@@ -214,7 +215,7 @@ impl SessionSource {
             }
         };
 
-        let executor = ExecutorBuilder::new()
+        let mut executor = ExecutorBuilder::new()
             .inspectors(|stack| {
                 stack.chisel_state(final_pc).trace_mode(TraceMode::Call).cheatcodes(
                     CheatsConfig::new(
@@ -230,6 +231,12 @@ impl SessionSource {
             .spec_id(self.config.foundry_config.evm_spec_id())
             .legacy_assertions(self.config.foundry_config.legacy_assertions)
             .build(env, backend);
+
+        executor.apply_arbitrum_state_overrides(|params| {
+            if let Some(stylus_config) = self.config.evm_opts.stylus_config.clone() {
+                apply_stylus_config(params, &stylus_config);
+            }
+        });
 
         Ok(ChiselRunner::new(executor, U256::MAX, Address::ZERO, self.config.calldata.clone()))
     }
