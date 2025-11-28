@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-use alloy_sol_types::SolInterface;
 use revm::{
     context::JournalTr,
     interpreter::{
@@ -17,14 +16,17 @@ use revm::{
 
 use crate::{
     ArbitrumContextTr, constants::ARBOS_STATE_ADDRESS,
-    precompiles::arb_wasm::IArbWasm::IArbWasmErrors,
 };
 #[derive(Debug)]
 pub enum ArbosStateError {
     OutOfGas,
     StateChangeDuringStaticCall,
+    InvalidBlockNumberForBlockHash,
     DecompressError(String),
-    ProgramError(IArbWasmErrors),
+    ProgramNotActivated,
+    ProgramNeedsUpgrade(u16, u16),
+    ProgramExpired(u32),
+    Context(String),
 }
 
 impl Display for ArbosStateError {
@@ -34,11 +36,23 @@ impl Display for ArbosStateError {
             Self::StateChangeDuringStaticCall => {
                 write!(f, "State change attempted during static call")
             }
+            Self::InvalidBlockNumberForBlockHash => {
+                write!(f, "Invalid block number for block hash")
+            }
             Self::DecompressError(msg) => {
                 write!(f, "Decompression error: {msg}")
             }
-            Self::ProgramError(err) => {
-                write!(f, "Program error: {:?}", err.abi_encode())
+            Self::ProgramNotActivated => {
+                write!(f, "Program not activated")
+            }
+            Self::ProgramNeedsUpgrade(current, required) => {
+                write!(f, "Program needs upgrade from version {current} to {required}")
+            }
+            Self::ProgramExpired(expired_at) => {
+                write!(f, "Program expired at {expired_at}")
+            }
+            Self::Context(err) => {
+                write!(f, "Context error: {err}")
             }
         }
     }
@@ -66,7 +80,8 @@ impl From<ArbosStateError> for InstructionResult {
     fn from(error: ArbosStateError) -> Self {
         match error {
             ArbosStateError::OutOfGas => Self::OutOfGas,
-            ArbosStateError::StateChangeDuringStaticCall => Self::StateChangeDuringStaticCall,
+            ArbosStateError::StateChangeDuringStaticCall => Self::StateChangeDuringStaticCall,            
+            ArbosStateError::Context(_) => Self::Revert,
             _ => Self::Revert,
         }
     }
@@ -84,11 +99,6 @@ impl From<ArbosStateError> for InterpreterResult {
                 result: InstructionResult::StateChangeDuringStaticCall,
                 gas: Gas::default(),
                 output: Bytes::default(),
-            },
-            ArbosStateError::ProgramError(e) => Self {
-                result: InstructionResult::Revert,
-                gas: Gas::default(),
-                output: e.abi_encode().into(),
             },
             _ => Self {
                 result: InstructionResult::Revert,
@@ -262,8 +272,8 @@ where
             .context
             .journal_mut()
             .sload(ARBOS_STATE_ADDRESS, self.slot.into())
-            .unwrap_or_default()
-            .data;
+            .and_then(|s| Ok(s.data))
+            .map_err(|err| ArbosStateError::Context(err.to_string()))?;
 
         Ok(T::from_word(word))
     }
@@ -281,7 +291,7 @@ where
             }
         }
 
-        let _ = self.context.sstore(ARBOS_STATE_ADDRESS, self.slot.into(), value).unwrap();
+        _ = self.context.sstore(ARBOS_STATE_ADDRESS, self.slot.into(), value);
 
         Ok(())
     }

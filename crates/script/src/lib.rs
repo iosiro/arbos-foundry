@@ -672,7 +672,13 @@ impl ScriptConfig {
             });
         }
 
-        Ok(ScriptRunner::new(builder.build(env, db), self.evm_opts.clone()))
+        let mut executor = builder.build(env.clone(), db.clone());
+
+        executor.apply_arbitrum_state_overrides(|state| {
+            println!("Initialized arbitrum state: {:?}", state);
+        });
+
+        Ok(ScriptRunner::new(executor, self.evm_opts.clone()))
     }
 }
 

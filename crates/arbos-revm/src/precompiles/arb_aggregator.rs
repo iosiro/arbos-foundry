@@ -8,12 +8,14 @@ use revm::{
 use crate::{
     ArbitrumContextTr,
     constants::ARBOS_BATCH_POSTER_ADDRESS,
-    generate_state_mut_table, precompile_impl,
+    generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
     precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success, try_state},
+        ArbPrecompileLogic, ExtendedPrecompile, decode_call,
+        StateMutability, selector_or_revert,
     },
-    state::{ArbState, ArbStateGetter},
+    state::{ArbState, ArbStateGetter, try_state},
 };
 
 sol! {
@@ -105,142 +107,118 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
-        arb_aggregator_run(
-            context,
-            input,
-            target_address,
-            caller_address,
-            call_value,
-            is_static,
-            gas_limit,
-        )
-    }
-}
-/// Run the precompile with the given context and input data.
-/// Run the arb_aggregator precompile with the given context and input data.
-fn arb_aggregator_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> InterpreterResult {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
+    ) -> Option<InterpreterResult> {
+        let mut gas = Gas::new(gas_limit);
+        let selector = selector_or_revert!(gas, input);
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
-
-    match selector {
-        ArbAggregator::addBatchPosterCall::SELECTOR => {
-            let is_chain_owner =
-                try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(caller_address));
-
-            if !is_chain_owner {
-                return_revert!(gas, Bytes::from("must be called by chain owner"));
-            }
-
-            let call = ArbAggregator::addBatchPosterCall::abi_decode(input).unwrap();
-
-            let mut arb_state = context.arb_state(Some(&mut gas));
-            let mut l1_pricing = arb_state.l1_pricing();
-            let mut batch_poster_table = l1_pricing.batch_poster_table();
-
-            if !try_state!(
-                gas,
-                batch_poster_table.add_if_missing(call.newBatchPoster, call.newBatchPoster)
-            ) {
-                return_success!(gas, Bytes::default());
-            }
-
-            return_success!(gas, Bytes::new());
-        }
-        ArbAggregator::getBatchPostersCall::SELECTOR => {
-            let posters = try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).l1_pricing().batch_poster_table().all()
-            );
-
-            let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&posters);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAggregator::getDefaultAggregatorCall::SELECTOR => {
-            let output = ArbAggregator::getDefaultAggregatorCall::abi_encode_returns(
-                &ARBOS_BATCH_POSTER_ADDRESS,
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAggregator::getFeeCollectorCall::SELECTOR => {
-            let call = ArbAggregator::getFeeCollectorCall::abi_decode(input).unwrap();
-
-            let mut arb_state = context.arb_state(Some(&mut gas));
-            let mut l1_pricing = arb_state.l1_pricing();
-            let mut batch_poster_table = l1_pricing.batch_poster_table();
-
-            let fee_collector = try_state!(gas, batch_poster_table.fee_collector(call.batchPoster));
-
-            let output = ArbAggregator::getFeeCollectorCall::abi_encode_returns(&fee_collector);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAggregator::getPreferredAggregatorCall::SELECTOR => {
-            let output = ArbAggregator::getPreferredAggregatorCall::abi_encode_returns(
-                &ArbAggregator::getPreferredAggregatorReturn::from((
-                    ARBOS_BATCH_POSTER_ADDRESS,
-                    true,
-                )),
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbAggregator::setFeeCollectorCall::SELECTOR => {
-            let call = ArbAggregator::setFeeCollectorCall::abi_decode(input).unwrap();
-
-            let mut arb_state = context.arb_state(Some(&mut gas));
-
-            let is_chain_owner = { try_state!(gas, arb_state.is_chain_owner(caller_address)) };
-
-            let mut l1_pricing = arb_state.l1_pricing();
-            let mut batch_poster_table = l1_pricing.batch_poster_table();
-
-            let current_fee_collector =
-                { try_state!(gas, batch_poster_table.fee_collector(call.batchPoster)) };
-
-            if caller_address != call.batchPoster
-                && caller_address != current_fee_collector
-                && !is_chain_owner
-            {
-                return_revert!(
+        match selector {
+            ArbAggregator::addBatchPosterCall::SELECTOR => {
+                let is_chain_owner = try_state!(
                     gas,
-                    Bytes::from(
-                        "only the batch poster, its fee collector, or a chain owner may change its fee collector"
-                    )
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
                 );
+
+                if !is_chain_owner {
+                    interpreter_revert!(gas, Bytes::from("must be called by chain owner"));
+                }
+
+                let call = decode_call!(gas, ArbAggregator::addBatchPosterCall, input);
+
+                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut l1_pricing = arb_state.l1_pricing();
+                let mut batch_poster_table = l1_pricing.batch_poster_table();
+
+                if !try_state!(
+                    gas,
+                    batch_poster_table.add_if_missing(call.newBatchPoster, call.newBatchPoster)
+                ) {
+                    interpreter_return!(gas, Bytes::default());
+                }
+
+                interpreter_return!(gas, Bytes::new());
             }
+            ArbAggregator::getBatchPostersCall::SELECTOR => {
+                let posters = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).l1_pricing().batch_poster_table().all()
+                );
 
-            try_state!(
-                gas,
-                batch_poster_table.set_fee_collector(call.batchPoster, call.newFeeCollector)
-            );
+                let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&posters);
 
-            return_success!(gas, Bytes::new());
-        }
-        ArbAggregator::getTxBaseFeeCall::SELECTOR => {
-            let output = ArbAggregator::getTxBaseFeeCall::abi_encode_returns(&U256::ZERO);
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbAggregator::getDefaultAggregatorCall::SELECTOR => {
+                let output = ArbAggregator::getDefaultAggregatorCall::abi_encode_returns(
+                    &ARBOS_BATCH_POSTER_ADDRESS,
+                );
 
-            return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbAggregator::getFeeCollectorCall::SELECTOR => {
+                let call = decode_call!(gas, ArbAggregator::getFeeCollectorCall, input);
+
+                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut l1_pricing = arb_state.l1_pricing();
+                let mut batch_poster_table = l1_pricing.batch_poster_table();
+
+                let fee_collector =
+                    try_state!(gas, batch_poster_table.fee_collector(call.batchPoster));
+
+                let output = ArbAggregator::getFeeCollectorCall::abi_encode_returns(&fee_collector);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbAggregator::getPreferredAggregatorCall::SELECTOR => {
+                let output = ArbAggregator::getPreferredAggregatorCall::abi_encode_returns(
+                    &ArbAggregator::getPreferredAggregatorReturn::from((
+                        ARBOS_BATCH_POSTER_ADDRESS,
+                        true,
+                    )),
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbAggregator::setFeeCollectorCall::SELECTOR => {
+                let call = decode_call!(gas, ArbAggregator::setFeeCollectorCall, input);
+
+                let mut arb_state = context.arb_state(Some(&mut gas));
+
+                let is_chain_owner = { try_state!(gas, arb_state.is_chain_owner(caller_address)) };
+
+                let mut l1_pricing = arb_state.l1_pricing();
+                let mut batch_poster_table = l1_pricing.batch_poster_table();
+
+                let current_fee_collector =
+                    { try_state!(gas, batch_poster_table.fee_collector(call.batchPoster)) };
+
+                if caller_address != call.batchPoster
+                    && caller_address != current_fee_collector
+                    && !is_chain_owner
+                {
+                    interpreter_revert!(
+                        gas,
+                        Bytes::from(
+                            "only the batch poster, its fee collector, or a chain owner may change its fee collector"
+                        )
+                    );
+                }
+
+                try_state!(
+                    gas,
+                    batch_poster_table.set_fee_collector(call.batchPoster, call.newFeeCollector)
+                );
+
+                interpreter_return!(gas, Bytes::new());
+            }
+            ArbAggregator::getTxBaseFeeCall::SELECTOR => {
+                let output = ArbAggregator::getTxBaseFeeCall::abi_encode_returns(&U256::ZERO);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbAggregator::setTxBaseFeeCall::SELECTOR => {
+                interpreter_return!(gas, Bytes::new());
+            }
+            _ => interpreter_revert!(gas, Bytes::from("Function not implemented")),
         }
-        ArbAggregator::setTxBaseFeeCall::SELECTOR => {
-            return_success!(gas, Bytes::new());
-        }
-        _ => return_revert!(gas, Bytes::from("Function not implemented")),
     }
 }

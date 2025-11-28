@@ -5,17 +5,10 @@ use revm::{
     precompile::PrecompileId,
     primitives::{Address, Bytes, I256, U256, address},
 };
-
 use crate::{
-    ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
-    constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
-    generate_state_mut_table, precompile_impl,
-    precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success, try_state},
-    },
-    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
+    ArbitrumContextTr, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::ARBOS_L1_PRICER_FUNDS_ADDRESS, generate_state_mut_table, macros::{interpreter_return, interpreter_revert}, precompile_impl, precompiles::{
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability,
+    }, state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr}
 };
 
 const ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE: u64 = 140;
@@ -184,11 +177,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
+    ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
         // decode selector
         if input.len() < 4 {
-            return_revert!(gas, Bytes::from("Input too short"));
+            interpreter_revert!(gas, Bytes::from("Input too short"));
         }
 
         // decode selector
@@ -205,7 +198,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &amortized_cost_cap_bips,
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {
                 let (speed_limit_per_second, max_tx_gas_limit) = {
@@ -227,7 +220,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     )),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getGasBacklogCall::SELECTOR => {
                 let gas_backlog = {
@@ -237,7 +230,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
 
                 let output = ArbGasInfo::getGasBacklogCall::abi_encode_returns(&gas_backlog);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {
                 let l1_base_fee_estimate = {
@@ -248,7 +241,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getL1BaseFeeEstimateCall::abi_encode_returns(&l1_base_fee_estimate);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {
                 let pricing_inertia = {
@@ -260,7 +253,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &pricing_inertia,
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {
                 let l1_fees_available = {
@@ -271,7 +264,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getL1FeesAvailableCall::abi_encode_returns(&l1_fees_available);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {
                 let equilibration_units = {
@@ -283,7 +276,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &equilibration_units,
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {
                 let funds_due_for_rewards = {
@@ -295,7 +288,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &U256::from(funds_due_for_rewards),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {
                 let l1_pricing_surplus = {
@@ -306,7 +299,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getL1PricingSurplusCall::abi_encode_returns(&l1_pricing_surplus);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {
                 let funds_due_for_refund = {
@@ -337,7 +330,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
 
                 let output = ArbGasInfo::getLastL1PricingSurplusCall::abi_encode_returns(&surplus);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {
                 let last_update_time = {
@@ -349,7 +342,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &last_update_time,
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {
                 let minimum_gas_price = {
@@ -360,7 +353,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getMinimumGasPriceCall::abi_encode_returns(&minimum_gas_price);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {
                 let per_batch_gas_charge = {
@@ -372,7 +365,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &(per_batch_gas_charge as i64),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getPricesInArbGasCall::SELECTOR => {
                 let l1_gas_price = {
@@ -403,7 +396,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                         )),
                     );
 
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 } else {
                     let wei_per_l2_tx = wei_for_l1_calldata
                         .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
@@ -423,7 +416,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                         )),
                     );
 
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
             }
             ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {
@@ -455,7 +448,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                         )),
                     );
 
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 } else {
                     let wei_per_l2_tx = wei_for_l1_calldata
                         .saturating_mul(U256::from(ARBOS_GAS_INFO_ASSUMED_SIMPLE_TX_SIZE));
@@ -476,7 +469,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                             )),
                         );
 
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
             }
             ArbGasInfo::getPricesInWeiCall::SELECTOR => {
@@ -512,7 +505,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     )),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {
                 let l1_gas_price = {
@@ -547,12 +540,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     )),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getCurrentTxL1GasFeesCall::SELECTOR => {
                 let output = ArbGasInfo::getCurrentTxL1GasFeesCall::abi_encode_returns(&U256::ZERO);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getPricingInertiaCall::SELECTOR => {
                 let pricing_inertia = {
@@ -563,7 +556,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getPricingInertiaCall::abi_encode_returns(&pricing_inertia);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1RewardRateCall::SELECTOR => {
                 let l1_reward_rate = {
@@ -573,7 +566,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
 
                 let output = ArbGasInfo::getL1RewardRateCall::abi_encode_returns(&l1_reward_rate);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {
                 let l1_reward_recipient = {
@@ -584,7 +577,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 let output =
                     ArbGasInfo::getL1RewardRecipientCall::abi_encode_returns(&l1_reward_recipient);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {
                 let l1_gas_price_estimate = {
@@ -596,9 +589,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     &l1_gas_price_estimate,
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
-            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+            _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
         }
     }
 }

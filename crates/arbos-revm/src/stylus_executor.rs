@@ -18,11 +18,14 @@ use arbutil::{
 
 use lru::LruCache;
 use revm::{
-    Inspector, context::{Block, Cfg, ContextSetters, ContextTr, JournalTr, LocalContextTr, Transaction}, handler::{EvmTr, PrecompileProvider, instructions::InstructionProvider}, inspector::{InspectorEvmTr, JournalExt}, interpreter::{
-        CallInput, FrameInput, Gas, InputsImpl, InstructionResult, InterpreterAction,
-        InterpreterResult, gas::memory_gas, interpreter::EthInterpreter,
-        interpreter_types::InputsTr,
-    }, primitives::{Address, B256, Bytes, FixedBytes, Log, U256, alloy_primitives::U64, keccak256}
+    Inspector,
+    context::{Block, Cfg, ContextSetters, ContextTr, JournalTr, LocalContextTr, Transaction},
+    handler::{EvmTr, PrecompileProvider, instructions::InstructionProvider},
+    inspector::{InspectorEvmTr, JournalExt},
+    interpreter::{
+        CallInput, FrameInput, Gas, InputsImpl, InstructionResult, InterpreterAction, InterpreterResult, gas::memory_gas, interpreter::EthInterpreter, interpreter_types::InputsTr
+    },
+    primitives::{Address, B256, Bytes, FixedBytes, Log, U256, alloy_primitives::U64, keccak256},
 };
 use stylus::{
     brotli::{self, Dictionary},
@@ -39,17 +42,10 @@ use stylus::{
 };
 
 use crate::{
-    ArbitrumEvm,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
-    constants::{
+    ArbitrumEvm, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
         ARBOS_VERSION_STYLUS_FIXES, COST_SCALAR_PERCENT, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
         MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    },
-    context::ArbitrumContextTr,
-    local_context::ArbitrumLocalContextTr,
-    precompiles::arb_wasm::IArbWasm::{IArbWasmErrors, ProgramNotActivated},
-    state::{ArbState, ArbStateGetter, program::ProgramInfo, types::ArbosStateError},
-    stylus_api::StylusHandler,
+    }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, state::{ArbState, ArbStateGetter, program::ProgramInfo, types::ArbosStateError}, stylus_api::StylusHandler
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -265,7 +261,7 @@ where
                 let stylus_params = {
                     let context = self.ctx();
 
-                    match context.arb_state(None).programs().get_stylus_params() {
+                    match context.arb_state(None).programs().stylus_params().get() {
                         Ok(params) => params,
                         Err(e) => return Some(e.into()),
                     }
@@ -277,8 +273,9 @@ where
 
                 let bytecode = context.journal_mut().code(stylus_ctx.bytecode_address).ok()?.data;
 
-                let bytecode = match stylus_code(&bytecode)  {
-                    Ok(code) => code,
+                let bytecode = match stylus_code(&bytecode) {
+                    Ok(Some(code)) => code,
+                    Ok(None) => return None,
                     Err(e) => {
                         return Some(InterpreterAction::Return(InterpreterResult {
                             result: InstructionResult::Revert,
@@ -289,7 +286,7 @@ where
                 };
 
                 let stylus_params = {
-                    match context.arb_state(None).programs().get_stylus_params() {
+                    match context.arb_state(None).programs().stylus_params().get() {
                         Ok(params) => params,
                         Err(e) => return Some(e.into()),
                     }
@@ -304,14 +301,11 @@ where
 
                 let mut cache = PROGRAM_CACHE.lock().unwrap();
                 match cache.try_get_or_insert::<_, Vec<u8>>(code_hash, || {
-                    let serialized = stylus_compile(
-                        &bytecode,
-                        &compile_config,
-                    )?;
+                    let serialized = stylus_compile(&bytecode, &compile_config)?;
 
                     let (module, stylus_data) = stylus_activate(
                         Some(&mut gas),
-                        &Bytes::from(serialized.clone()),
+                        &bytecode,
                         code_hash,
                         context.cfg().stylus().arbos_version(),
                         stylus_params.version,
@@ -331,11 +325,9 @@ where
                             gas,
                         }));
                     }
-                }   
+                }
             }
         };
-            
-   
 
         let (stylus_config, compile_config, evm_data) = {
             let context = self.ctx();
@@ -369,8 +361,8 @@ where
             .programs()
             .get_active_program(&stylus_params, &code_hash)
         {
-            Ok(Some(info)) => info,
-            Ok(None) => {
+            Ok(info) => info,
+            Err(e) => {
                 if !self.ctx().cfg().stylus().disable_auto_activate() {
                     ProgramInfo {
                         version: stylus_params.version,
@@ -382,16 +374,24 @@ where
                         cached: !self.ctx().cfg().stylus().disable_auto_cache(),
                     }
                 } else {
-                    return Some(
-                        ArbosStateError::ProgramError(IArbWasmErrors::ProgramNotActivated(
-                            ProgramNotActivated,
-                        ))
-                        .into(),
-                    );
+                    match e {
+                        ArbosStateError::ProgramNotActivated => {
+                            gas.spend_all();
+                            return Some(InterpreterAction::Return(InterpreterResult {
+                                result: InstructionResult::OutOfGas,
+                                output: ArbosStateError::ProgramNotActivated.into(),
+                                gas,
+                            }));
+                        }
+                        _ => {
+                            return Some(InterpreterAction::Return(InterpreterResult {
+                                result: InstructionResult::Revert,
+                                output: e.into(),
+                                gas,
+                            }));
+                        }
+                    }
                 }
-            }
-            Err(e) => {
-                return Some(e.into());
             }
         };
 
@@ -580,8 +580,8 @@ where
     }
 }
 
-pub fn stylus_code(bytecode: &[u8]) -> Result<Bytes, Vec<u8>> {
-    let bytecode = if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
+pub fn stylus_code(bytecode: &[u8]) -> Result<Option<Bytes>, Vec<u8>> {
+    if let Some(bytecode) = bytecode.strip_prefix(STYLUS_DISCRIMINANT) {
         let (dictionary, compressed_bytecode) =
             if let Some((dictionary, compressed_bytecode)) = bytecode.split_at_checked(1) {
                 (dictionary, compressed_bytecode)
@@ -604,12 +604,10 @@ pub fn stylus_code(bytecode: &[u8]) -> Result<Bytes, Vec<u8>> {
             }
         })?;
 
-        bytecode
+        Ok(Some(Bytes::from(bytecode)))
     } else {
-        return Err("specified bytecode is not a Stylus program".as_bytes().to_vec());
-    };
-
-    Ok(Bytes::from(bytecode))
+        Ok(None)
+    }
 }
 
 /// Compile Stylus bytecode
@@ -638,7 +636,6 @@ pub fn stylus_activate(
     page_limit: u16,
     debug: bool,
 ) -> Result<(Module, StylusData), Vec<u8>> {
-
     let mut activation_gas = if let Some(gas) = gas.as_deref_mut() {
         let remaining = gas.remaining();
         gas.spend_all();
@@ -665,6 +662,7 @@ pub fn stylus_activate(
     }
 
     return Ok((module, stylus_data));
+    
 }
 
 pub fn ink_to_gas_ceil(pricing: PricingParams, ink: Ink) -> u64 {

@@ -465,7 +465,7 @@ where
                 let open = context.local().stylus_pages_open();
                 let ever = context.local().stylus_pages_ever();
 
-                let stylus_params = context.arb_state(None).programs().get_stylus_params().unwrap();
+                let stylus_params = context.arb_state(None).programs().stylus_params().get().unwrap();
 
                 let free_pages = stylus_params.free_pages;
                 let page_gas = stylus_params.page_gas;

@@ -6,12 +6,14 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
+    ArbitrumContextTr, generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
     precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success, try_state},
+        ArbPrecompileLogic, ExtendedPrecompile, decode_call,
+        StateMutability, selector_or_revert,
     },
-    state::{ArbState, ArbStateGetter},
+    state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr},
 };
 
 sol! {
@@ -327,148 +329,198 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPrecompile {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
-        arb_owner_run(
-            context,
-            input,
-            target_address,
-            caller_address,
-            call_value,
-            is_static,
-            gas_limit,
-        )
-    }
-}
-/// Run the precompile with the given context and input data.
-fn arb_owner_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> InterpreterResult {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
+    ) -> Option<InterpreterResult> {
+        let mut gas = Gas::new(gas_limit);
+        const NOT_CHAIN_OWNER: &str = "must be called by chain owner";
+        let selector = selector_or_revert!(gas, input);
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        match selector {
+            ArbOwner::addChainOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::addChainOwnerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).chain_owners().add(call.newOwner)
+                );
 
-    match selector {
-        ArbOwner::addChainOwnerCall::SELECTOR => {
-            let call = ArbOwner::addChainOwnerCall::abi_decode(input).unwrap();
-            try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().add(call.newOwner));
+                let output = ArbOwner::addChainOwnerCall::abi_encode_returns(
+                    &ArbOwner::addChainOwnerReturn {},
+                );
 
-            let output =
-                ArbOwner::addChainOwnerCall::abi_encode_returns(&ArbOwner::addChainOwnerReturn {});
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::addNativeTokenOwnerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).native_token_owners().add(call.newOwner)
+                );
 
-            return_success!(gas, Bytes::from(output));
+                let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(
+                    &ArbOwner::addNativeTokenOwnerReturn {},
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::addWasmCacheManagerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::addWasmCacheManagerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).programs().cache_managers().add(call.manager)
+                );
+
+                let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(
+                    &ArbOwner::addWasmCacheManagerReturn {},
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::isChainOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::isChainOwnerCall, input);
+
+                let is_owner =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(call.addr));
+
+                let output = ArbOwner::isChainOwnerCall::abi_encode_returns(&is_owner);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::isNativeTokenOwnerCall, input);
+
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_native_token_owner(call.addr)
+                );
+
+                let output = ArbOwner::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::removeChainOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::removeChainOwnerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).chain_owners().remove(&call.ownerToRemove)
+                );
+
+                let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
+                    &ArbOwner::removeChainOwnerReturn {},
+                );
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::removeNativeTokenOwnerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context
+                        .arb_state(Some(&mut gas))
+                        .native_token_owners()
+                        .remove(&call.ownerToRemove)
+                );
+
+                let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
+                    &ArbOwner::removeNativeTokenOwnerReturn {},
+                );
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::removeWasmCacheManagerCall, input);
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+                try_state!(
+                    gas,
+                    context
+                        .arb_state(Some(&mut gas))
+                        .programs()
+                        .cache_managers()
+                        .remove(&call.manager)
+                );
+
+                let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
+                    &ArbOwner::removeWasmCacheManagerReturn {},
+                );
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::getAllChainOwnersCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwner::getAllChainOwnersCall, input);
+                let chains_owners =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().all());
+
+                let output = ArbOwner::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwner::getAllNativeTokenOwnersCall, input);
+                let native_token_owners =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).native_token_owners().all());
+
+                let output =
+                    ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwner::setCalldataPriceIncreaseCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwner::setCalldataPriceIncreaseCall, input);
+
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                );
+                if !is_owner {
+                    interpreter_revert!(gas, Bytes::from(NOT_CHAIN_OWNER));
+                }
+
+                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut l1_pricing = arb_state.l1_pricing();
+                try_state!(
+                    gas,
+                    l1_pricing.gas_floor_per_token().set(if call.enable { 1 } else { 0 })
+                );
+
+                interpreter_return!(gas, Bytes::new());
+            }
+            _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
         }
-        ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
-            let call = ArbOwner::addNativeTokenOwnerCall::abi_decode(input).unwrap();
-            try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).native_token_owners().add(call.newOwner)
-            );
-
-            let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(
-                &ArbOwner::addNativeTokenOwnerReturn {},
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::addWasmCacheManagerCall::SELECTOR => {
-            let call = ArbOwner::addWasmCacheManagerCall::abi_decode(input).unwrap();
-            try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().cache_managers().add(call.manager)
-            );
-
-            let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(
-                &ArbOwner::addWasmCacheManagerReturn {},
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::isChainOwnerCall::SELECTOR => {
-            let call = ArbOwner::isChainOwnerCall::abi_decode(input).unwrap();
-
-            let is_owner =
-                try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(call.addr));
-
-            let output = ArbOwner::isChainOwnerCall::abi_encode_returns(&is_owner);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
-            let call = ArbOwner::isNativeTokenOwnerCall::abi_decode(input).unwrap();
-
-            let is_owner =
-                try_state!(gas, context.arb_state(Some(&mut gas)).is_native_token_owner(call.addr));
-
-            let output = ArbOwner::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::removeChainOwnerCall::SELECTOR => {
-            let call = ArbOwner::removeChainOwnerCall::abi_decode(input).unwrap();
-            try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).chain_owners().remove(&call.ownerToRemove)
-            );
-
-            let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
-                &ArbOwner::removeChainOwnerReturn {},
-            );
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
-            let call = ArbOwner::removeNativeTokenOwnerCall::abi_decode(input).unwrap();
-            try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).native_token_owners().remove(&call.ownerToRemove)
-            );
-
-            let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
-                &ArbOwner::removeNativeTokenOwnerReturn {},
-            );
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
-            let call = ArbOwner::removeWasmCacheManagerCall::abi_decode(input).unwrap();
-            try_state!(
-                gas,
-                context.arb_state(Some(&mut gas)).programs().cache_managers().remove(&call.manager)
-            );
-
-            let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
-                &ArbOwner::removeWasmCacheManagerReturn {},
-            );
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::getAllChainOwnersCall::SELECTOR => {
-            let _ = ArbOwner::getAllChainOwnersCall::abi_decode(input).unwrap();
-            let chains_owners =
-                try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().all());
-
-            let output = ArbOwner::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
-            let _ = ArbOwner::getAllNativeTokenOwnersCall::abi_decode(input).unwrap();
-            let native_token_owners =
-                try_state!(gas, context.arb_state(Some(&mut gas)).native_token_owners().all());
-
-            let output =
-                ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }

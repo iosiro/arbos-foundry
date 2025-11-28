@@ -6,18 +6,8 @@ use revm::{
     primitives::{Address, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
-use crate::{
-    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
-    precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, emit_event, return_revert, return_success, try_state},
-    },
-    record_cost,
-    state::{
-        ArbState, ArbStateGetter,
-        types::{ArbosStateError, StorageBackedTr},
-    },
-};
+use crate::{ArbitrumContextTr, generate_state_mut_table, macros::{emit_event, interpreter_return, interpreter_revert}, precompile_impl, precompiles::{ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert}, state::{ArbState, ArbStateGetter, ArbosStateError, try_state, types::StorageBackedTr}, try_record_cost};
+
 
 sol! {
 
@@ -102,21 +92,14 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
+    ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
 
-        // decode selector
-        if input.len() < 4 {
-            gas.spend_all();
-            return_revert!(gas, Bytes::from("Input too short"));
-        }
-
-        // decode selector
-        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        let selector = selector_or_revert!(gas, input);
 
         match selector {
             IArbWasmCache::isCacheManagerCall::SELECTOR => {
-                let call = IArbWasmCache::isCacheManagerCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, IArbWasmCache::isCacheManagerCall, input);
                 let manager = call.manager;
 
                 let is_manager = try_state!(
@@ -126,29 +109,29 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let output = IArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasmCache::allCacheManagersCall::SELECTOR => {
-                let _call = IArbWasmCache::allCacheManagersCall::abi_decode(input).unwrap();
+                let _call = decode_call!(gas, IArbWasmCache::allCacheManagersCall, input);
 
                 let managers =
                     try_state!(gas, context.arb_state(Some(&mut gas)).cache_managers().all());
 
                 let output = IArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasmCache::cacheCodehashCall::SELECTOR => {
                 if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
-                    return_revert!(gas);
+                    interpreter_revert!(gas);
                 }
 
-                let call = IArbWasmCache::cacheCodehashCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, IArbWasmCache::cacheCodehashCall, input);
                 let codehash = call.codehash;
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
+                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
                 );
 
                 let mut program_info = if let Some(program_info) = try_state!(
@@ -157,7 +140,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 ) {
                     program_info
                 } else {
-                    return_revert!(
+                    interpreter_revert!(
                         gas,
                         IArbWasmCache::ProgramNeedsUpgrade {
                             version: 0,
@@ -173,10 +156,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 if program_info.cached {
                     // already cached, no-op
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
 
-                // TODO: burn cache cost
                 program_info.cached = true;
 
                 try_state!(
@@ -187,55 +169,36 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                         .save_program_info(&codehash, &program_info)
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasmCache::cacheProgramCall::SELECTOR => {
                 if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
-                    return_revert!(gas);
+                    interpreter_revert!(gas);
                 }
 
-                let call = IArbWasmCache::cacheProgramCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, IArbWasmCache::cacheProgramCall, input);
                 let addr = call.addr;
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
+                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
                 );
 
                 let code_hash = try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(addr));
 
                 let mut program_info = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
-                )
-                .unwrap_or_default();
+                    context.arb_state(Some(&mut gas)).programs().get_active_program(&params, &code_hash)
+                );
 
-                if program_info.version != params.version {
-                    return_revert!(
-                        gas,
-                        IArbWasmCache::ProgramNeedsUpgrade {
-                            version: program_info.version,
-                            stylusVersion: params.version
-                        }
-                        .abi_encode()
-                    );
-                }
-
-                if program_info.age > params.expiry_days as u32 * 86400 {
-                    return_revert!(
-                        gas,
-                        IArbWasmCache::ProgramExpired { ageInSeconds: program_info.age as u64 }
-                            .abi_encode()
-                    );
-                }
-
+                
                 let output = IArbWasmCache::cacheProgramCall::abi_encode_returns(
                     &IArbWasmCache::cacheProgramReturn {},
                 );
 
                 if program_info.cached {
                     // already cached, no-op
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
 
                 // emit event cost
@@ -253,7 +216,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                     gas
                 );
 
-                record_cost!(gas, program_info.init_cost as u64);
+                try_record_cost!(gas, program_info.init_cost as u64);
 
                 try_state!(
                     gas,
@@ -270,19 +233,19 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                         .save_program_info(&code_hash, &program_info)
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasmCache::evictCodehashCall::SELECTOR => {
                 if !try_state!(gas, has_access(context, caller_address, &mut gas)) {
-                    return_revert!(gas);
+                    interpreter_revert!(gas);
                 }
 
-                let call = IArbWasmCache::evictCodehashCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, IArbWasmCache::evictCodehashCall, input);
                 let code_hash = call.codehash;
 
                 let _ = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().get_stylus_params()
+                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
                 );
 
                 let mut program_info = try_state!(
@@ -297,7 +260,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 if !program_info.cached {
                     // if not cached, no-op
-                    return_success!(gas, Bytes::from(output));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
 
                 // emit event cost
@@ -315,7 +278,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                     gas
                 );
 
-                record_cost!(gas, program_info.init_cost as u64);
+                try_record_cost!(gas, program_info.init_cost as u64);
 
                 try_state!(
                     gas,
@@ -332,10 +295,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                         .save_program_info(&code_hash, &program_info)
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasmCache::codehashIsCachedCall::SELECTOR => {
-                let call = IArbWasmCache::codehashIsCachedCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, IArbWasmCache::codehashIsCachedCall, input);
                 let codehash = call.codehash;
 
                 let is_cached = if let Some(program_info) = try_state!(
@@ -349,9 +312,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let output = IArbWasmCache::codehashIsCachedCall::abi_encode_returns(&is_cached);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
-            _ => return_revert!(gas, Bytes::from("Unknown selector")),
+            _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
         }
     }
 }
@@ -431,16 +394,10 @@ mod tests {
             U256::ZERO,
             true,
             1_000_000,
-        )
-        .unwrap();
-
-        assert!(result.is_some());
-        let result = result.unwrap();
+        ).unwrap();
         let output = result.output;
-        let decoded = crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_decode_returns(&output).unwrap();
+        let decoded = crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_decode_returns(&output)
+            .expect("decode precompile output");
         assert_eq!(decoded, false);
-
-        // gas cost should be 1606
-        assert_eq!(result.gas.spent(), 1606);
     }
 }

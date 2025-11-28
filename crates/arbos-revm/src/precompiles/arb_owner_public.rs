@@ -6,12 +6,14 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
+    ArbitrumContextTr, generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
     precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success, try_state},
+        ArbPrecompileLogic, ExtendedPrecompile, decode_call,
+        StateMutability, selector_or_revert,
     },
-    state::{ArbState, ArbStateGetter, types::StorageBackedTr},
+    state::{ArbState, ArbStateGetter, try_state, types::StorageBackedTr},
 };
 
 sol! {
@@ -108,123 +110,113 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
-        arb_owner_public_run(
-            context,
-            input,
-            target_address,
-            caller_address,
-            call_value,
-            is_static,
-            gas_limit,
-        )
-    }
-}
-/// Run the precompile with the given context and input data.
-/// Run the arb_owner_public precompile with the given context and input data.
-fn arb_owner_public_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> InterpreterResult {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
+    ) -> Option<InterpreterResult> {
+        let mut gas = Gas::new(gas_limit);
+        let selector = selector_or_revert!(gas, input);
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        match selector {
+            ArbOwnerPublic::isChainOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwnerPublic::isChainOwnerCall, input);
 
-    match selector {
-        ArbOwnerPublic::isChainOwnerCall::SELECTOR => {
-            let call = ArbOwnerPublic::isChainOwnerCall::abi_decode(input).unwrap();
+                let is_owner =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(call.addr));
 
-            let is_owner =
-                try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(call.addr));
+                let output = ArbOwnerPublic::isChainOwnerCall::abi_encode_returns(&is_owner);
 
-            let output = ArbOwnerPublic::isChainOwnerCall::abi_encode_returns(&is_owner);
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::isNativeTokenOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwnerPublic::isNativeTokenOwnerCall, input);
 
-            return_success!(gas, Bytes::from(output));
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).is_native_token_owner(call.addr)
+                );
+
+                let output = ArbOwnerPublic::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getAllChainOwnersCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getAllChainOwnersCall, input);
+                let chains_owners =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().all());
+
+                let output =
+                    ArbOwnerPublic::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getAllNativeTokenOwnersCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getAllNativeTokenOwnersCall, input);
+                let native_token_owners =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).native_token_owners().all());
+
+                let output = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_encode_returns(
+                    &native_token_owners,
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getNetworkFeeAccountCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getNetworkFeeAccountCall, input);
+                let network_fee_account =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).network_fee_account().get());
+
+                let output = ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(
+                    &network_fee_account,
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getInfraFeeAccountCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getInfraFeeAccountCall, input);
+                let infra_fee_account =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).infra_fee_account().get());
+                let output =
+                    ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getBrotliCompressionLevelCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getBrotliCompressionLevelCall, input);
+                let compression_level = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas)).brotli_compression_level().get()
+                );
+                let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(
+                    &compression_level,
+                );
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::getScheduledUpgradeCall::SELECTOR => {
+                let _ = decode_call!(gas, ArbOwnerPublic::getScheduledUpgradeCall, input);
+                let upgrade_version =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_version().get());
+                let upgrade_timestamp =
+                    try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_timestamp().get());
+                let output = ArbOwnerPublic::getScheduledUpgradeCall::abi_encode_returns(
+                    &ArbOwnerPublic::getScheduledUpgradeReturn {
+                        arbosVersion: upgrade_version,
+                        scheduledForTimestamp: upgrade_timestamp,
+                    },
+                );
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::SELECTOR => {
+                let _ =
+                    decode_call!(gas, ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall, input);
+                let enabled = {
+                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let value = try_state!(gas, arb_state.l1_pricing().gas_floor_per_token().get());
+                    value != 0
+                };
+                let output = ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::abi_encode_returns(
+                    &enabled,
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
         }
-        ArbOwnerPublic::isNativeTokenOwnerCall::SELECTOR => {
-            let call = ArbOwnerPublic::isNativeTokenOwnerCall::abi_decode(input).unwrap();
-
-            let is_owner =
-                try_state!(gas, context.arb_state(Some(&mut gas)).is_native_token_owner(call.addr));
-
-            let output = ArbOwnerPublic::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getAllChainOwnersCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getAllChainOwnersCall::abi_decode(input).unwrap();
-            let chains_owners =
-                try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().all());
-
-            let output = ArbOwnerPublic::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getAllNativeTokenOwnersCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_decode(input).unwrap();
-            let native_token_owners =
-                try_state!(gas, context.arb_state(Some(&mut gas)).native_token_owners().all());
-
-            let output = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_encode_returns(
-                &native_token_owners,
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getNetworkFeeAccountCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getNetworkFeeAccountCall::abi_decode(input).unwrap();
-            let network_fee_account =
-                try_state!(gas, context.arb_state(Some(&mut gas)).network_fee_account().get());
-
-            let output =
-                ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(&network_fee_account);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getInfraFeeAccountCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getInfraFeeAccountCall::abi_decode(input).unwrap();
-            let infra_fee_account =
-                try_state!(gas, context.arb_state(Some(&mut gas)).infra_fee_account().get());
-            let output =
-                ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getBrotliCompressionLevelCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_decode(input).unwrap();
-            let compression_level =
-                try_state!(gas, context.arb_state(Some(&mut gas)).brotli_compression_level().get());
-            let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(
-                &compression_level,
-            );
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::getScheduledUpgradeCall::SELECTOR => {
-            let _ = ArbOwnerPublic::getScheduledUpgradeCall::abi_decode(input).unwrap();
-            let upgrade_version =
-                try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_version().get());
-            let upgrade_timestamp =
-                try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_timestamp().get());
-            let output = ArbOwnerPublic::getScheduledUpgradeCall::abi_encode_returns(
-                &ArbOwnerPublic::getScheduledUpgradeReturn {
-                    arbosVersion: upgrade_version,
-                    scheduledForTimestamp: upgrade_timestamp,
-                },
-            );
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall::SELECTOR => {
-            todo!()
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown selector")),
     }
 }

@@ -6,12 +6,11 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
-    precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success},
-    },
+    ArbitrumContextTr, generate_state_mut_table, macros::{interpreter_return, interpreter_revert}, precompile_impl, precompiles::{
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert
+    }
 };
+
 
 sol! {
 /// @title Lookup for basic info about accounts and contracts.
@@ -52,36 +51,30 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbInfoPrecompile {
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
+    ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
-        // decode selector
-        if input.len() < 4 {
-            return_revert!(gas, Bytes::from("Input too short"));
-        }
-
-        // decode selector
-        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        let selector = selector_or_revert!(gas, input);
 
         match selector {
             ArbInfo::getBalanceCall::SELECTOR => {
-                let call = ArbInfo::getBalanceCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, ArbInfo::getBalanceCall, input);
 
                 let balance = context.balance(call.account).unwrap_or_default().data;
 
                 let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
             ArbInfo::getCodeCall::SELECTOR => {
-                let call = ArbInfo::getCodeCall::abi_decode(input).unwrap();
+                let call = decode_call!(gas, ArbInfo::getCodeCall, input);
 
                 let code = context.load_account_code(call.account).unwrap_or_default().data;
 
                 let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
-            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+            _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
         }
     }
 }

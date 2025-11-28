@@ -8,10 +8,11 @@ use revm::{
 use crate::{
     ArbitrumContextTr,
     config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
-    generate_state_mut_table, precompile_impl,
+    generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
     precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success},
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert
     },
 };
 
@@ -198,116 +199,93 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
         call_value: U256,
         is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
-        arb_sys_run(
-            context,
-            input,
-            target_address,
-            caller_address,
-            call_value,
-            is_static,
-            gas_limit,
-        )
-    }
-}
-/// Run the precompile with the given context and input data.
-/// Run the arb_sys precompile with the given context and input data.
-fn arb_sys_run<CTX: ArbitrumContextTr>(
-    context: &mut CTX,
-    input: &[u8],
-    _target_address: &Address,
-    _caller_address: Address,
-    _call_value: U256,
-    _is_static: bool,
-    gas_limit: u64,
-) -> InterpreterResult {
-    let mut gas = Gas::new(gas_limit);
-    // decode selector
-    if input.len() < 4 {
-        return_revert!(gas, Bytes::from("Input too short"));
-    }
+    ) -> Option<InterpreterResult> {
+        let mut gas = Gas::new(gas_limit);
 
-    // decode selector
-    let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        let selector = selector_or_revert!(gas, input);
 
-    match selector {
-        ArbSys::arbBlockNumberCall::SELECTOR => {
-            let output = ArbSys::arbBlockNumberCall::abi_encode_returns(&context.block_number());
+        match selector {
+            ArbSys::arbBlockNumberCall::SELECTOR => {
+                let output =
+                    ArbSys::arbBlockNumberCall::abi_encode_returns(&context.block_number());
 
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::arbChainIDCall::SELECTOR => {
-            let output = ArbSys::arbChainIDCall::abi_encode_returns(&context.chain_id());
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::arbChainIDCall::SELECTOR => {
+                let output = ArbSys::arbChainIDCall::abi_encode_returns(&context.chain_id());
 
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::arbOSVersionCall::SELECTOR => {
-            let output = ArbSys::arbOSVersionCall::abi_encode_returns(&U256::from(
-                context.cfg().stylus().arbos_version() + 55,
-            ));
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::arbOSVersionCall::SELECTOR => {
+                let output = ArbSys::arbOSVersionCall::abi_encode_returns(&U256::from(
+                    context.cfg().stylus().arbos_version() + 55,
+                ));
 
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::arbBlockHashCall::SELECTOR => {
-            let call = ArbSys::arbBlockHashCall::abi_decode(input).unwrap();
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::arbBlockHashCall::SELECTOR => {
+                let call = decode_call!(gas, ArbSys::arbBlockHashCall, input);
 
-            let current_block = context.block_number().saturating_to::<u64>();
-            let requested_block: u64 = call.arbBlockNum.saturating_to();
+                let current_block = context.block_number().saturating_to::<u64>();
+                let requested_block: u64 = call.arbBlockNum.saturating_to();
 
-            if requested_block >= current_block || requested_block + 256 < current_block {
-                if context.cfg().stylus().arbos_version() >= 33 {
-                    return_revert!(
-                        gas,
-                        ArbSys::InvalidBlockNumber {
-                            requested: call.arbBlockNum,
-                            current: U256::from(current_block),
-                        }
-                        .abi_encode()
-                    );
+                if requested_block >= current_block || requested_block + 256 < current_block {
+                    if context.cfg().stylus().arbos_version() >= 33 {
+                        interpreter_revert!(
+                            gas,
+                            ArbSys::InvalidBlockNumber {
+                                requested: call.arbBlockNum,
+                                current: U256::from(current_block),
+                            }
+                            .abi_encode()
+                        );
+                    }
+
+                    interpreter_return!(gas, Bytes::from("invalid block number for ArbBlockHAsh"));
                 }
 
-                return_success!(gas, Bytes::from("invalid block number for ArbBlockHAsh"));
+                let hash = context.block_hash(requested_block).unwrap_or_default();
+
+                let output = ArbSys::arbBlockHashCall::abi_encode_returns(&hash);
+
+                interpreter_return!(gas, Bytes::from(output));
             }
+            ArbSys::getStorageGasAvailableCall::SELECTOR => {
+                let output = ArbSys::getStorageGasAvailableCall::abi_encode_returns(&U256::ZERO);
 
-            let hash = context.block_hash(requested_block).unwrap_or_default();
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::isTopLevelCallCall::SELECTOR => {
+                let output = ArbSys::isTopLevelCallCall::abi_encode_returns(&false);
 
-            let output = ArbSys::arbBlockHashCall::abi_encode_returns(&hash);
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::mapL1SenderContractAddressToL2AliasCall::SELECTOR => {
+                let call =
+                    decode_call!(gas, ArbSys::mapL1SenderContractAddressToL2AliasCall, input);
 
-            return_success!(gas, Bytes::from(output));
+                let aliased_address = remap_l1_address(&call.sender);
+
+                let output = ArbSys::mapL1SenderContractAddressToL2AliasCall::abi_encode_returns(
+                    &aliased_address,
+                );
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::wasMyCallersAddressAliasedCall::SELECTOR => {
+                let output = ArbSys::wasMyCallersAddressAliasedCall::abi_encode_returns(&false);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::myCallersAddressWithoutAliasingCall::SELECTOR => {
+                let address = Address::ZERO;
+                let output =
+                    ArbSys::myCallersAddressWithoutAliasingCall::abi_encode_returns(&address);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
         }
-        ArbSys::getStorageGasAvailableCall::SELECTOR => {
-            let output = ArbSys::getStorageGasAvailableCall::abi_encode_returns(&U256::ZERO);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::isTopLevelCallCall::SELECTOR => {
-            let output = ArbSys::isTopLevelCallCall::abi_encode_returns(&false);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::mapL1SenderContractAddressToL2AliasCall::SELECTOR => {
-            let call = ArbSys::mapL1SenderContractAddressToL2AliasCall::abi_decode(input).unwrap();
-
-            let aliased_address = remap_l1_address(&call.sender);
-
-            let output = ArbSys::mapL1SenderContractAddressToL2AliasCall::abi_encode_returns(
-                &aliased_address,
-            );
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::wasMyCallersAddressAliasedCall::SELECTOR => {
-            let output = ArbSys::wasMyCallersAddressAliasedCall::abi_encode_returns(&false);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        ArbSys::myCallersAddressWithoutAliasingCall::SELECTOR => {
-            let address = Address::ZERO;
-            let output = ArbSys::myCallersAddressWithoutAliasingCall::abi_encode_returns(&address);
-
-            return_success!(gas, Bytes::from(output));
-        }
-        _ => return_revert!(gas, Bytes::from("Unknown function selector")),
     }
 }
 

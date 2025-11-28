@@ -18,6 +18,7 @@ pub mod state;
 pub mod stylus_api;
 pub mod stylus_executor;
 pub mod transaction;
+pub mod macros;
 
 pub use evm::ArbitrumEvm;
 pub use result::ArbitrumHaltReason;

@@ -84,7 +84,7 @@ where
             .set(B256::left_padding_from(address.as_slice()))?;
 
         // update size
-        StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), elem_slot)
+        StorageBackedU256::new(&mut self.context, self.gas.as_deref_mut(), size_slot)
             .set(U256::from(new_num))?;
 
         // record by-address -> new_num (1-based)
@@ -150,24 +150,22 @@ where
     }
 
     pub fn decompress(&mut self, data: &[u8]) -> Result<(Address, u64), ArbosStateError> {
-        let slice = data;
-        let mut stream = alloy_rlp::Rlp::new(slice)
-            .map_err(|e| ArbosStateError::DecompressError(format!("Invalid RLP: {e:?}")))?;
-        stream
-            .get_next::<RLPItem>()
-            .map_err(|e| ArbosStateError::DecompressError(format!("RLP decode error: {e:?}")))
-            .and_then(|item| match item {
-                Some(RLPItem::Address(addr)) => Ok((addr, (data.len() - slice.len()) as u64)),
-                Some(RLPItem::Index(idx)) => {
-                    let addr = self.lookup_index(idx)?.ok_or_else(|| {
-                        ArbosStateError::DecompressError(
-                            "invalid index in compressed address".to_string(),
-                        )
-                    })?;
-                    Ok((addr, (data.len() - slice.len()) as u64))
-                }
-                None => Err(ArbosStateError::DecompressError("empty RLP item".to_string())),
-            })
+        let mut remaining = data;
+        let item = RLPItem::decode(&mut remaining)
+            .map_err(|e| ArbosStateError::DecompressError(format!("RLP decode error: {e:?}")))?;
+        let consumed = data.len().saturating_sub(remaining.len()) as u64;
+
+        match item {
+            RLPItem::Address(addr) => Ok((addr, consumed)),
+            RLPItem::Index(idx) => {
+                let addr = self.lookup_index(idx)?.ok_or_else(|| {
+                    ArbosStateError::DecompressError(
+                        "invalid index in compressed address".to_string(),
+                    )
+                })?;
+                Ok((addr, consumed))
+            }
+        }
     }
 }
 

@@ -6,11 +6,10 @@ use revm::{
 };
 
 use crate::{
-    ArbitrumContextTr, generate_state_mut_table, precompile_impl,
-    precompiles::{
-         ArbPrecompileLogic, ExtendedPrecompile,
-        macros::{StateMutability, return_revert, return_success},
-    },
+    ArbitrumContextTr, generate_state_mut_table, macros::{interpreter_return, interpreter_revert}, precompile_impl, precompiles::{
+        ArbPrecompileLogic, ExtendedPrecompile,
+            StateMutability, selector_or_revert, 
+    }
 };
 
 sol! {
@@ -66,15 +65,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbStatisticsPrecompile
         _call_value: U256,
         _is_static: bool,
         gas_limit: u64,
-    ) -> InterpreterResult {
+    ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
-        // decode selector
-        if input.len() < 4 {
-            return_revert!(gas, Bytes::from("Input too short"));
-        }
-
-        // decode selector
-        let selector: [u8; 4] = input[0..4].try_into().unwrap();
+        
+        let selector = selector_or_revert!(gas, input);
 
         match selector {
             ArbStatistics::getStatsCall::SELECTOR => {
@@ -89,9 +83,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbStatisticsPrecompile
                     )),
                 );
 
-                return_success!(gas, Bytes::from(output));
+                interpreter_return!(gas, Bytes::from(output));
             }
-            _ => return_revert!(gas, Bytes::from("Unknown function selector")),
+            _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
         }
     }
 }
