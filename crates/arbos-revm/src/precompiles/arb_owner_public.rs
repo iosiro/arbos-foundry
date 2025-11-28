@@ -104,9 +104,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
     fn inner(
         context: &mut CTX,
         input: &[u8],
-        target_address: &Address,
-        caller_address: Address,
-        call_value: U256,
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
         is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
@@ -117,8 +117,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             ArbOwnerPublic::isChainOwnerCall::SELECTOR => {
                 let call = decode_call!(gas, ArbOwnerPublic::isChainOwnerCall, input);
 
-                let is_owner =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).is_chain_owner(call.addr));
+                let is_owner = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).is_chain_owner(call.addr)
+                );
 
                 let output = ArbOwnerPublic::isChainOwnerCall::abi_encode_returns(&is_owner);
 
@@ -129,7 +131,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
 
                 let is_owner = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).is_native_token_owner(call.addr)
+                    context.arb_state(Some(&mut gas), is_static).is_native_token_owner(call.addr)
                 );
 
                 let output = ArbOwnerPublic::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
@@ -138,8 +140,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             }
             ArbOwnerPublic::getAllChainOwnersCall::SELECTOR => {
                 let _ = decode_call!(gas, ArbOwnerPublic::getAllChainOwnersCall, input);
-                let chains_owners =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).chain_owners().all());
+                let chains_owners = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).chain_owners().all()
+                );
 
                 let output =
                     ArbOwnerPublic::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
@@ -148,8 +152,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             }
             ArbOwnerPublic::getAllNativeTokenOwnersCall::SELECTOR => {
                 let _ = decode_call!(gas, ArbOwnerPublic::getAllNativeTokenOwnersCall, input);
-                let native_token_owners =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).native_token_owners().all());
+                let native_token_owners = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).native_token_owners().all()
+                );
 
                 let output = ArbOwnerPublic::getAllNativeTokenOwnersCall::abi_encode_returns(
                     &native_token_owners,
@@ -159,8 +165,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             }
             ArbOwnerPublic::getNetworkFeeAccountCall::SELECTOR => {
                 let _ = decode_call!(gas, ArbOwnerPublic::getNetworkFeeAccountCall, input);
-                let network_fee_account =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).network_fee_account().get());
+                let network_fee_account = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).network_fee_account().get()
+                );
 
                 let output = ArbOwnerPublic::getNetworkFeeAccountCall::abi_encode_returns(
                     &network_fee_account,
@@ -170,8 +178,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             }
             ArbOwnerPublic::getInfraFeeAccountCall::SELECTOR => {
                 let _ = decode_call!(gas, ArbOwnerPublic::getInfraFeeAccountCall, input);
-                let infra_fee_account =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).infra_fee_account().get());
+                let infra_fee_account = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).infra_fee_account().get()
+                );
                 let output =
                     ArbOwnerPublic::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
                 interpreter_return!(gas, Bytes::from(output));
@@ -180,7 +190,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
                 let _ = decode_call!(gas, ArbOwnerPublic::getBrotliCompressionLevelCall, input);
                 let compression_level = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).brotli_compression_level().get()
+                    context.arb_state(Some(&mut gas), is_static).brotli_compression_level().get()
                 );
                 let output = ArbOwnerPublic::getBrotliCompressionLevelCall::abi_encode_returns(
                     &compression_level,
@@ -189,10 +199,14 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
             }
             ArbOwnerPublic::getScheduledUpgradeCall::SELECTOR => {
                 let _ = decode_call!(gas, ArbOwnerPublic::getScheduledUpgradeCall, input);
-                let upgrade_version =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_version().get());
-                let upgrade_timestamp =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).upgrade_timestamp().get());
+                let upgrade_version = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).upgrade_version().get()
+                );
+                let upgrade_timestamp = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).upgrade_timestamp().get()
+                );
                 let output = ArbOwnerPublic::getScheduledUpgradeCall::abi_encode_returns(
                     &ArbOwnerPublic::getScheduledUpgradeReturn {
                         arbosVersion: upgrade_version,
@@ -205,7 +219,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
                 let _ =
                     decode_call!(gas, ArbOwnerPublic::isCalldataPriceIncreaseEnabledCall, input);
                 let enabled = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     let value = try_state!(gas, arb_state.l1_pricing().gas_floor_per_token().get());
                     value != 0
                 };

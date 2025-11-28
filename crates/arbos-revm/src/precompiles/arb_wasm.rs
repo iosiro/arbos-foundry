@@ -2,7 +2,7 @@
 
 use crate::{
     ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    config::ArbitrumConfigTr,
     constants::{COST_SCALAR_PERCENT, MIN_CACHED_GAS_UNITS, MIN_INIT_GAS_UNITS},
     generate_state_mut_table,
     local_context::ArbitrumLocalContextTr,
@@ -215,16 +215,20 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 try_record_cost!(gas, STYLUS_ACTIVATION_FIXED_COST);
 
-                let code_hash = try_state!(gas, context.arb_state(None).code_hash(call.program));
+                let code_hash =
+                    try_state!(gas, context.arb_state(None, is_static).code_hash(call.program));
 
                 let cached = if let Some(program_info) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .programs()
+                        .program_info(&code_hash)
                 ) {
                     let expired = program_info.age > params.expiry_days as u32 * 24 * 60 * 60;
 
@@ -252,9 +256,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 };
 
                 let compile_config =
-                    CompileConfig::version(params.version, context.cfg().stylus().debug_mode());
+                    CompileConfig::version(params.version, context.cfg().debug_mode());
 
-                let debug = context.cfg().stylus().debug_mode();
+                let debug = context.cfg().debug_mode();
 
                 let open_pages = context.local().stylus_pages_open();
 
@@ -271,7 +275,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                             Some(&mut gas),
                             &bytecode,
                             code_hash,
-                            context.cfg().stylus().arbos_version(),
+                            context.cfg().arbos_version(),
                             params.version,
                             params.page_limit.saturating_sub(open_pages),
                             debug,
@@ -287,7 +291,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 if cached {
                     try_or_halt!(
                         gas,
-                        context.arb_state(Some(&mut gas)).programs().module_hash(&code_hash).get()
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .module_hash(&code_hash)
+                            .get()
                     );
                 }
 
@@ -295,7 +303,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 try_or_halt!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .module_hash(&code_hash)
                         .set(module_hash)
@@ -307,7 +315,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 let data_free = try_or_halt!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .data_pricer()
                         .update(stylus_data.asm_estimate, timestamp.saturating_to(),)
@@ -322,8 +330,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                     );
                 }
 
-                let fee_recipient =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).network_fee_account().get());
+                let fee_recipient = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).network_fee_account().get()
+                );
 
                 if let Some(error) = context
                     .journal_mut()
@@ -365,7 +375,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .save_program_info(&code_hash, &program_info)
                 );
@@ -398,7 +408,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::stylusVersionCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::stylusVersionCall::abi_encode_returns(&params.version);
@@ -410,13 +420,13 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &call.codehash)
                 );
@@ -431,13 +441,13 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let mut program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &call.codehash)
                 );
@@ -464,7 +474,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 let timestamp = context.block().timestamp();
                 let data_fee = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().data_pricer().update(
+                    context.arb_state(Some(&mut gas), is_static).programs().data_pricer().update(
                         program_info.asm_estimated_kb.saturating_mul(1024),
                         timestamp.saturating_to(),
                     )
@@ -481,8 +491,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                     );
                 }
 
-                let fee_recipient =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).network_fee_account().get());
+                let fee_recipient = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).network_fee_account().get()
+                );
 
                 if let Some(error) = context
                     .journal_mut()
@@ -514,7 +526,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                 try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .save_program_info(&call.codehash, &program_info)
                 );
@@ -540,13 +552,13 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &call.codehash)
                 );
@@ -562,16 +574,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
-                let code_hash =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(call.program));
+                let code_hash = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).code_hash(call.program)
+                );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &code_hash)
                 );
@@ -586,16 +600,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
-                let code_hash =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(call.program));
+                let code_hash = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).code_hash(call.program)
+                );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &code_hash)
                 );
@@ -622,16 +638,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
-                let code_hash =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(call.program));
+                let code_hash = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).code_hash(call.program)
+                );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &code_hash)
                 );
@@ -647,16 +665,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
-                let code_hash =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(call.program));
+                let code_hash = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).code_hash(call.program)
+                );
 
                 let program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &code_hash)
                 );
@@ -669,7 +689,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::inkPriceCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::inkPriceCall::abi_encode_returns(&params.ink_price);
@@ -679,7 +699,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::maxStackDepthCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output =
@@ -690,7 +710,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::freePagesCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::freePagesCall::abi_encode_returns(&params.free_pages);
@@ -700,7 +720,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::pageGasCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::pageGasCall::abi_encode_returns(&params.page_gas);
@@ -710,7 +730,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::pageRampCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::pageRampCall::abi_encode_returns(&params.page_ramp);
@@ -720,7 +740,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::pageLimitCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::pageLimitCall::abi_encode_returns(&params.page_limit);
@@ -730,8 +750,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::minInitGasCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
+
+                if context.cfg().arbos_version() < ARBOS_VERSION_STYLUS_CHARGING_FIXES as u16 {
+                    interpreter_revert!(gas);
+                }
 
                 let output =
                     IArbWasm::minInitGasCall::abi_encode_returns(&IArbWasm::minInitGasReturn {
@@ -739,18 +763,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
                         cached: params.min_cached_init_gas as u64 * MIN_CACHED_GAS_UNITS,
                     });
 
-                if context.cfg().stylus().arbos_version()
-                    < ARBOS_VERSION_STYLUS_CHARGING_FIXES as u16
-                {
-                    interpreter_revert!(gas);
-                }
-
                 interpreter_return!(gas, Bytes::from(output));
             }
             IArbWasm::initCostScalarCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::initCostScalarCall::abi_encode_returns(
@@ -762,7 +780,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::expiryDaysCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output = IArbWasm::expiryDaysCall::abi_encode_returns(&params.expiry_days);
@@ -772,7 +790,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::keepaliveDaysCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output =
@@ -783,7 +801,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmPrecompile {
             IArbWasm::blockCacheSizeCall::SELECTOR => {
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let output =
@@ -819,20 +837,15 @@ mod tests {
     fn setup() -> ArbitrumContext<EmptyDBTyped<Infallible>> {
         let db = EmptyDBTyped::<Infallible>::default();
 
-        let context = ArbitrumContext {
-            journaled_state: {
-                let journal = Journal::new(db);
-                journal
-            },
+        ArbitrumContext {
+            journaled_state: Journal::new(db),
             block: BlockEnv::default(),
             cfg: ArbitrumConfig::default(),
             tx: TxEnv::default(),
             chain: (),
             local: ArbitrumLocalContext::default(),
             error: Ok(()),
-        };
-
-        context
+        }
     }
 
     fn deploy_program(

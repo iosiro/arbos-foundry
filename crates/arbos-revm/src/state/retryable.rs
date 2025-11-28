@@ -17,6 +17,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut revm::interpreter::Gas>,
+    pub is_static: bool,
     slot: B256,
 }
 
@@ -24,19 +25,20 @@ impl<'a, CTX: ArbitrumContextTr> RetryableState<'a, CTX> {
     pub fn new(
         context: &'a mut CTX,
         gas: Option<&'a mut revm::interpreter::Gas>,
+        is_static: bool,
         subkey: B256,
     ) -> Self {
-        Self { context, gas, slot: subkey }
+        Self { context, gas, is_static, slot: subkey }
     }
 
     pub fn timeout_queue(&mut self) -> StorageBackedQueue<'_, CTX> {
         let slot = substorage(&self.slot, ARBOS_STATE_RETRYABLE_TIMEOUT_QUEUE_KEY);
-        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn retryable(&mut self, id: B256) -> Retryable<'_, CTX> {
         let slot = substorage(&self.slot, id.as_slice());
-        Retryable::new(self.context, self.gas.as_deref_mut(), slot)
+        Retryable::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 }
 
@@ -46,6 +48,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut revm::interpreter::Gas>,
+    is_static: bool,
     slot: B256,
 }
 
@@ -53,9 +56,10 @@ impl<'a, CTX: ArbitrumContextTr> Retryable<'a, CTX> {
     pub fn new(
         context: &'a mut CTX,
         gas: Option<&'a mut revm::interpreter::Gas>,
+        is_static: bool,
         subkey: B256,
     ) -> Self {
-        Self { context, gas, slot: subkey }
+        Self { context, gas, is_static, slot: subkey }
     }
 
     #[inline]
@@ -65,42 +69,42 @@ impl<'a, CTX: ArbitrumContextTr> Retryable<'a, CTX> {
 
     pub fn num_tries(&mut self) -> StorageBackedU64<'_, CTX> {
         let slot = self.slot(0);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn from(&mut self) -> StorageBackedAddress<'_, CTX> {
         let slot = self.slot(1);
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn to(&mut self) -> StorageBackedAddress<'_, CTX> {
         let slot = self.slot(2);
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn callvalue(&mut self) -> StorageBackedU256<'_, CTX> {
         let slot = self.slot(3);
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn beneficiary(&mut self) -> StorageBackedAddress<'_, CTX> {
         let slot = self.slot(4);
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn calldata(&mut self) -> StorageBackedBytes<'_, CTX> {
         let slot = substorage(&self.slot, ARBOS_STATE_RETRYABLE_CALLDATA_KEY);
-        StorageBackedBytes::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedBytes::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn timeout(&mut self) -> StorageBackedU64<'_, CTX> {
         let slot = self.slot(5);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn timeout_windows_left(&mut self) -> StorageBackedU64<'_, CTX> {
         let slot = self.slot(6);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn clear(&mut self) -> Result<(), ArbosStateError> {

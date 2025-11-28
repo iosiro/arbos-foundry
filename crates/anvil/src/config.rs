@@ -34,7 +34,7 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
     provider::{ProviderBuilder, RetryProvider},
 };
-use foundry_config::Config;
+use foundry_config::{Config, stylus::StylusConfig};
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
@@ -198,6 +198,8 @@ pub struct NodeConfig {
     pub silent: bool,
     /// The path where states are cached.
     pub cache_path: Option<PathBuf>,
+    /// Stylus configuration
+    pub stylus_config: Option<StylusConfig>,
 }
 
 impl NodeConfig {
@@ -491,6 +493,7 @@ impl Default for NodeConfig {
             networks: Default::default(),
             silent: false,
             cache_path: None,
+            stylus_config: None,
         }
     }
 }
@@ -1027,6 +1030,12 @@ impl NodeConfig {
     #[must_use]
     pub fn with_cache_path(mut self, cache_path: Option<PathBuf>) -> Self {
         self.cache_path = cache_path;
+        self
+    }
+
+    #[must_use]
+    pub fn with_stylus_config(mut self, stylus_config: Option<StylusConfig>) -> Self {
+        self.stylus_config = stylus_config;
         self
     }
 

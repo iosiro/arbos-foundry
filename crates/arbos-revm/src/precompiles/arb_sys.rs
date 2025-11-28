@@ -7,7 +7,7 @@ use revm::{
 
 use crate::{
     ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    config::ArbitrumConfigTr,
     generate_state_mut_table,
     macros::{interpreter_return, interpreter_revert},
     precompile_impl,
@@ -194,10 +194,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
     fn inner(
         context: &mut CTX,
         input: &[u8],
-        target_address: &Address,
-        caller_address: Address,
-        call_value: U256,
-        is_static: bool,
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
@@ -218,7 +218,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
             }
             ArbSys::arbOSVersionCall::SELECTOR => {
                 let output = ArbSys::arbOSVersionCall::abi_encode_returns(&U256::from(
-                    context.cfg().stylus().arbos_version() + 55,
+                    context.cfg().arbos_version() + 55,
                 ));
 
                 interpreter_return!(gas, Bytes::from(output));
@@ -230,7 +230,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
                 let requested_block: u64 = call.arbBlockNum.saturating_to();
 
                 if requested_block >= current_block || requested_block + 256 < current_block {
-                    if context.cfg().stylus().arbos_version() >= 33 {
+                    if context.cfg().arbos_version() >= 33 {
                         interpreter_revert!(
                             gas,
                             ArbSys::InvalidBlockNumber {

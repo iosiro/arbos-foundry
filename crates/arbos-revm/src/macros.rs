@@ -43,7 +43,7 @@ pub(crate) fn record_cost_return(gas: &mut Gas, cost: u64) -> Option<Interpreter
 #[macro_export]
 macro_rules! try_record_cost {
     ($gas:expr, $cost:expr) => {{
-        if let Some(result) = crate::macros::record_cost_return(&mut $gas, $cost) {
+        if let Some(result) = $crate::macros::record_cost_return(&mut $gas, $cost) {
             return Some(result);
         }
     }};
@@ -53,10 +53,13 @@ pub(crate) use try_record_cost;
 
 macro_rules! interpreter_return {
     ($gas:expr, $output:expr) => {
-        return Some(crate::macros::interpreter_result_return_with_output(&mut $gas, $output.into()))
+        return Some($crate::macros::interpreter_result_return_with_output(
+            &mut $gas,
+            $output.into(),
+        ))
     };
     ($gas:expr) => {
-        return Some(crate::macros::interpreter_result_return(&mut $gas))
+        return Some($crate::macros::interpreter_result_return(&mut $gas))
     };
 }
 pub(crate) use interpreter_return;
@@ -66,7 +69,7 @@ macro_rules! try_or_halt {
         match $expr {
             Ok(value) => value,
             Err(_) => {
-                return Some(crate::macros::interpreter_result_revert_out_of_gas(&mut $gas));
+                return Some($crate::macros::interpreter_result_revert_out_of_gas(&mut $gas));
             }
         }
     }};
@@ -76,10 +79,13 @@ pub(crate) use try_or_halt;
 
 macro_rules! interpreter_revert {
     ($gas:expr, $output:expr) => {
-        return Some(crate::macros::interpreter_result_revert_with_output(&mut $gas, $output.into()))
+        return Some($crate::macros::interpreter_result_revert_with_output(
+            &mut $gas,
+            $output.into(),
+        ))
     };
     ($gas:expr) => {
-        return Some(crate::macros::interpreter_result_revert(&mut $gas))
+        return Some($crate::macros::interpreter_result_revert(&mut $gas))
     };
 }
 
@@ -92,9 +98,9 @@ macro_rules! emit_event {
             $log.data.data.len() as u64,
         );
         if let Some(log_cost) = log_cost {
-            crate::macros::try_record_cost!(&mut $gas, log_cost)
+            $crate::macros::try_record_cost!(&mut $gas, log_cost)
         } else {
-            return Some(crate::macros::interpreter_result_revert_out_of_gas(&mut $gas));
+            return Some($crate::macros::interpreter_result_revert_out_of_gas(&mut $gas));
         }
 
         $context.journal_mut().log($log);

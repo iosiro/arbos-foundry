@@ -91,9 +91,11 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::state::ArbosStateParams;
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use foundry_config::apply_stylus_config;
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
@@ -1257,11 +1259,11 @@ impl Backend {
             cheats: self.cheats().clone(),
         };
 
-        executor.apply_arbitrum_state_overrides(|state| {
-            println!(
-                "Applied Arbitrum state overrides for pending block at parent hash {:?}",
-                storage.best_hash
-            );
+        executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+            let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+            if let Some(stylus_config) = stylus_config {
+                apply_stylus_config(params, &stylus_config);
+            }
         });
 
         // create a new pending block
@@ -1353,11 +1355,11 @@ impl Backend {
                     cheats: self.cheats().clone(),
                 };
 
-                executor.apply_arbitrum_state_overrides(|state| {
-                    println!(
-                        "Applied Arbitrum state overrides for mined block at parent hash {:?}",
-                        best_hash
-                    );
+                executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+                    let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+                    if let Some(stylus_config) = stylus_config {
+                        apply_stylus_config(params, &stylus_config);
+                    }
                 });
 
                 let executed_tx = executor.execute();
@@ -2712,8 +2714,11 @@ impl Backend {
                 cheats: self.cheats().clone(),
             };
 
-            executor.apply_arbitrum_state_overrides(|state| {
-                println!("Applying Arbitrum state overrides for tracing");
+            executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+                let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+                if let Some(stylus_config) = stylus_config {
+                    apply_stylus_config(params, &stylus_config);
+                }
             });
 
             let _ = executor.execute();

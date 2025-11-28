@@ -16,7 +16,7 @@ use foundry_compilers::{
     artifacts::{Contract, Libraries},
     compilers::Compiler,
 };
-use foundry_config::{Config, InlineConfig};
+use foundry_config::{Config, InlineConfig, apply_stylus_config};
 use foundry_evm::{
     Env,
     backend::Backend,
@@ -375,8 +375,10 @@ impl TestRunnerConfig {
             .legacy_assertions(self.config.legacy_assertions)
             .build(self.env.clone(), db);
 
-        executor.apply_arbitrum_state_overrides(|state| {
-            println!("Initialized arbitrum state: {:?}", state);
+        executor.apply_arbitrum_state_overrides(|params| {
+            if let Some(stylus_config) = self.evm_opts.stylus_config.clone() {
+                apply_stylus_config(params, &stylus_config);
+            }
         });
 
         executor

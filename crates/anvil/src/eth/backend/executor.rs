@@ -276,12 +276,9 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
             error: Ok(()),
         };
 
-        let mut state = context.arb_state(None);
+        let mut state = context.arb_state(None, true);
 
-        let mut params = match state.get() {
-            Ok(params) => params,
-            Err(_) => arbos_revm::state::ArbosStateParams::default(),
-        };
+        let mut params: arbos_revm::state::ArbosStateParams = state.get().unwrap_or_default();
 
         f(&mut params);
 

@@ -98,7 +98,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
         target_address: &Address,
         caller_address: Address,
         _call_value: U256,
-        _is_static: bool,
+        is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
@@ -112,7 +112,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let is_manager = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).cache_managers().contains(manager)
+                    context.arb_state(Some(&mut gas), is_static).cache_managers().contains(manager)
                 );
 
                 let output = IArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
@@ -122,8 +122,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
             IArbWasmCache::allCacheManagersCall::SELECTOR => {
                 let _call = decode_call!(gas, IArbWasmCache::allCacheManagersCall, input);
 
-                let managers =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).cache_managers().all());
+                let managers = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).cache_managers().all()
+                );
 
                 let output = IArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
 
@@ -139,12 +141,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let mut program_info = if let Some(program_info) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
+                    context.arb_state(Some(&mut gas), is_static).programs().program_info(&codehash)
                 ) {
                     program_info
                 } else {
@@ -172,7 +174,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .save_program_info(&codehash, &program_info)
                 );
@@ -189,15 +191,16 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let params = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
-                let code_hash = try_state!(gas, context.arb_state(Some(&mut gas)).code_hash(addr));
+                let code_hash =
+                    try_state!(gas, context.arb_state(Some(&mut gas), is_static).code_hash(addr));
 
                 let mut program_info = try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .get_active_program(&params, &code_hash)
                 );
@@ -230,7 +233,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().module_hash(&code_hash).get()
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .programs()
+                        .module_hash(&code_hash)
+                        .get()
                 );
 
                 program_info.cached = true;
@@ -238,7 +245,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .save_program_info(&code_hash, &program_info)
                 );
@@ -255,12 +262,15 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let _ = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().stylus_params().get()
+                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
                 );
 
                 let mut program_info = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&code_hash)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .programs()
+                        .program_info(&code_hash)
                 )
                 .unwrap_or_default();
 
@@ -292,7 +302,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().module_hash(&code_hash).get()
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .programs()
+                        .module_hash(&code_hash)
+                        .get()
                 );
 
                 program_info.cached = false;
@@ -300,7 +314,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
                 try_state!(
                     gas,
                     context
-                        .arb_state(Some(&mut gas))
+                        .arb_state(Some(&mut gas), is_static)
                         .programs()
                         .save_program_info(&code_hash, &program_info)
                 );
@@ -313,7 +327,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let is_cached = if let Some(program_info) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).programs().program_info(&codehash)
+                    context.arb_state(Some(&mut gas), true).programs().program_info(&codehash)
                 ) {
                     program_info.cached
                 } else {
@@ -334,7 +348,7 @@ fn has_access<CTX: ArbitrumContextTr>(
     caller: Address,
     gas: &mut Gas,
 ) -> Result<bool, ArbosStateError> {
-    let mut arb_state = context.arb_state(Some(gas));
+    let mut arb_state = context.arb_state(Some(gas), true);
     if arb_state.cache_managers().contains(caller)? {
         return Ok(true);
     }
@@ -364,20 +378,15 @@ mod tests {
     fn setup() -> ArbitrumContext<EmptyDBTyped<Infallible>> {
         let db = EmptyDBTyped::<Infallible>::default();
 
-        let context = ArbitrumContext {
-            journaled_state: {
-                let journal = Journal::new(db);
-                journal
-            },
+        ArbitrumContext {
+            journaled_state: Journal::new(db),
             block: BlockEnv::default(),
             cfg: ArbitrumConfig::default(),
             tx: TxEnv::default(),
             chain: (),
             local: ArbitrumLocalContext::default(),
             error: Ok(()),
-        };
-
-        context
+        }
     }
 
     #[test]
@@ -409,6 +418,6 @@ mod tests {
         let output = result.output;
         let decoded = crate::precompiles::arb_wasm_cache::IArbWasmCache::codehashIsCachedCall::abi_decode_returns(&output)
             .expect("decode precompile output");
-        assert_eq!(decoded, false);
+        assert!(!decoded);
     }
 }

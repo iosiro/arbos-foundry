@@ -1,10 +1,8 @@
 use std::{cmp::min, mem, sync::Arc};
 
-use arbutil::{
-    evm::{
-        api::{EvmApiMethod, Gas as ArbGas, VecReader},
-        req::RequestHandler,
-    },
+use arbutil::evm::{
+    api::{EvmApiMethod, Gas as ArbGas, VecReader},
+    req::RequestHandler,
 };
 use revm::{
     Database,
@@ -24,7 +22,10 @@ use revm::{
 use tracing::{debug, trace, warn};
 
 use crate::{
-    ArbitrumContextTr, ArbitrumEvm, Utf8OrHex, buffer, local_context::ArbitrumLocalContextTr, state::{ArbState, ArbStateGetter}, stylus_executor::stylus_call_cost
+    ArbitrumContextTr, ArbitrumEvm, Utf8OrHex, buffer,
+    local_context::ArbitrumLocalContextTr,
+    state::{ArbState, ArbStateGetter},
+    stylus_executor::stylus_call_cost,
 };
 
 pub(crate) type HostCallFunc = dyn Fn(
@@ -592,7 +593,7 @@ where
                 let ever = context.local().stylus_pages_ever();
 
                 let stylus_params =
-                    context.arb_state(None).programs().stylus_params().get().unwrap();
+                    context.arb_state(None, true).programs().stylus_params().get().unwrap();
 
                 let free_pages = stylus_params.free_pages;
                 let page_gas = stylus_params.page_gas;
@@ -622,10 +623,10 @@ enum Status {
 impl Status {
     fn as_str(&self) -> &'static str {
         match self {
-            Status::Success => "success",
-            Status::Failure => "failure",
-            Status::OutOfGas => "out_of_gas",
-            Status::WriteProtection => "write_protection",
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::OutOfGas => "out_of_gas",
+            Self::WriteProtection => "write_protection",
         }
     }
 }

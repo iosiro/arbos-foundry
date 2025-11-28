@@ -79,9 +79,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbDebugPrecompile {
     fn inner(
         context: &mut CTX,
         input: &[u8],
-        target_address: &Address,
+        _target_address: &Address,
         caller_address: Address,
-        call_value: U256,
+        _call_value: U256,
         is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
@@ -94,7 +94,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbDebugPrecompile {
 
                 try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).chain_owners().add(caller_address)
+                    context.arb_state(Some(&mut gas), is_static).chain_owners().add(caller_address)
                 );
 
                 interpreter_return!(gas);

@@ -142,7 +142,11 @@ impl Executor {
             },
         );
 
-        Self { backend, env, inspector, gas_limit, legacy_assertions }
+        let mut res = Self { backend, env, inspector, gas_limit, legacy_assertions };
+
+        res.apply_arbitrum_state_overrides(|_| {});
+
+        res
     }
 
     fn clone_with_backend(&self, backend: Backend) -> Self {
@@ -342,12 +346,9 @@ impl Executor {
             error: Ok(()),
         };
 
-        let mut state = context.arb_state(None);
+        let mut state = context.arb_state(None, false);
 
-        let mut params = match state.get() {
-            Ok(params) => params,
-            Err(_) => ArbosStateParams::default(),
-        };
+        let mut params: ArbosStateParams = state.get().unwrap_or_default();
 
         f(&mut params);
 

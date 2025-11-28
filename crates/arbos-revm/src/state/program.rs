@@ -6,7 +6,6 @@ use revm::{
 
 use crate::{
     ArbitrumContextTr, buffer,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
     constants::{
         ARBOS_GENESIS_TIMESTAMP, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
         ARBOS_PROGRAMS_STATE_DATA_PRICER_KEY, ARBOS_PROGRAMS_STATE_MODULE_HASHES_KEY,
@@ -73,6 +72,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
     subkey: B256,
 }
 
@@ -80,8 +80,13 @@ impl<'a, CTX> StorageBackedStylusParams<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, subkey: B256) -> Self {
-        Self { context, gas, subkey }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        subkey: B256,
+    ) -> Self {
+        Self { context, gas, is_static, subkey }
     }
 
     pub fn set(&mut self, params: &StylusParams) -> Result<(), ArbosStateError> {
@@ -104,19 +109,20 @@ where
         data[26..30].copy_from_slice(&params.max_wasm_size.to_be_bytes());
 
         let value = U256::from_be_bytes(data);
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(B256::from(value))
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+            .set(B256::from(value))
     }
 
     pub fn get(&mut self) -> Result<StylusParams, ArbosStateError> {
         let slot = map_address(&self.subkey, &B256::ZERO);
 
-        if let Some(gas) = self.gas.as_deref_mut() {
-            if !gas.record_cost(WARM_SLOAD_GAS.0) {
-                return Err(ArbosStateError::OutOfGas);
-            }
+        if let Some(gas) = self.gas.as_deref_mut()
+            && !gas.record_cost(WARM_SLOAD_GAS.0)
+        {
+            return Err(ArbosStateError::OutOfGas);
         }
 
-        let data = StorageBackedB256::new(self.context, None, slot).get()?;
+        let data = StorageBackedB256::new(self.context, None, true, slot).get()?;
 
         let mut params = StylusParams::default();
 
@@ -177,6 +183,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
     subkey: B256,
 }
 
@@ -184,14 +191,19 @@ impl<'a, CTX> DataPricer<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, subkey: B256) -> Self {
-        Self { context, gas, subkey }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        subkey: B256,
+    ) -> Self {
+        Self { context, gas, is_static, subkey }
     }
 
     fn demand(&mut self) -> StorageBackedU32<'_, CTX> {
         let slot =
             map_address(&self.subkey, &B256::from(U256::from(DATA_PRICER_DEMAND_OFFSET as u64)));
-        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn bytes_per_second(&mut self) -> StorageBackedU32<'_, CTX> {
@@ -199,7 +211,7 @@ where
             &self.subkey,
             &B256::from(U256::from(DATA_PRICER_BYTES_PER_SECOND_OFFSET as u64)),
         );
-        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn last_update_time(&mut self) -> StorageBackedU64<'_, CTX> {
@@ -207,19 +219,19 @@ where
             &self.subkey,
             &B256::from(U256::from(DATA_PRICER_LAST_UPDATE_TIME_OFFSET as u64)),
         );
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn min_price(&mut self) -> StorageBackedU32<'_, CTX> {
         let slot =
             map_address(&self.subkey, &B256::from(U256::from(DATA_PRICER_MIN_PRICE_OFFSET as u64)));
-        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn inertia(&mut self) -> StorageBackedU32<'_, CTX> {
         let slot =
             map_address(&self.subkey, &B256::from(U256::from(DATA_PRICER_INERTIA_OFFSET as u64)));
-        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU32::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn update(&mut self, temp_bytes: u32, time: u64) -> Result<u64, ArbosStateError> {
@@ -284,6 +296,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
     subkey: B256,
 }
 
@@ -291,8 +304,13 @@ impl<'a, CTX> Programs<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, subkey: B256) -> Self {
-        Self { context, gas, subkey }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        subkey: B256,
+    ) -> Self {
+        Self { context, gas, is_static, subkey }
     }
 
     fn params_subkey(&self) -> B256 {
@@ -313,7 +331,7 @@ where
 
     pub fn module_hash(&mut self, code_hash: &B256) -> StorageBackedB256<'_, CTX> {
         let slot = map_address(&self.module_hashes_subkey(), code_hash);
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn program_info(
@@ -322,7 +340,9 @@ where
     ) -> Result<Option<ProgramInfo>, ArbosStateError> {
         let slot = map_address(&self.program_data_subkey(), code_hash);
 
-        let data = StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).get()?;
+        let data =
+            StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+                .get()?;
 
         if !data.is_zero() && data.len() >= 15 {
             let version = u16::from_be_bytes([data[0], data[1]]);
@@ -369,7 +389,8 @@ where
         data[14] = if info.cached { 1 } else { 0 };
 
         let value = U256::from_be_bytes(data);
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(B256::from(value))
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+            .set(B256::from(value))
     }
 
     pub fn get_active_program(
@@ -405,19 +426,24 @@ where
     // stylus params
     pub fn stylus_params(&mut self) -> StorageBackedStylusParams<'_, CTX> {
         let sub_key = self.params_subkey();
-        StorageBackedStylusParams::new(self.context, self.gas.as_deref_mut(), sub_key)
+        StorageBackedStylusParams::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            sub_key,
+        )
     }
 
     // data pricer
     pub fn data_pricer(&mut self) -> DataPricer<'_, CTX> {
         let sub_key = self.data_pricer_subkey();
-        DataPricer::new(self.context, self.gas.as_deref_mut(), sub_key)
+        DataPricer::new(self.context, self.gas.as_deref_mut(), self.is_static, sub_key)
     }
 
     // cache managers address set
     pub fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
         let sub_key = self.cache_managers_subkey();
-        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), sub_key)
+        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), self.is_static, sub_key)
     }
 
     pub fn initialize(

@@ -10,7 +10,7 @@ use revm::{
 
 use crate::{
     ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    config::ArbitrumConfigTr,
     generate_state_mut_table,
     macros::{emit_event, interpreter_return, interpreter_revert},
     precompile_impl,
@@ -161,7 +161,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
         input: &[u8],
         target_address: &Address,
         caller_address: Address,
-        call_value: U256,
+        _call_value: U256,
         is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
@@ -174,7 +174,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 let call = decode_call!(gas, ArbRetryableTx::cancelCall, input);
 
                 let beneficiary = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.retryable(call.ticketId).beneficiary().get())
                 };
 
@@ -185,8 +185,8 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     );
                 }
 
-                // move any funds in escrow to the beneficiary (should be none if the retry succeeded --
-                // see EndTxHook)
+                // move any funds in escrow to the beneficiary (should be none if the retry
+                // succeeded -- see EndTxHook)
                 let escrow_address = { retryable_escrow_address(call.ticketId) };
 
                 let escrow_balance = context.balance(escrow_address).unwrap_or_default().data;
@@ -204,7 +204,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     });
                 }
 
-                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                 let mut retryable = arb_state.retryable(call.ticketId);
                 try_state!(gas, retryable.clear());
 
@@ -218,12 +218,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 let call = decode_call!(gas, ArbRetryableTx::getBeneficiaryCall, input);
 
                 let beneficiary = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.retryable(call.ticketId).beneficiary().get())
                 };
 
                 if beneficiary == Address::ZERO {
-                    if context.cfg().stylus().arbos_version() >= 3 {
+                    if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                         interpreter_revert!(gas, Bytes::from(output));
@@ -253,12 +253,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 let call = decode_call!(gas, ArbRetryableTx::getTimeoutCall, input);
 
                 let timeout = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.retryable(call.ticketId).timeout().get())
                 };
 
                 if timeout == 0 {
-                    if context.cfg().stylus().arbos_version() >= 3 {
+                    if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                         interpreter_revert!(gas, Bytes::from(output));
@@ -276,7 +276,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 let call = decode_call!(gas, ArbRetryableTx::keepaliveCall, input);
 
                 let (timeout, windows_left, calldata_len) = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     let mut retryable = arb_state.retryable(call.ticketId);
 
                     let timeout = try_state!(gas, retryable.timeout().get());
@@ -287,7 +287,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 };
 
                 if timeout == 0 {
-                    if context.cfg().stylus().arbos_version() >= 3 {
+                    if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                         interpreter_revert!(gas, Bytes::from(output));
@@ -312,7 +312,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     interpreter_revert!(gas, Bytes::from("timeout too far into the future"));
                 }
 
-                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                 try_state!(
                     gas,
                     arb_state.timeout_queue().push(U256::from_be_slice(call.ticketId.as_slice()))
@@ -346,12 +346,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                 let call = decode_call!(gas, ArbRetryableTx::redeemCall, input);
 
                 let timeout = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.retryable(call.ticketId).timeout().get())
                 };
 
                 if timeout == 0 {
-                    if context.cfg().stylus().arbos_version() >= 3 {
+                    if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
                         interpreter_revert!(gas, Bytes::from(output));

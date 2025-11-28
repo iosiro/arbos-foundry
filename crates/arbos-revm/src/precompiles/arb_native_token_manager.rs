@@ -82,8 +82,8 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbNativeTokenManagerPr
         input: &[u8],
         target_address: &Address,
         caller_address: Address,
-        call_value: U256,
-        is_static: bool,
+        _call_value: U256,
+        _is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
@@ -148,5 +148,5 @@ fn has_access<CTX: ArbitrumContextTr>(
     gas: &mut Gas,
     caller: Address,
 ) -> Result<bool, ArbosStateError> {
-    context.arb_state(Some(gas)).is_native_token_owner(caller)
+    context.arb_state(Some(gas), true).is_native_token_owner(caller)
 }

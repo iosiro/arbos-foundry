@@ -34,7 +34,7 @@ pub trait Utf8OrHex {
 
 impl Utf8OrHex for String {
     fn from_utf8_or_hex(data: impl Into<Vec<u8>>) -> String {
-        match String::from_utf8(data.into()) {
+        match Self::from_utf8(data.into()) {
             Ok(string) => string,
             Err(error) => hex::encode(error.as_bytes()),
         }

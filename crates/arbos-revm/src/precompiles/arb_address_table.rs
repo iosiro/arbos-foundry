@@ -112,7 +112,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
         _target_address: &Address,
         _caller_address: Address,
         _call_value: U256,
-        _is_static: bool,
+        is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
@@ -125,7 +125,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
 
                 let exists = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().address_exists(call.addr)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .address_table()
+                        .address_exists(call.addr)
                 );
 
                 let output = ArbAddressTable::addressExistsCall::abi_encode_returns(&exists);
@@ -137,7 +140,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
 
                 let compressed = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().compress(call.addr)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .address_table()
+                        .compress(call.addr)
                 );
 
                 interpreter_return!(
@@ -168,7 +174,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
 
                 let (decompressed, consumed) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().decompress(data)
+                    context.arb_state(Some(&mut gas), is_static).address_table().decompress(data)
                 );
                 let new_offset = offset.saturating_add(consumed);
 
@@ -184,7 +190,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
                 let call = decode_call!(gas, ArbAddressTable::lookupCall, input);
                 let index = if let Some(index) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().lookup(call.addr)
+                    context.arb_state(Some(&mut gas), is_static).address_table().lookup(call.addr)
                 ) {
                     index
                 } else {
@@ -207,7 +213,10 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
                 };
                 let addr = if let Some(addr) = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().lookup_index(index)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .address_table()
+                        .lookup_index(index)
                 ) {
                     addr
                 } else {
@@ -221,15 +230,20 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAddressTablePrecompi
                 let call = decode_call!(gas, ArbAddressTable::registerCall, input);
                 let index = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).address_table().register(call.addr)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .address_table()
+                        .register(call.addr)
                 );
 
                 let output = ArbAddressTable::registerCall::abi_encode_returns(&U256::from(index));
                 interpreter_return!(gas, Bytes::from(output));
             }
             ArbAddressTable::sizeCall::SELECTOR => {
-                let size =
-                    try_state!(gas, context.arb_state(Some(&mut gas)).address_table().size());
+                let size = try_state!(
+                    gas,
+                    context.arb_state(Some(&mut gas), is_static).address_table().size()
+                );
 
                 let output = ArbAddressTable::sizeCall::abi_encode_returns(&U256::from(size));
                 interpreter_return!(gas, Bytes::from(output));

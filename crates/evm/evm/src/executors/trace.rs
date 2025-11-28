@@ -38,10 +38,6 @@ impl TracingExecutor {
             .spec_id(evm_spec_id(version.unwrap_or_default()))
             .build(env, db);
 
-        executor.apply_arbitrum_state_overrides(|state| {
-            println!("Initialized arbitrum state: {:?}", state);
-        });
-
         // Apply the state overrides.
         if let Some(state_overrides) = state_overrides {
             for (address, overrides) in state_overrides {

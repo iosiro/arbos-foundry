@@ -101,9 +101,9 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
     fn inner(
         context: &mut CTX,
         input: &[u8],
-        target_address: &Address,
+        _target_address: &Address,
         caller_address: Address,
-        call_value: U256,
+        _call_value: U256,
         is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
@@ -114,7 +114,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
             ArbAggregator::addBatchPosterCall::SELECTOR => {
                 let is_chain_owner = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).is_chain_owner(caller_address)
+                    context.arb_state(Some(&mut gas), is_static).is_chain_owner(caller_address)
                 );
 
                 if !is_chain_owner {
@@ -123,7 +123,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
 
                 let call = decode_call!(gas, ArbAggregator::addBatchPosterCall, input);
 
-                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                 let mut l1_pricing = arb_state.l1_pricing();
                 let mut batch_poster_table = l1_pricing.batch_poster_table();
 
@@ -139,7 +139,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
             ArbAggregator::getBatchPostersCall::SELECTOR => {
                 let posters = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas)).l1_pricing().batch_poster_table().all()
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .l1_pricing()
+                        .batch_poster_table()
+                        .all()
                 );
 
                 let output = ArbAggregator::getBatchPostersCall::abi_encode_returns(&posters);
@@ -156,7 +160,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
             ArbAggregator::getFeeCollectorCall::SELECTOR => {
                 let call = decode_call!(gas, ArbAggregator::getFeeCollectorCall, input);
 
-                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                 let mut l1_pricing = arb_state.l1_pricing();
                 let mut batch_poster_table = l1_pricing.batch_poster_table();
 
@@ -180,7 +184,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbAggregatorPrecompile
             ArbAggregator::setFeeCollectorCall::SELECTOR => {
                 let call = decode_call!(gas, ArbAggregator::setFeeCollectorCall, input);
 
-                let mut arb_state = context.arb_state(Some(&mut gas));
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
 
                 let is_chain_owner = { try_state!(gas, arb_state.is_chain_owner(caller_address)) };
 

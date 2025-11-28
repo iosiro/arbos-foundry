@@ -71,10 +71,10 @@ impl ArbitrumLocalContextTr for ArbitrumLocalContext {
     fn insert_recent_wasm(&mut self, code_hash: B256, retain: u16) -> bool {
         if let Some(pos) = self.recent_wasms.iter().position(|existing| *existing == code_hash) {
             // Move existing entry to the back to track recency.
-            if pos + 1 != self.recent_wasms.len() {
-                if let Some(found) = self.recent_wasms.remove(pos) {
-                    self.recent_wasms.push_back(found);
-                }
+            if pos + 1 != self.recent_wasms.len()
+                && let Some(found) = self.recent_wasms.remove(pos)
+            {
+                self.recent_wasms.push_back(found);
             }
             return true;
         }

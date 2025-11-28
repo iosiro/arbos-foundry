@@ -72,19 +72,28 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
 
 pub trait ArbState<'a, CTX: ArbitrumContextTr> {
     type ArbStateGetterType: ArbStateGetter<CTX>;
-    fn arb_state(&'a mut self, gas: Option<&'a mut Gas>) -> Self::ArbStateGetterType;
+    fn arb_state(
+        &'a mut self,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+    ) -> Self::ArbStateGetterType;
 }
 
 impl<'a, CTX: ArbitrumContextTr + 'a> ArbState<'a, CTX> for CTX {
     type ArbStateGetterType = ArbStateWrapper<'a, CTX>;
-    fn arb_state(&'a mut self, gas: Option<&'a mut Gas>) -> Self::ArbStateGetterType {
-        ArbStateWrapper::new(self, gas)
+    fn arb_state(
+        &'a mut self,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+    ) -> Self::ArbStateGetterType {
+        ArbStateWrapper::new(self, gas, is_static)
     }
 }
 
 pub struct ArbStateWrapper<'a, CTX: ArbitrumContextTr> {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -119,15 +128,16 @@ impl Default for ArbosStateParams {
 }
 
 impl<'a, CTX: ArbitrumContextTr> ArbStateWrapper<'a, CTX> {
-    pub fn new(context: &'a mut CTX, mut gas: Option<&'a mut Gas>) -> Self {
+    pub fn new(context: &'a mut CTX, mut gas: Option<&'a mut Gas>, is_static: bool) -> Self {
         if let Err(err) = context.journal_mut().warm_account(ARBOS_STATE_ADDRESS) {
-            // Consume all gas so downstream callers see a consistent failure state rather than a panic.
+            // Consume all gas so downstream callers see a consistent failure state rather than a
+            // panic.
             if let Some(gas) = gas.as_deref_mut() {
                 gas.spend_all();
             }
             let _ = err;
         }
-        Self { context, gas }
+        Self { context, gas, is_static }
     }
 }
 
@@ -171,13 +181,19 @@ where
     CTX: ArbitrumContextTr,
 {
     fn programs(&mut self) -> Programs<'_, CTX> {
-        Programs::new(self.context, self.gas.as_deref_mut(), state_subkey(ARBOS_STATE_PROGRAMS_KEY))
+        Programs::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            state_subkey(ARBOS_STATE_PROGRAMS_KEY),
+        )
     }
 
     fn brotli_compression_level(&mut self) -> StorageBackedU64<'_, CTX> {
         StorageBackedU64::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_BROTLI_COMPRESSION_LEVEL_OFFSET),
         )
     }
@@ -185,6 +201,7 @@ where
         StorageBackedU64::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET),
         )
     }
@@ -192,6 +209,7 @@ where
         StorageBackedAddress::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_INFRA_FEE_ACCOUNT_OFFSET),
         )
     }
@@ -199,6 +217,7 @@ where
         StorageBackedU64::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_GENESIS_BLOCK_NUM_OFFSET),
         )
     }
@@ -206,6 +225,7 @@ where
         StorageBackedU64::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_UPGRADE_VERSION_OFFSET),
         )
     }
@@ -213,6 +233,7 @@ where
         StorageBackedU64::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_UPGRADE_TIMESTAMP_OFFSET),
         )
     }
@@ -220,6 +241,7 @@ where
         StorageBackedU256::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_CHAIN_ID_OFFSET),
         )
     }
@@ -228,29 +250,31 @@ where
         BlockHashes::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_BLOCKHASHES_KEY),
         )
     }
 
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
         let slot = map_address(&state_subkey(ARBOS_CHAIN_OWNERS_KEY), &B256::ZERO);
-        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn chain_config(&mut self) -> StorageBackedU256<'_, CTX> {
         let slot = map_address(&state_subkey(ARBOS_CHAIN_CONFIG_KEY), &B256::ZERO);
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn features(&mut self) -> StorageBackedU256<'_, CTX> {
         let slot = map_address(&state_subkey(ARBOS_STATE_FEATURES_KEY), &B256::ZERO);
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn native_token_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
         StorageBackedAddressSet::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY),
         )
     }
@@ -258,7 +282,7 @@ where
     fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
         let root = state_subkey(ARBOS_STATE_PROGRAMS_KEY);
         let slot = substorage(&root, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY);
-        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError> {
@@ -273,6 +297,7 @@ where
         AddressTable::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_ADDRESS_TABLE_KEY),
         )
     }
@@ -281,6 +306,7 @@ where
         L1Pricing::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_L1_PRICING_KEY),
         )
     }
@@ -289,6 +315,7 @@ where
         L2Pricing::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_L2_PRICING_KEY),
         )
     }
@@ -297,31 +324,34 @@ where
         RetryableState::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_subkey(ARBOS_STATE_RETRYABLES_KEY),
         )
     }
 
     fn retryable<'b>(&'b mut self, id: B256) -> Retryable<'b, CTX> {
         let root = state_subkey(ARBOS_STATE_RETRYABLES_KEY);
-        Retryable::new(self.context, self.gas.as_deref_mut(), substorage(&root, id.as_slice()))
+        Retryable::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            substorage(&root, id.as_slice()),
+        )
     }
 
     fn timeout_queue(&mut self) -> StorageBackedQueue<'_, CTX> {
         let root = state_subkey(ARBOS_STATE_RETRYABLES_KEY);
         let slot = substorage(&root, &[0]);
-        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedQueue::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn code_hash(&mut self, address: Address) -> Result<B256, ArbosStateError> {
-        let code_hash = self
-            .context
-            .load_account_code_hash(address)
-            .and_then(|s| Some(s.data))
-            .unwrap_or_default();
-        if let Some(gas) = self.gas.as_deref_mut() {
-            if !gas.record_cost(COLD_ACCOUNT_ACCESS_COST) {
-                return Err(ArbosStateError::OutOfGas);
-            }
+        let code_hash =
+            self.context.load_account_code_hash(address).map(|s| s.data).unwrap_or_default();
+        if let Some(gas) = self.gas.as_deref_mut()
+            && !gas.record_cost(COLD_ACCOUNT_ACCESS_COST)
+        {
+            return Err(ArbosStateError::OutOfGas);
         }
         Ok(code_hash)
     }
@@ -330,6 +360,7 @@ where
         StorageBackedAddress::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             state_slot(ARBOS_STATE_NETWORK_FEE_ACCOUNT_OFFSET),
         )
     }

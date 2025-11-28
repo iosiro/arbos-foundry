@@ -1,6 +1,6 @@
 use crate::{
     ArbitrumContextTr,
-    config::{ArbitrumConfigTr, ArbitrumStylusConfigTr},
+    config::ArbitrumConfigTr,
     constants::ARBOS_L1_PRICER_FUNDS_ADDRESS,
     generate_state_mut_table,
     macros::{interpreter_return, interpreter_revert},
@@ -180,7 +180,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
         _target_address: &Address,
         _caller_address: Address,
         _call_value: U256,
-        _is_static: bool,
+        is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
         let mut gas = Gas::new(gas_limit);
@@ -195,7 +195,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
         match selector {
             ArbGasInfo::getAmortizedCostCapBipsCall::SELECTOR => {
                 let amortized_cost_cap_bips = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().amortized_cost_cap_bips().get())
                 };
 
@@ -207,7 +207,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getGasAccountingParamsCall::SELECTOR => {
                 let (speed_limit_per_second, max_tx_gas_limit) = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     let mut l2_pricing = arb_state.l2_pricing();
 
                     let speed_limit_per_second =
@@ -229,7 +229,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getGasBacklogCall::SELECTOR => {
                 let gas_backlog = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l2_pricing().gas_backlog().get())
                 };
 
@@ -239,7 +239,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1BaseFeeEstimateCall::SELECTOR => {
                 let l1_base_fee_estimate = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 
@@ -250,7 +250,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1BaseFeeEstimateInertiaCall::SELECTOR => {
                 let pricing_inertia = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().inertia().get())
                 };
 
@@ -262,7 +262,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1FeesAvailableCall::SELECTOR => {
                 let l1_fees_available = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
                 };
 
@@ -273,7 +273,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1PricingEquilibrationUnitsCall::SELECTOR => {
                 let equilibration_units = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().equilibration_units().get())
                 };
 
@@ -285,7 +285,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1PricingFundsDueForRewardsCall::SELECTOR => {
                 let funds_due_for_rewards = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
                 };
 
@@ -297,7 +297,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1PricingSurplusCall::SELECTOR => {
                 let l1_pricing_surplus = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().last_surplus().get())
                 };
 
@@ -308,7 +308,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getLastL1PricingSurplusCall::SELECTOR => {
                 let funds_due_for_refund = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(
                         gas,
                         arb_state.l1_pricing().batch_poster_table().total_funds_due().get()
@@ -316,18 +316,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                 };
 
                 let funds_due_for_rewards = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().funds_due_for_rewards().get())
                 };
 
                 let need_funds = funds_due_for_refund.wrapping_add(funds_due_for_rewards);
 
-                let have_funds = if context.cfg().stylus().arbos_version() < 10 {
+                let have_funds = if context.cfg().arbos_version() < 10 {
                     let arb_pricer_funds =
                         context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default();
                     arb_pricer_funds.data
                 } else {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().l1_fees_available().get())
                 };
 
@@ -339,7 +339,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getLastL1PricingUpdateTimeCall::SELECTOR => {
                 let last_update_time = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().last_update_time().get())
                 };
 
@@ -351,7 +351,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getMinimumGasPriceCall::SELECTOR => {
                 let minimum_gas_price = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l2_pricing().min_base_fee_wei().get())
                 };
 
@@ -362,7 +362,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPerBatchGasChargeCall::SELECTOR => {
                 let per_batch_gas_charge = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().per_batch_gas_cost().get())
                 };
 
@@ -374,7 +374,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPricesInArbGasCall::SELECTOR => {
                 let l1_gas_price = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 
@@ -384,7 +384,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
                 ));
 
-                if context.cfg().stylus().arbos_version() < 4 {
+                if context.cfg().arbos_version() < 4 {
                     let mut gas_for_l1_calldata = U256::ZERO;
                     if l2_gas_price > 0 {
                         gas_for_l1_calldata =
@@ -426,7 +426,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPricesInArbGasWithAggregatorCall::SELECTOR => {
                 let l1_gas_price = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 
@@ -436,7 +436,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
                     revm::interpreter::gas::NON_ZERO_BYTE_MULTIPLIER_ISTANBUL,
                 ));
 
-                if context.cfg().stylus().arbos_version() < 4 {
+                if context.cfg().arbos_version() < 4 {
                     let mut gas_for_l1_calldata = U256::ZERO;
                     if l2_gas_price > 0 {
                         gas_for_l1_calldata =
@@ -479,7 +479,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPricesInWeiCall::SELECTOR => {
                 let l1_gas_price = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 
@@ -514,7 +514,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPricesInWeiWithAggregatorCall::SELECTOR => {
                 let l1_gas_price = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 
@@ -554,7 +554,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getPricingInertiaCall::SELECTOR => {
                 let pricing_inertia = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l2_pricing().pricing_inertia().get())
                 };
 
@@ -565,7 +565,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1RewardRateCall::SELECTOR => {
                 let l1_reward_rate = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().per_unit_reward().get())
                 };
 
@@ -575,7 +575,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1RewardRecipientCall::SELECTOR => {
                 let l1_reward_recipient = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().reward_recipient().get())
                 };
 
@@ -586,7 +586,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbGasInfoPrecompile {
             }
             ArbGasInfo::getL1GasPriceEstimateCall::SELECTOR => {
                 let l1_gas_price_estimate = {
-                    let mut arb_state = context.arb_state(Some(&mut gas));
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     try_state!(gas, arb_state.l1_pricing().price_per_unit().get())
                 };
 

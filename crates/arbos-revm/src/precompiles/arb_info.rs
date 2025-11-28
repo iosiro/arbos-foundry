@@ -1,6 +1,6 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
-    interpreter::{Gas, InterpreterResult},
+    interpreter::{Gas, InterpreterResult, gas::COLD_SLOAD_COST},
     precompile::PrecompileId,
     primitives::{Address, Bytes, U256, address},
 };
@@ -12,6 +12,7 @@ use crate::{
     precompiles::{
         ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
     },
+    try_record_cost,
 };
 
 sol! {
@@ -61,6 +62,8 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbInfoPrecompile {
             ArbInfo::getBalanceCall::SELECTOR => {
                 let call = decode_call!(gas, ArbInfo::getBalanceCall, input);
 
+                try_record_cost!(gas, 700);
+
                 let balance = context.balance(call.account).unwrap_or_default().data;
 
                 let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
@@ -70,7 +73,13 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbInfoPrecompile {
             ArbInfo::getCodeCall::SELECTOR => {
                 let call = decode_call!(gas, ArbInfo::getCodeCall, input);
 
+                try_record_cost!(gas, COLD_SLOAD_COST);
+
                 let code = context.load_account_code(call.account).unwrap_or_default().data;
+
+                let words = code.len().div_ceil(32);
+                let additional_gas = words as u64 * revm::interpreter::gas::COPY;
+                try_record_cost!(gas, additional_gas);
 
                 let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
 

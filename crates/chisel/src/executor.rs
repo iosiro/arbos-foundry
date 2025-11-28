@@ -11,6 +11,7 @@ use alloy_json_abi::EventParam;
 use alloy_primitives::{Address, B256, U256, hex};
 use eyre::{Result, WrapErr};
 use foundry_compilers::Artifact;
+use foundry_config::apply_stylus_config;
 use foundry_evm::{
     backend::Backend, decode::decode_console_logs, executors::ExecutorBuilder,
     inspectors::CheatsConfig, traces::TraceMode,
@@ -231,8 +232,10 @@ impl SessionSource {
             .legacy_assertions(self.config.foundry_config.legacy_assertions)
             .build(env, backend);
 
-        executor.apply_arbitrum_state_overrides(|state| {
-            println!("Initialized arbitrum state: {:?}", state);
+        executor.apply_arbitrum_state_overrides(|params| {
+            if let Some(stylus_config) = self.config.evm_opts.stylus_config.clone() {
+                apply_stylus_config(params, &stylus_config);
+            }
         });
 
         Ok(ChiselRunner::new(executor, U256::MAX, Address::ZERO, self.config.calldata.clone()))

@@ -16,6 +16,7 @@ where
 {
     context: &'a mut CTX,
     gas: Option<&'a mut Gas>,
+    is_static: bool,
     slot: B256,
 }
 
@@ -23,13 +24,18 @@ impl<'a, CTX> BlockHashes<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        slot: B256,
+    ) -> Self {
+        Self { context, gas, is_static, slot }
     }
 
     pub fn l1_block_number(&mut self) -> StorageBackedU64<'_, CTX> {
         let slot = map_address(&self.slot, &B256::ZERO);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), slot)
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     pub fn block_hash(&mut self, number: u64) -> Result<B256, ArbosStateError> {
@@ -39,7 +45,7 @@ where
         }
 
         let slot = map_address(&self.slot, &B256::from(U256::from(1 + (number % 256))));
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).get()
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot).get()
     }
 
     pub fn record_new_l1_block(
@@ -69,11 +75,13 @@ where
             let fill = keccak256(data);
 
             let slot = map_address(&self.slot, &B256::from(U256::from(1 + (next_number % 256))));
-            StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(fill)?;
+            StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+                .set(fill)?;
         }
 
         let slot = map_address(&self.slot, &B256::from(U256::from(1 + (number % 256))));
-        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), slot).set(block_hash)?;
+        StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+            .set(block_hash)?;
 
         self.l1_block_number().set(number + 1)
     }

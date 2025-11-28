@@ -45,10 +45,16 @@ use stylus::{
 use tracing::{debug, trace, warn};
 
 use crate::{
-    ArbitrumEvm, Utf8OrHex, config::{ArbitrumConfigTr, ArbitrumStylusConfigTr}, constants::{
+    ArbitrumEvm, Utf8OrHex,
+    config::ArbitrumConfigTr,
+    constants::{
         ARBOS_VERSION_STYLUS_FIXES, COST_SCALAR_PERCENT, MEMORY_EXPONENTS, MIN_CACHED_GAS_UNITS,
         MIN_INIT_GAS_UNITS, STYLUS_DISCRIMINANT,
-    }, context::ArbitrumContextTr, local_context::ArbitrumLocalContextTr, state::{ArbState, ArbStateGetter, program::ProgramInfo, types::ArbosStateError}, stylus_api::StylusHandler
+    },
+    context::ArbitrumContextTr,
+    local_context::ArbitrumLocalContextTr,
+    state::{ArbState, ArbStateGetter, program::ProgramInfo, types::ArbosStateError},
+    stylus_api::StylusHandler,
 };
 
 type ProgramCacheEntry = (Vec<u8>, Module, StylusData);
@@ -65,7 +71,7 @@ where
     CTX: ArbitrumContextTr,
 {
     let config_env = context.cfg();
-    let arbos_env = context.cfg().stylus();
+    let arbos_env = context.cfg();
 
     let block_env = context.block();
     let tx_env = context.tx();
@@ -279,7 +285,7 @@ where
                 let stylus_params = {
                     let context = self.ctx();
 
-                    match context.arb_state(None).programs().stylus_params().get() {
+                    match context.arb_state(None, true).programs().stylus_params().get() {
                         Ok(params) => params,
                         Err(e) => return Some(e.into()),
                     }
@@ -310,7 +316,7 @@ where
                 };
 
                 let stylus_params = {
-                    match context.arb_state(None).programs().stylus_params().get() {
+                    match context.arb_state(None, true).programs().stylus_params().get() {
                         Ok(params) => params,
                         Err(e) => {
                             debug!(
@@ -324,12 +330,10 @@ where
                     }
                 };
 
-                let compile_config = CompileConfig::version(
-                    stylus_params.version,
-                    context.cfg().stylus().debug_mode(),
-                );
+                let compile_config =
+                    CompileConfig::version(stylus_params.version, context.cfg().debug_mode());
 
-                let debug = context.cfg().stylus().debug_mode();
+                let debug = context.cfg().debug_mode();
 
                 let mut cache = PROGRAM_CACHE.lock().unwrap();
                 match cache.try_get_or_insert::<_, String>(code_hash, || {
@@ -339,7 +343,7 @@ where
                         None,
                         &bytecode,
                         code_hash,
-                        context.cfg().stylus().arbos_version(),
+                        context.cfg().arbos_version(),
                         stylus_params.version,
                         stylus_params.page_limit,
                         debug,
@@ -348,7 +352,7 @@ where
                     Ok((serialized, module, stylus_data))
                 }) {
                     Ok((serialized, module, stylus_data)) => {
-                        (serialized.clone(), module.clone(), stylus_data.clone(), stylus_params)
+                        (serialized.clone(), module.clone(), *stylus_data, stylus_params)
                     }
                     Err(e) => {
                         warn!(
@@ -378,7 +382,7 @@ where
             );
 
             let compile_config =
-                CompileConfig::version(stylus_params.version, context.cfg().stylus().debug_mode());
+                CompileConfig::version(stylus_params.version, context.cfg().debug_mode());
 
             let evm_data = build_evm_data(
                 self.ctx(),
@@ -396,13 +400,13 @@ where
 
         let program_info = match self
             .ctx()
-            .arb_state(None)
+            .arb_state(None, false)
             .programs()
             .get_active_program(&stylus_params, &code_hash)
         {
             Ok(info) => info,
             Err(e) => {
-                if !self.ctx().cfg().stylus().disable_auto_activate() {
+                if !self.ctx().cfg().disable_auto_activate() {
                     trace!(
                         target: "arbos-revm::stylus",
                         bytecode_address = %stylus_ctx.bytecode_address,
@@ -416,7 +420,7 @@ where
                         footprint: stylus_data.footprint,
                         asm_estimated_kb: stylus_data.asm_estimate,
                         age: 0,
-                        cached: !self.ctx().cfg().stylus().disable_auto_cache(),
+                        cached: !self.ctx().cfg().disable_auto_cache(),
                     }
                 } else {
                     match e {
@@ -580,8 +584,7 @@ where
 
         self.ctx().local_mut().set_stylus_pages_open(stylus_open_pages);
 
-        if data.len() > 0 && self.ctx().cfg().stylus().arbos_version() >= ARBOS_VERSION_STYLUS_FIXES
-        {
+        if !data.is_empty() && self.ctx().cfg().arbos_version() >= ARBOS_VERSION_STYLUS_FIXES {
             let evm_cost = memory_gas(data.len());
 
             if gas.limit() < evm_cost {
@@ -688,7 +691,7 @@ pub fn stylus_code(bytecode: &[u8]) -> Result<Option<Bytes>, Vec<u8>> {
         let dictionary = match dictionary[0] {
             0x00 => Dictionary::Empty,
             0x01 => Dictionary::StylusProgram,
-            t => return Err(format!("unsupported dictionary {}", t).as_bytes().to_vec()),
+            t => return Err(format!("unsupported dictionary {t}").as_bytes().to_vec()),
         };
 
         let bytecode = brotli::decompress(compressed_bytecode, dictionary).or_else(|err| {
@@ -696,7 +699,7 @@ pub fn stylus_code(bytecode: &[u8]) -> Result<Option<Bytes>, Vec<u8>> {
             if dictionary == Dictionary::Empty {
                 Ok(compressed_bytecode.to_vec())
             } else {
-                return Err(format!("failed decompression: {}", err as u8).as_bytes().to_vec());
+                Err(format!("failed decompression: {}", err as u8).as_bytes().to_vec())
             }
         })?;
 
@@ -709,7 +712,7 @@ pub fn stylus_code(bytecode: &[u8]) -> Result<Option<Bytes>, Vec<u8>> {
 /// Compile Stylus bytecode
 pub fn stylus_compile(bytecode: &Bytes, compile_config: &CompileConfig) -> Result<Vec<u8>, String> {
     let serialized = native::compile(
-        &bytecode,
+        bytecode,
         compile_config.version,
         compile_config.debug.debug_funcs,
         wasmer_types::compilation::target::Target::default(),
@@ -754,7 +757,7 @@ pub fn stylus_activate(
         gas.erase_cost(activation_gas);
     }
 
-    return Ok((module, stylus_data));
+    Ok((module, stylus_data))
 }
 
 pub fn ink_to_gas_ceil(pricing: PricingParams, ink: Ink) -> u64 {

@@ -65,7 +65,7 @@ impl From<ArbosStateError> for String {
 
 impl From<ArbosStateError> for Bytes {
     fn from(error: ArbosStateError) -> Self {
-        Bytes::from(error.to_string().into_bytes())
+        Self::from(error.to_string().into_bytes())
     }
 }
 
@@ -132,6 +132,7 @@ impl From<ArbosStateError> for InterpreterResult {
 pub struct StorageBacked<'a, CTX, T> {
     pub context: &'a mut CTX,
     pub gas: Option<&'a mut Gas>,
+    pub is_static: bool,
     pub slot: B256,
     _marker: core::marker::PhantomData<T>,
 }
@@ -141,7 +142,7 @@ where
     CTX: ArbitrumContextTr,
     T: StorageWord,
 {
-    fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self;
+    fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, is_static: bool, slot: B256) -> Self;
     fn get(&mut self) -> Result<T, ArbosStateError>;
     fn set(&mut self, value: T) -> Result<(), ArbosStateError>;
 }
@@ -276,8 +277,8 @@ where
     CTX: ArbitrumContextTr,
     T: StorageWord,
 {
-    fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot, _marker: std::marker::PhantomData }
+    fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, is_static: bool, slot: B256) -> Self {
+        Self { context, gas, is_static, slot, _marker: std::marker::PhantomData }
     }
 
     fn get(&mut self) -> Result<T, ArbosStateError> {
@@ -292,13 +293,17 @@ where
             .context
             .journal_mut()
             .sload(ARBOS_STATE_ADDRESS, self.slot.into())
-            .and_then(|s| Ok(s.data))
+            .map(|s| s.data)
             .map_err(|err| ArbosStateError::Context(err.to_string()))?;
 
         Ok(T::from_word(word))
     }
 
     fn set(&mut self, value: T) -> Result<(), ArbosStateError> {
+        if self.is_static {
+            return Err(ArbosStateError::StateChangeDuringStaticCall);
+        }
+
         let value = value.into_word();
 
         if let Some(gas) = &mut self.gas {
@@ -324,6 +329,7 @@ where
 {
     pub context: &'a mut CTX,
     pub gas: Option<&'a mut Gas>,
+    pub is_static: bool,
     pub slot: B256,
 }
 
@@ -331,8 +337,13 @@ impl<'a, CTX> StorageBackedAddressSet<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        slot: B256,
+    ) -> Self {
+        Self { context, gas, is_static, slot }
     }
 
     fn size_slot(&self) -> B256 {
@@ -341,7 +352,7 @@ where
 
     pub fn size(&mut self) -> Result<usize, ArbosStateError> {
         let size_slot = self.size_slot();
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), size_slot)
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, size_slot)
             .get()
             .map(|v| v.saturating_to::<usize>())
     }
@@ -351,8 +362,13 @@ where
         let mut out = Vec::with_capacity(n);
         for i in 0..n {
             let slot = map_address(&self.slot, &B256::from(U256::from(i as u64 + 1)));
-            let addr =
-                StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot).get()?;
+            let addr = StorageBackedAddress::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                slot,
+            )
+            .get()?;
             out.push(addr);
         }
         Ok(out)
@@ -361,7 +377,9 @@ where
     pub fn contains(&mut self, address: Address) -> Result<bool, ArbosStateError> {
         let by_address = substorage(&self.slot, &[0]);
         let slot = map_address(&by_address, &B256::left_padding_from(address.as_slice()));
-        let addr = StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot).get()?;
+        let addr =
+            StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+                .get()?;
         Ok(!addr.is_zero())
     }
 
@@ -369,21 +387,27 @@ where
         // push to array
         let size = {
             let size_slot = self.size_slot();
-            let mut size_slot =
-                StorageBackedU256::new(self.context, self.gas.as_deref_mut(), size_slot);
+            let mut size_slot = StorageBackedU256::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                size_slot,
+            );
             let size = size_slot.get()? + U256::ONE;
             size_slot.set(size)?;
             size
         };
 
         let slot = map_address(&self.slot, &B256::from(size));
-        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), slot).set(address)?;
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+            .set(address)?;
 
         // also set by-address index so contains() is O(1)
         let by_address = substorage(&self.slot, &[0]);
         StorageBackedU256::new(
             self.context,
             self.gas.as_deref_mut(),
+            self.is_static,
             map_address(&by_address, &B256::left_padding_from(address.as_slice())),
         )
         .set(U256::ONE)?;
@@ -396,8 +420,13 @@ where
         let by_address_slot =
             map_address(&by_address, &B256::left_padding_from(address.as_slice()));
 
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), by_address_slot)
-            .set(U256::ZERO)
+        StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            by_address_slot,
+        )
+        .set(U256::ZERO)
 
         // NOTE: we don't compact the array in storage to keep logic simple and predictable.
     }
@@ -409,6 +438,7 @@ where
 {
     pub context: &'a mut CTX,
     pub gas: Option<&'a mut Gas>,
+    pub is_static: bool,
     pub slot: B256,
 }
 
@@ -416,14 +446,24 @@ impl<'a, CTX> StorageBackedBytes<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        slot: B256,
+    ) -> Self {
+        Self { context, gas, is_static, slot }
     }
 
     pub fn get(&mut self) -> Result<Vec<u8>, ArbosStateError> {
         let size_slot = map_address(&self.slot, &B256::from(U256::from(0u64)));
-        let size =
-            StorageBackedU256::new(self.context, self.gas.as_deref_mut(), size_slot).get()?;
+        let size = StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            size_slot,
+        )
+        .get()?;
 
         let size = size.to::<usize>();
 
@@ -431,8 +471,13 @@ where
         let mut offset = 0;
         while offset < size {
             let chunk_slot = map_address(&self.slot, &B256::from(U256::from(offset + 1)));
-            let chunk =
-                StorageBackedB256::new(self.context, self.gas.as_deref_mut(), chunk_slot).get()?;
+            let chunk = StorageBackedB256::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                chunk_slot,
+            )
+            .get()?;
 
             let chunk_bytes = chunk.to_vec();
             let to_copy = std::cmp::min(size - offset, 32);
@@ -444,7 +489,7 @@ where
 
     pub fn set(&mut self, value: &[u8]) -> Result<(), ArbosStateError> {
         let size_slot = map_address(&self.slot, &B256::from(U256::from(0u64)));
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), size_slot)
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, size_slot)
             .set(U256::from(value.len() as u64))?;
 
         let mut offset = 0;
@@ -455,7 +500,13 @@ where
             let mut chunk_bytes = [0u8; 32];
             chunk_bytes[..to_copy].copy_from_slice(&value[offset..(offset + to_copy)]);
             let chunk = B256::from_slice(&chunk_bytes);
-            StorageBackedB256::new(self.context, self.gas.as_deref_mut(), chunk_slot).set(chunk)?;
+            StorageBackedB256::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                chunk_slot,
+            )
+            .set(chunk)?;
             offset += to_copy;
         }
         Ok(())
@@ -468,6 +519,7 @@ where
 {
     pub context: &'a mut CTX,
     pub gas: Option<&'a mut Gas>,
+    pub is_static: bool,
     pub slot: B256,
 }
 
@@ -475,8 +527,13 @@ impl<'a, CTX> StorageBackedQueue<'a, CTX>
 where
     CTX: ArbitrumContextTr,
 {
-    pub fn new(context: &'a mut CTX, gas: Option<&'a mut Gas>, slot: B256) -> Self {
-        Self { context, gas, slot }
+    pub fn new(
+        context: &'a mut CTX,
+        gas: Option<&'a mut Gas>,
+        is_static: bool,
+        slot: B256,
+    ) -> Self {
+        Self { context, gas, is_static, slot }
     }
 
     fn head_slot(&self) -> B256 {
@@ -491,8 +548,12 @@ where
         let head_slot = self.head_slot();
         let tail_slot = self.tail_slot();
 
-        let head = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), head_slot).get()?;
-        let tail = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), tail_slot).get()?;
+        let head =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, head_slot)
+                .get()?;
+        let tail =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, tail_slot)
+                .get()?;
         Ok(tail.saturating_sub(head))
     }
 
@@ -500,15 +561,25 @@ where
         let head_slot = self.head_slot();
         let tail_slot = self.tail_slot();
 
-        let head = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), head_slot).get()?;
-        let tail = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), tail_slot).get()?;
+        let head =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, head_slot)
+                .get()?;
+        let tail =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, tail_slot)
+                .get()?;
 
         if head >= tail {
             return Ok(None);
         }
         let elem_slot = map_address(&self.slot, &B256::from(U256::from(head)));
 
-        let v = StorageBackedU256::new(self.context, self.gas.as_deref_mut(), elem_slot).get()?;
+        let v = StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            elem_slot,
+        )
+        .get()?;
         Ok(Some(v))
     }
 
@@ -516,31 +587,45 @@ where
         let head_slot = self.head_slot();
         let tail_slot = self.tail_slot();
 
-        let head = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), head_slot).get()?;
-        let tail = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), tail_slot).get()?;
+        let head =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, head_slot)
+                .get()?;
+        let tail =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, tail_slot)
+                .get()?;
 
         if head >= tail {
             return Ok(None);
         }
         let elem_slot = map_address(&self.slot, &B256::from(U256::from(head)));
-        let v = StorageBackedU256::new(self.context, self.gas.as_deref_mut(), elem_slot).get()?;
+        let v = StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            elem_slot,
+        )
+        .get()?;
 
         // increment head
         let new_head = head.saturating_add(1);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), head_slot).set(new_head)?;
-
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, head_slot)
+            .set(new_head)?;
         Ok(Some(v))
     }
 
     pub fn push(&mut self, value: U256) -> Result<(), ArbosStateError> {
         let tail_slot = self.tail_slot();
 
-        let tail = StorageBackedU64::new(self.context, self.gas.as_deref_mut(), tail_slot).get()?;
+        let tail =
+            StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, tail_slot)
+                .get()?;
         let new_tail = tail.saturating_add(1);
-        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), tail_slot).set(new_tail)?;
+        StorageBackedU64::new(self.context, self.gas.as_deref_mut(), self.is_static, tail_slot)
+            .set(new_tail)?;
 
         let elem_slot = map_address(&self.slot, &B256::from(U256::from(tail)));
-        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), elem_slot).set(value)?;
+        StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, elem_slot)
+            .set(value)?;
 
         Ok(())
     }
