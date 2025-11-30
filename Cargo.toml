@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "benches/",
+    "crates/alloy-evm/",
     "crates/anvil/",
     "crates/anvil/core/",
     "crates/anvil/rpc/",
@@ -178,6 +179,7 @@ syn.opt-level = "z"
 trezor-client.opt-level = "z"
 
 [workspace.dependencies]
+alloy-evm = { path = "crates/alloy-evm" }
 anvil = { path = "crates/anvil" }
 arbos-revm = { path = "crates/arbos-revm" }
 cast = { path = "crates/cast" }
@@ -275,9 +277,6 @@ revm-inspectors = { version = "0.30.0", features = ["serde"] }
 arbutil = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
 stylus = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
 wasmer-types = { git = "https://github.com/bernard-wagner/nitro", rev = "e1d47755c5fe476cf197c9304faf2ec61ea0e850", default-features = false }
-
-## alloy-evm
-alloy-evm = { git = "https://github.com/iosiro/alloy-evm", rev = "60dc4ec58100af8938ad090e7231bc064380dd34", default-features = false }
 
 ## cli
 anstream = "0.6"

@@ -9,7 +9,7 @@ contract TestContract {}
 contract GetDeployedCodeTest is DSTest {
     Vm constant vm = Vm(HEVM_ADDRESS);
 
-    address public constant overrideAddress = 0x0000000000000000000000000000000000000064;
+    address public constant overrideAddress = 0x0000000000000000000000000000000000001337;
 
     event Payload(address sender, address target, bytes data);
 

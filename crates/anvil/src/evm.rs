@@ -1,20 +1,15 @@
 use alloy_evm::{
-    Database, Evm,
-    precompiles::{DynPrecompile, PrecompileInput, PrecompilesMap},
+    Database,
+    precompiles::{DynPrecompile, PrecompileInput},
 };
-use alloy_primitives::{Address, Bytes};
 use core::ops::{Deref, DerefMut};
-use foundry_evm::{
-    EvmEnv,
-    core::evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, TxEnv},
-};
+use foundry_evm::core::evm::{EthEvm, EthEvmContext, PrecompilesMap, TxEnv};
 use revm::{
-    Context, ExecuteEvm, InspectEvm, Inspector, SystemCallEvm,
-    context::result::{EVMError, HaltReason, ResultAndState},
+    DatabaseCommit, ExecuteEvm, InspectEvm, Inspector,
+    context::result::{EVMError, ExecutionResult, HaltReason, ResultAndState},
     handler::PrecompileProvider,
     interpreter::InterpreterResult,
     precompile::Precompile,
-    primitives::hardfork::SpecId,
 };
 use std::fmt::Debug;
 
@@ -27,7 +22,7 @@ pub trait PrecompileFactory: Send + Sync + Unpin + Debug {
 
 /// Inject custom precompiles into the EVM dynamically.
 pub fn inject_custom_precompiles<DB, I>(
-    evm: &mut AnvilEvm<DB, I, PrecompilesMap>,
+    evm: &mut AnvilEvm<DB, I, PrecompilesMap<DB>>,
     precompiles: Vec<(Precompile, u64)>,
 ) where
     DB: Database,
@@ -76,70 +71,51 @@ where
     }
 }
 
-impl<DB, I, PRECOMPILE> Evm for AnvilEvm<DB, I, PRECOMPILE>
+impl<DB, I, PRECOMPILE> AnvilEvm<DB, I, PRECOMPILE>
 where
     DB: Database,
     I: Inspector<EthEvmContext<DB>>,
     PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
 {
-    type DB = DB;
-    type Block = BlockEnv;
-    type Config = CfgEnv;
-    type Tx = TxEnv;
-    type Error = EVMError<DB::Error>;
-    type HaltReason = HaltReason;
-    type Spec = SpecId;
-    type Precompiles = PRECOMPILE;
-    type Inspector = I;
-
-    fn block(&self) -> &Self::Block {
-        &self.inner.0.block
+    pub fn precompiles(&self) -> &PRECOMPILE {
+        &self.inner.precompiles
     }
 
-    fn chain_id(&self) -> u64 {
-        self.inner.0.cfg.chain_id
+    pub fn precompiles_mut(&mut self) -> &mut PRECOMPILE {
+        &mut self.inner.precompiles
     }
 
-    fn transact_raw(
+    pub fn transact(
         &mut self,
-        tx: Self::Tx,
-    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        if self.inspect { self.inner.0.inspect_tx(tx) } else { self.inner.0.transact(tx) }
+        tx: TxEnv,
+    ) -> Result<ResultAndState<HaltReason>, EVMError<DB::Error>> {
+        if self.inspect { self.inner.inspect_tx(tx) } else { self.inner.transact(tx) }
     }
 
-    fn transact_system_call(
+    pub fn inspector(&self) -> &I {
+        &self.inner.inspector
+    }
+
+    pub fn inspector_mut(&mut self) -> &mut I {
+        &mut self.inner.inspector
+    }
+}
+
+impl<DB, I, PRECOMPILE> AnvilEvm<DB, I, PRECOMPILE>
+where
+    DB: Database + DatabaseCommit,
+    I: Inspector<EthEvmContext<DB>>,
+    PRECOMPILE: PrecompileProvider<EthEvmContext<DB>, Output = InterpreterResult>,
+{
+    /// Executes a transaction and commits the state changes to the underlying database.
+    pub fn transact_commit(
         &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        self.inner.0.system_call_with_caller(caller, contract, data)
-    }
+        tx: TxEnv,
+    ) -> Result<ExecutionResult<HaltReason>, EVMError<DB::Error>> {
+        let ResultAndState { result, state } = self.transact(tx)?;
+        self.ctx.journaled_state.database.commit(state);
 
-    fn finish(self) -> (DB, EvmEnv) {
-        let Context { block: block_env, cfg: cfg_env, journaled_state, .. } = self.inner.0.ctx;
-
-        (journaled_state.database, EvmEnv { block_env, cfg_env })
-    }
-
-    fn set_inspector_enabled(&mut self, enabled: bool) {
-        self.inspect = enabled;
-    }
-
-    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
-        (
-            &self.inner.0.ctx.journaled_state.database,
-            &self.inner.0.inspector,
-            &self.inner.0.precompiles,
-        )
-    }
-
-    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
-        (
-            &mut self.inner.0.ctx.journaled_state.database,
-            &mut self.inner.0.inspector,
-            &mut self.inner.0.precompiles,
-        )
+        Ok(result)
     }
 }
 
@@ -148,24 +124,21 @@ mod tests {
     use std::{borrow::Cow, convert::Infallible};
 
     use crate::{PrecompileFactory, evm::AnvilEvm, inject_custom_precompiles};
-    use alloy_evm::{Evm, precompiles::PrecompilesMap};
     use alloy_primitives::{Address, Bytes, TxKind, address};
+    use arbos_revm::precompiles::ArbitrumPrecompileProvider;
     use foundry_evm::{
         EvmEnv,
-        core::evm::{CfgEnv, EthEvm, EthEvmContext, LocalContext, TxEnv},
+        core::evm::{CfgEnv, EthEvm, EthEvmContext, LocalContext, PrecompilesMap, TxEnv},
     };
-    use itertools::Itertools;
+
     use revm::{
         Journal,
         context::JournalTr,
         database::{EmptyDB, EmptyDBTyped},
-        handler::{EthPrecompiles, instructions::EthInstructions},
+        handler::instructions::EthInstructions,
         inspector::NoOpInspector,
         interpreter::interpreter::EthInterpreter,
-        precompile::{
-            Precompile, PrecompileId, PrecompileOutput, PrecompileResult, PrecompileSpecId,
-            Precompiles,
-        },
+        precompile::{Precompile, PrecompileId, PrecompileOutput, PrecompileResult},
         primitives::hardfork::SpecId,
     };
 
@@ -173,7 +146,7 @@ mod tests {
     const ETH_PRAGUE_PRECOMPILE: Address = address!("0x0000000000000000000000000000000000000011");
 
     // A custom precompile address and payload for testing.
-    const PRECOMPILE_ADDR: Address = address!("0x0000000000000000000000000000000000000071");
+    const PRECOMPILE_ADDR: Address = address!("0x0000000000000000000000000000000000000044");
     const PAYLOAD: &[u8] = &[0xde, 0xad, 0xbe, 0xef];
 
     #[derive(Debug)]
@@ -198,10 +171,11 @@ mod tests {
         Ok(PrecompileOutput { bytes: Bytes::copy_from_slice(input), gas_used: 0, reverted: false })
     }
 
+    pub type TestEvm =
+        AnvilEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap<EmptyDBTyped<Infallible>>>;
+
     /// Creates a new EVM instance with the custom precompile factory.
-    fn create_eth_evm(
-        spec: SpecId,
-    ) -> (foundry_evm::Env, AnvilEvm<EmptyDBTyped<Infallible>, NoOpInspector, PrecompilesMap>) {
+    fn create_eth_evm(spec: SpecId) -> (foundry_evm::Env, TestEvm) {
         let eth_env = foundry_evm::Env {
             evm_env: EvmEnv { block_env: Default::default(), cfg_env: CfgEnv::new_with_spec(spec) },
             tx: TxEnv {
@@ -221,17 +195,14 @@ mod tests {
             error: Ok(()),
         };
 
-        let eth_precompiles = EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }
-        .precompiles;
+        let precompiles = ArbitrumPrecompileProvider::new(spec);
+
         let eth_evm = AnvilEvm::new(
             EthEvm::new_with_inspector(
                 eth_evm_context,
                 NoOpInspector,
                 EthInstructions::<EthInterpreter, EthEvmContext<EmptyDB>>::default(),
-                PrecompilesMap::from_static(eth_precompiles),
+                PrecompilesMap::new(precompiles),
             ),
             true,
         );
@@ -244,13 +215,13 @@ mod tests {
         let (env, mut evm) = create_eth_evm(SpecId::default());
 
         // Check that the Prague precompile IS present when using the default spec.
-        assert!(evm.precompiles().addresses().contains(&ETH_PRAGUE_PRECOMPILE));
+        assert!(evm.precompiles().contains(&ETH_PRAGUE_PRECOMPILE));
 
-        assert!(!evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(!evm.precompiles().contains(&PRECOMPILE_ADDR));
 
         inject_custom_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
 
-        assert!(evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(evm.precompiles().contains(&PRECOMPILE_ADDR));
 
         let result = evm.transact(env.tx).unwrap();
 
@@ -263,13 +234,13 @@ mod tests {
         let (env, mut evm) = create_eth_evm(SpecId::LONDON);
 
         // Check that the Prague precompile IS NOT present when using the London spec.
-        assert!(!evm.precompiles().addresses().contains(&ETH_PRAGUE_PRECOMPILE));
+        assert!(!evm.precompiles().contains(&ETH_PRAGUE_PRECOMPILE));
 
-        assert!(!evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(!evm.precompiles().contains(&PRECOMPILE_ADDR));
 
         inject_custom_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
 
-        assert!(evm.precompiles().addresses().contains(&PRECOMPILE_ADDR));
+        assert!(evm.precompiles().contains(&PRECOMPILE_ADDR));
 
         let result = evm.transact(env.tx).unwrap();
 

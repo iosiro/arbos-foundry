@@ -18,19 +18,17 @@ use alloy_consensus::{
     Receipt, ReceiptWithBloom, constants::EMPTY_WITHDRAWALS, proofs::calculate_receipt_root,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams};
-use alloy_evm::{
-    Evm,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
-};
+use alloy_evm::precompiles::{DynPrecompile, Precompile};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
+use arbos_revm::state::ArbState;
 use foundry_evm::{
     backend::DatabaseError,
     core::{
-        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext},
+        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext, PrecompilesMap, TxEnv},
         precompiles::EC_RECOVER,
     },
     traces::{CallTraceDecoder, CallTraceNode},
@@ -41,9 +39,8 @@ use revm::{
     context::{Block as RevmBlock, Cfg, JournalTr},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -264,6 +261,29 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
 
         Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
     }
+
+    pub fn apply_arbitrum_state_overrides<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut arbos_revm::state::ArbosStateParams),
+    {
+        let mut context = EthEvmContext {
+            block: BlockEnv::default(),
+            tx: TxEnv::default(),
+            cfg: CfgEnv::default(),
+            journaled_state: { Journal::new(&mut self.db) },
+            chain: (),
+            local: LocalContext::default(),
+            error: Ok(()),
+        };
+
+        let mut state = context.arb_state(None, true);
+
+        let mut params: arbos_revm::state::ArbosStateParams = state.get().unwrap_or_default();
+
+        f(&mut params);
+
+        _ = state.initialize(&params);
+    }
 }
 
 /// Represents the result of a single transaction execution attempt
@@ -449,7 +469,7 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> AnvilEvm<DB, I, PrecompilesMap>
+) -> AnvilEvm<DB, I, PrecompilesMap<DB>>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -469,16 +489,11 @@ where
         error: Ok(()),
     };
 
-    let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
-    }
-    .precompiles;
     let eth_evm = EthEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
-        PrecompilesMap::from_static(eth_precompiles),
+        PrecompilesMap::new(arbos_revm::precompiles::ArbitrumPrecompileProvider::new(spec)),
     );
 
     AnvilEvm::new(eth_evm, true)
@@ -489,7 +504,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,

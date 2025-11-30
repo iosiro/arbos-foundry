@@ -49,9 +49,9 @@ use alloy_eips::{
     eip7910::SystemContract,
 };
 use alloy_evm::{
-    Database, Evm,
+    Database,
     overrides::{OverrideBlockHashes, apply_state_overrides},
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile},
 };
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
@@ -91,14 +91,16 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::state::ArbosStateParams;
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use foundry_config::apply_stylus_config;
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     core::{
-        evm::{BlockEnv, EthEvmContext},
+        evm::{BlockEnv, EthEvmContext, PrecompilesMap},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -1148,7 +1150,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -1238,7 +1240,7 @@ impl Backend {
 
         let storage = self.blockchain.storage.read();
 
-        let executor = TransactionExecutor {
+        let mut executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
             pending: pool_transactions.into_iter(),
@@ -1256,6 +1258,13 @@ impl Backend {
             blob_params: self.blob_params(),
             cheats: self.cheats().clone(),
         };
+
+        executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+            let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+            if let Some(stylus_config) = stylus_config {
+                apply_stylus_config(params, &stylus_config);
+            }
+        });
 
         // create a new pending block
         let executed = executor.execute();
@@ -1327,7 +1336,7 @@ impl Backend {
                 // to ensure the timestamp is as close as possible to the actual execution.
                 env.evm_env.block_env.timestamp = U256::from(self.time.next_timestamp());
 
-                let executor = TransactionExecutor {
+                let mut executor = TransactionExecutor {
                     db: &mut **db,
                     validator: self,
                     pending: pool_transactions.into_iter(),
@@ -1345,6 +1354,14 @@ impl Backend {
                     blob_params: self.blob_params(),
                     cheats: self.cheats().clone(),
                 };
+
+                executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+                    let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+                    if let Some(stylus_config) = stylus_config {
+                        apply_stylus_config(params, &stylus_config);
+                    }
+                });
+
                 let executed_tx = executor.execute();
 
                 // we also need to update the new blockhash in the db itself
@@ -1942,7 +1959,6 @@ impl Backend {
                     }
                     #[cfg(feature = "js-tracer")]
                     GethDebugTracerType::JsTracer(code) => {
-                        use alloy_evm::IntoTxEnv;
                         let config = tracer_config.into_json();
                         let mut inspector =
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
@@ -1954,7 +1970,7 @@ impl Backend {
                         let result = evm.transact(env.tx.clone())?;
                         let res = evm
                             .inspector_mut()
-                            .json_result(result, &env.tx.into_tx_env(), &block, &cache_db)
+                            .json_result(result, &env.tx, &block, &cache_db)
                             .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
                         Ok(GethTrace::JS(res))
@@ -2665,7 +2681,6 @@ impl Backend {
 
         let trace = |parent_state: &StateDb| -> Result<T, BlockchainError> {
             let mut cache_db = CacheDB::new(Box::new(parent_state));
-
             // configure the blockenv for the block of the transaction
             let mut env = self.env.read().clone();
 
@@ -2680,7 +2695,7 @@ impl Backend {
                 ..Default::default()
             };
 
-            let executor = TransactionExecutor {
+            let mut executor = TransactionExecutor {
                 db: &mut cache_db,
                 validator: self,
                 pending: pool_txs.into_iter(),
@@ -2698,6 +2713,13 @@ impl Backend {
                 blob_params: self.blob_params(),
                 cheats: self.cheats().clone(),
             };
+
+            executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
+                let stylus_config = self.node_config.blocking_read().stylus_config.clone();
+                if let Some(stylus_config) = stylus_config {
+                    apply_stylus_config(params, &stylus_config);
+                }
+            });
 
             let _ = executor.execute();
 
@@ -2743,12 +2765,7 @@ impl Backend {
             inspector,
             |result, cache_db, mut inspector, tx_env, env| {
                 inspector
-                    .json_result(
-                        result,
-                        &alloy_evm::IntoTxEnv::into_tx_env(tx_env),
-                        &env.evm_env.block_env,
-                        &cache_db,
-                    )
+                    .json_result(result, &tx_env, &env.evm_env.block_env, &cache_db)
                     .map_err(|e| BlockchainError::Message(e.to_string()))
             },
         )??;
