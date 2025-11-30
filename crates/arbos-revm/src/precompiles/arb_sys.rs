@@ -285,12 +285,12 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
                 interpreter_return!(gas, Bytes::from(output));
             }
             ArbSys::sendTxToL1Call::SELECTOR => {
-                let output = ArbSys::sendTxToL1Call::abi_encode_returns(&U256::random());
+                let output = ArbSys::sendTxToL1Call::abi_encode_returns(&U256::ONE);
 
                 interpreter_return!(gas, Bytes::from(output));
             }
             ArbSys::withdrawEthCall::SELECTOR => {
-                let output = ArbSys::withdrawEthCall::abi_encode_returns(&U256::random());
+                let output = ArbSys::withdrawEthCall::abi_encode_returns(&U256::ONE);
 
                 interpreter_return!(gas, Bytes::from(output));
             }

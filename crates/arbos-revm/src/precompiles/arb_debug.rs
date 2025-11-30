@@ -1,15 +1,15 @@
 use crate::{
     ArbitrumContextTr, generate_state_mut_table,
-    macros::{interpreter_return, interpreter_revert},
+    macros::{emit_event, interpreter_return, interpreter_revert},
     precompile_impl,
     precompiles::{
         ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
     },
     state::{ArbState, ArbStateGetter, try_state},
-    try_record_cost,
 };
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
+    context::JournalTr,
     interpreter::{Gas, InstructionResult, InterpreterResult},
     precompile::PrecompileId,
     primitives::{Address, B256, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
@@ -102,9 +102,6 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbDebugPrecompile {
             ArbDebug::eventsCall::SELECTOR => {
                 let call = decode_call!(gas, ArbDebug::eventsCall, input);
 
-                // TODO handle inspector mode
-
-                // Emit events based on the args
                 events(
                     context,
                     caller_address,
@@ -168,45 +165,29 @@ fn events<CTX: ArbitrumContextTr>(
         });
     }
 
-    let log_data = ArbDebug::Basic { flag, value }.to_log_data();
-    if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
-    {
-        let mut gas = &mut gas;
-        try_record_cost!(gas, gas_cost);
-    }
-
-    context.log(
-        Log::new(
-            address!("0x00000000000000000000000000000000000000ff"),
-            log_data.topics().into(),
-            log_data.data,
-        )
-        .unwrap(),
+    emit_event!(
+        context,
+        Log {
+            address: address!("0x00000000000000000000000000000000000000ff"),
+            data: ArbDebug::Basic { flag: !flag, value }.to_log_data(),
+        },
+        gas
     );
 
-    let log_data = ArbDebug::Mixed {
-        flag,
-        not: !flag,
-        caller: caller_address,
-        conn: address!("0x00000000000000000000000000000000000000ff"),
-        value,
-    }
-    .to_log_data();
-
-    if let Some(gas_cost) =
-        revm::interpreter::gas::log_cost(log_data.topics().len() as u8, log_data.data.len() as u64)
-    {
-        try_record_cost!(gas, gas_cost);
-    }
-
-    context.log(
-        Log::new(
-            address!("0x00000000000000000000000000000000000000ff"),
-            log_data.topics().into(),
-            log_data.data,
-        )
-        .unwrap(),
+    emit_event!(
+        context,
+        Log {
+            address: address!("0x00000000000000000000000000000000000000ff"),
+            data: ArbDebug::Mixed {
+                flag,
+                value,
+                not: !flag,
+                conn: address!("0x00000000000000000000000000000000000000aa"),
+                caller: caller_address
+            }
+            .to_log_data(),
+        },
+        gas
     );
 
     interpreter_return!(gas);
