@@ -2,9 +2,7 @@ use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{
-        Address, B256, Bytes, FixedBytes, U256, address, fixed_bytes,
-    },
+    primitives::{Address, B256, Bytes, FixedBytes, U256, address, fixed_bytes},
 };
 
 use crate::{
