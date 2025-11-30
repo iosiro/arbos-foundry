@@ -1259,10 +1259,10 @@ impl Backend {
             cheats: self.cheats().clone(),
         };
 
+        let stylus_config = self.node_config.blocking_read().stylus_config.clone();
         executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-            let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-            if let Some(stylus_config) = stylus_config {
-                apply_stylus_config(params, &stylus_config);
+            if let Some(ref stylus_config) = stylus_config {
+                apply_stylus_config(params, stylus_config);
             }
         });
 
@@ -1355,10 +1355,10 @@ impl Backend {
                     cheats: self.cheats().clone(),
                 };
 
+                let stylus_config = self.node_config.blocking_read().stylus_config.clone();
                 executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-                    let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-                    if let Some(stylus_config) = stylus_config {
-                        apply_stylus_config(params, &stylus_config);
+                    if let Some(ref stylus_config) = stylus_config {
+                        apply_stylus_config(params, stylus_config);
                     }
                 });
 
@@ -2714,10 +2714,10 @@ impl Backend {
                 cheats: self.cheats().clone(),
             };
 
+            let stylus_config = self.node_config.blocking_read().stylus_config.clone();
             executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-                let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-                if let Some(stylus_config) = stylus_config {
-                    apply_stylus_config(params, &stylus_config);
+                if let Some(ref stylus_config) = stylus_config {
+                    apply_stylus_config(params, stylus_config);
                 }
             });
 
