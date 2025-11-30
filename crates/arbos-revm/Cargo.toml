@@ -21,6 +21,7 @@ stylus = { workspace = true, default-features = false, features = ["cc_brotli"] 
 wasmer-types = { workspace = true, default-features = false }
 auto_impl = { workspace = true}
 alloy-rlp = { workspace = true }
+tracing = { workspace = true }
 
 lru = "0.14.0"
 lazy_static = "1.5.0"
