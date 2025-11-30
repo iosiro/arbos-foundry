@@ -25,6 +25,8 @@ pub enum ArbosStateError {
     ProgramNotActivated,
     ProgramNeedsUpgrade(u16, u16),
     ProgramExpired(u32),
+    RectifyMappingNotOwner,
+    RectifyMappingNoChange,
     Context(String),
 }
 
@@ -49,6 +51,12 @@ impl Display for ArbosStateError {
             }
             Self::ProgramExpired(expired_at) => {
                 write!(f, "Program expired at {expired_at}")
+            }
+            Self::RectifyMappingNotOwner => {
+                write!(f, "RectifyMapping: Address is not an owner")
+            }
+            Self::RectifyMappingNoChange => {
+                write!(f, "RectifyMapping: Owner address is correctly mapped")
             }
             Self::Context(err) => {
                 write!(f, "Context error: {err}")
@@ -110,6 +118,13 @@ impl From<ArbosStateError> for InterpreterResult {
                 gas: Gas::default(),
                 output: Bytes::default(),
             },
+            ArbosStateError::RectifyMappingNoChange | ArbosStateError::RectifyMappingNotOwner => {
+                Self {
+                    result: InstructionResult::Revert,
+                    gas: Gas::default(),
+                    output: Bytes::from(description.clone().into_bytes()),
+                }
+            }
             _ => Self {
                 result: InstructionResult::Revert,
                 gas: Gas::default(),
@@ -377,13 +392,17 @@ where
     pub fn contains(&mut self, address: Address) -> Result<bool, ArbosStateError> {
         let by_address = substorage(&self.slot, &[0]);
         let slot = map_address(&by_address, &B256::left_padding_from(address.as_slice()));
-        let addr =
-            StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+        let index =
+            StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
                 .get()?;
-        Ok(!addr.is_zero())
+        Ok(!index.is_zero())
     }
 
     pub fn add(&mut self, address: Address) -> Result<(), ArbosStateError> {
+        if self.contains(address)? {
+            return Ok(());
+        }
+
         // push to array
         let size = {
             let size_slot = self.size_slot();
@@ -410,25 +429,118 @@ where
             self.is_static,
             map_address(&by_address, &B256::left_padding_from(address.as_slice())),
         )
-        .set(U256::ONE)?;
+        .set(size)?;
 
         Ok(())
     }
 
     pub fn remove(&mut self, address: &Address) -> Result<(), ArbosStateError> {
         let by_address = substorage(&self.slot, &[0]);
-        let by_address_slot =
-            map_address(&by_address, &B256::left_padding_from(address.as_slice()));
+        let slot = StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            map_address(&by_address, &B256::left_padding_from(address.as_slice())),
+        )
+        .get()?
+        .saturating_to::<usize>();
 
+        if slot == 0 {
+            return Ok(());
+        }
+
+        // clear by-address index
         StorageBackedU256::new(
             self.context,
             self.gas.as_deref_mut(),
             self.is_static,
-            by_address_slot,
+            map_address(&by_address, &B256::left_padding_from(address.as_slice())),
         )
-        .set(U256::ZERO)
+        .set(U256::ZERO)?;
 
-        // NOTE: we don't compact the array in storage to keep logic simple and predictable.
+        let size = self.size()?;
+        if slot < size {
+            let at_size_slot = map_address(&self.slot, &B256::from(U256::from(size as u64)));
+            let at_size = StorageBackedAddress::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                at_size_slot,
+            )
+            .get()?;
+
+            let slot_slot = map_address(&self.slot, &B256::from(U256::from(slot as u64)));
+            StorageBackedAddress::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                slot_slot,
+            )
+            .set(at_size)?;
+
+            // update by-address index for moved address
+            StorageBackedU256::new(
+                self.context,
+                self.gas.as_deref_mut(),
+                self.is_static,
+                map_address(&by_address, &B256::left_padding_from(at_size.as_slice())),
+            )
+            .set(U256::from(slot as u64))?;
+        }
+
+        // clear last slot
+        let last_slot = map_address(&self.slot, &B256::from(U256::from(size as u64)));
+        StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, last_slot)
+            .set(Address::ZERO)?;
+
+        // decrement size
+        let size_slot = self.size_slot();
+        let mut size_slot = StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            size_slot,
+        );
+
+        let size = size_slot.get()? - U256::ONE;
+        size_slot.set(size)?;
+
+        Ok(())
+    }
+
+    pub fn rectify(&mut self, address: Address) -> Result<(), ArbosStateError> {
+        if self.contains(address)? {
+            return Err(ArbosStateError::RectifyMappingNotOwner);
+        }
+
+        let by_address = substorage(&self.slot, &[0]);
+        let slot = map_address(&by_address, &B256::left_padding_from(address.as_slice()));
+        let index =
+            StorageBackedU256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+                .get()?;
+
+        let slot = map_address(&self.slot, &B256::from(index));
+        let addr =
+            StorageBackedAddress::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+                .get()?;
+        let size = self.size()?;
+        if addr == address && index.saturating_to::<usize>() <= size {
+            return Err(ArbosStateError::RectifyMappingNoChange);
+        }
+
+        // clear by-address index
+        StorageBackedU256::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            map_address(&by_address, &B256::left_padding_from(address.as_slice())),
+        )
+        .set(U256::ZERO)?;
+
+        // push to array
+        self.add(address)?;
+
+        Ok(())
     }
 }
 

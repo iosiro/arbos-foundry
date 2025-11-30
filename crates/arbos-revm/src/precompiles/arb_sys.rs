@@ -2,7 +2,9 @@ use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, B256, Bytes, FixedBytes, U256, address, fixed_bytes},
+    primitives::{
+        Address, B256, Bytes, FixedBytes, U256, address, fixed_bytes,
+    },
 };
 
 use crate::{
@@ -281,6 +283,27 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbSysPrecompile {
                 let address = Address::ZERO;
                 let output =
                     ArbSys::myCallersAddressWithoutAliasingCall::abi_encode_returns(&address);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::sendTxToL1Call::SELECTOR => {
+                let output = ArbSys::sendTxToL1Call::abi_encode_returns(&U256::random());
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::withdrawEthCall::SELECTOR => {
+                let output = ArbSys::withdrawEthCall::abi_encode_returns(&U256::random());
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbSys::sendMerkleTreeStateCall::SELECTOR => {
+                let output = ArbSys::sendMerkleTreeStateCall::abi_encode_returns(
+                    &ArbSys::sendMerkleTreeStateReturn {
+                        size: U256::ZERO,
+                        root: B256::ZERO,
+                        partials: vec![],
+                    },
+                );
 
                 interpreter_return!(gas, Bytes::from(output));
             }

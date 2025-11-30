@@ -1,13 +1,14 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
+    context::JournalTr,
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, Bytes, U256, address},
+    primitives::{Address, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
 use crate::{
     ArbitrumContextTr, generate_state_mut_table,
-    macros::{interpreter_return, interpreter_revert},
+    macros::{emit_event, interpreter_return, interpreter_revert},
     precompile_impl,
     precompiles::{
         ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
@@ -228,6 +229,24 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPublicPrecompil
                 );
 
                 interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbOwnerPublic::rectifyChainOwnerCall::SELECTOR => {
+                let call = decode_call!(gas, ArbOwnerPublic::rectifyChainOwnerCall, input);
+
+                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                try_state!(gas, arb_state.chain_owners().rectify(call.ownerToRectify));
+
+                let log = Log {
+                    data: ArbOwnerPublic::ChainOwnerRectified {
+                        rectifiedOwner: call.ownerToRectify,
+                    }
+                    .into_log_data(),
+                    ..Default::default()
+                };
+
+                emit_event!(context, log, gas);
+
+                interpreter_return!(gas);
             }
             _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
         }

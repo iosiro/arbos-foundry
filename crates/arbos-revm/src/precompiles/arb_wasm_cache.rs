@@ -112,7 +112,11 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let is_manager = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas), is_static).cache_managers().contains(manager)
+                    context
+                        .arb_state(Some(&mut gas), is_static)
+                        .programs()
+                        .cache_managers()
+                        .contains(manager)
                 );
 
                 let output = IArbWasmCache::isCacheManagerCall::abi_encode_returns(&is_manager);
@@ -124,7 +128,7 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbWasmCache {
 
                 let managers = try_state!(
                     gas,
-                    context.arb_state(Some(&mut gas), is_static).cache_managers().all()
+                    context.arb_state(Some(&mut gas), is_static).programs().cache_managers().all()
                 );
 
                 let output = IArbWasmCache::allCacheManagersCall::abi_encode_returns(&managers);
@@ -349,7 +353,7 @@ fn has_access<CTX: ArbitrumContextTr>(
     gas: &mut Gas,
 ) -> Result<bool, ArbosStateError> {
     let mut arb_state = context.arb_state(Some(gas), true);
-    if arb_state.cache_managers().contains(caller)? {
+    if arb_state.programs().cache_managers().contains(caller)? {
         return Ok(true);
     }
 

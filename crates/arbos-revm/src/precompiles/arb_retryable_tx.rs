@@ -1,7 +1,7 @@
 use alloy_sol_types::{SolCall, SolError, sol};
 use revm::{
     context::{Block, JournalTr},
-    interpreter::{Gas, InterpreterResult},
+    interpreter::{Gas, InterpreterResult, gas::ISTANBUL_SLOAD_GAS},
     precompile::PrecompileId,
     primitives::{
         Address, B256, Bytes, Log, U256, address, alloy_primitives::IntoLogData, keccak256,
@@ -22,6 +22,7 @@ use crate::{
 };
 
 const ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60; // 1 week
+const RETRYABLE_REAP_PRICE: u64 = 58_000;
 
 sol! {
 ///
@@ -173,9 +174,24 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
             ArbRetryableTx::cancelCall::SELECTOR => {
                 let call = decode_call!(gas, ArbRetryableTx::cancelCall, input);
 
+                let current_time = context.block().timestamp().saturating_to::<u64>();
+
                 let beneficiary = {
                     let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                    try_state!(gas, arb_state.retryable(call.ticketId).beneficiary().get())
+                    let mut retryable = arb_state.retryable(call.ticketId);
+                    let timeout = try_state!(gas, retryable.timeout().get());
+
+                    if timeout == 0 || timeout < current_time {
+                        if context.cfg().arbos_version() >= 3 {
+                            let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+
+                            interpreter_revert!(gas, Bytes::from(output));
+                        }
+
+                        interpreter_revert!(gas, Bytes::from("ticketId not found"));
+                    }
+
+                    try_state!(gas, retryable.beneficiary().get())
                 };
 
                 if caller_address != beneficiary {
@@ -217,20 +233,23 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
             ArbRetryableTx::getBeneficiaryCall::SELECTOR => {
                 let call = decode_call!(gas, ArbRetryableTx::getBeneficiaryCall, input);
 
+                let current_time = context.block().timestamp().saturating_to::<u64>();
                 let beneficiary = {
                     let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                    try_state!(gas, arb_state.retryable(call.ticketId).beneficiary().get())
-                };
+                    let mut retryable = arb_state.retryable(call.ticketId);
+                    let timeout = try_state!(gas, retryable.timeout().get());
+                    if timeout == 0 || timeout < current_time {
+                        if context.cfg().arbos_version() >= 3 {
+                            let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
-                if beneficiary == Address::ZERO {
-                    if context.cfg().arbos_version() >= 3 {
-                        let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
+                            interpreter_revert!(gas, Bytes::from(output));
+                        }
 
-                        interpreter_revert!(gas, Bytes::from(output));
+                        interpreter_revert!(gas, Bytes::from("ticketId not found"));
                     }
 
-                    interpreter_revert!(gas, Bytes::from("ticketId not found"));
-                }
+                    try_state!(gas, retryable.beneficiary().get())
+                };
 
                 let output = ArbRetryableTx::getBeneficiaryCall::abi_encode_returns(&beneficiary);
 
@@ -252,12 +271,16 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
             ArbRetryableTx::getTimeoutCall::SELECTOR => {
                 let call = decode_call!(gas, ArbRetryableTx::getTimeoutCall, input);
 
-                let timeout = {
+                let current_time = context.block().timestamp().saturating_to::<u64>();
+                let (timeout, windows_left) = {
                     let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                    try_state!(gas, arb_state.retryable(call.ticketId).timeout().get())
+                    let mut retryable = arb_state.retryable(call.ticketId);
+                    let timeout = try_state!(gas, retryable.timeout().get());
+                    let windows_left = try_state!(gas, retryable.timeout_windows_left().get());
+                    (timeout, windows_left)
                 };
 
-                if timeout == 0 {
+                if timeout == 0 || timeout < current_time {
                     if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
@@ -267,26 +290,29 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     interpreter_revert!(gas, Bytes::from("ticketId not found"));
                 }
 
-                let output =
-                    ArbRetryableTx::getTimeoutCall::abi_encode_returns(&U256::from(timeout));
+                let calculated_timeout = calculate_retryable_timeout(timeout, windows_left);
+
+                let output = ArbRetryableTx::getTimeoutCall::abi_encode_returns(&U256::from(
+                    calculated_timeout,
+                ));
 
                 interpreter_return!(gas, Bytes::from(output));
             }
             ArbRetryableTx::keepaliveCall::SELECTOR => {
                 let call = decode_call!(gas, ArbRetryableTx::keepaliveCall, input);
 
-                let (timeout, windows_left, calldata_len) = {
+                let current_time = context.block().timestamp().saturating_to::<u64>();
+                let (timeout, windows_left) = {
                     let mut arb_state = context.arb_state(Some(&mut gas), is_static);
                     let mut retryable = arb_state.retryable(call.ticketId);
 
                     let timeout = try_state!(gas, retryable.timeout().get());
-                    let calldata_len = try_state!(gas, retryable.calldata().get()).len();
                     let windows_left = try_state!(gas, retryable.timeout_windows_left().get());
 
-                    (timeout, windows_left, calldata_len)
+                    (timeout, windows_left)
                 };
 
-                if timeout == 0 {
+                if timeout == 0 || timeout < current_time {
                     if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
@@ -296,19 +322,25 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     interpreter_revert!(gas, Bytes::from("ticketId not found"));
                 }
 
-                let nbytes = { 7 * 32 + 32 * calldata_len.div_ceil(32) };
+                let calldata_len = {
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                    try_state!(gas, arb_state.retryable(call.ticketId).calldata().get()).len()
+                        as u64
+                };
 
-                let update_cost =
-                    nbytes.div_ceil(32) as u64 * revm::interpreter::gas::SSTORE_SET / 100;
+                let nbytes = retryable_size_bytes(calldata_len);
+
+                let update_cost = nbytes.div_ceil(32) * revm::interpreter::gas::SSTORE_SET / 100;
 
                 try_record_cost!(gas, update_cost);
 
-                let current_time = context.block().timestamp().saturating_to::<u64>();
-                let window = current_time + ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;
+                let window = current_time.saturating_add(ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS);
 
-                let new_timeout = timeout + windows_left * ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS;
+                let effective_timeout = calculate_retryable_timeout(timeout, windows_left);
+                let new_timeout =
+                    effective_timeout.saturating_add(ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS);
 
-                if timeout > window {
+                if effective_timeout > window {
                     interpreter_revert!(gas, Bytes::from("timeout too far into the future"));
                 }
 
@@ -323,6 +355,8 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     gas,
                     retryable.timeout_windows_left().set(windows_left.saturating_add(1))
                 );
+
+                try_record_cost!(gas, RETRYABLE_REAP_PRICE);
 
                 emit_event!(
                     context,
@@ -345,12 +379,18 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
             ArbRetryableTx::redeemCall::SELECTOR => {
                 let call = decode_call!(gas, ArbRetryableTx::redeemCall, input);
 
-                let timeout = {
+                let current_time = context.block().timestamp().saturating_to::<u64>();
+
+                let (timeout, calldata_len) = {
                     let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                    try_state!(gas, arb_state.retryable(call.ticketId).timeout().get())
+                    let mut retryable = arb_state.retryable(call.ticketId);
+                    let timeout = try_state!(gas, retryable.timeout().get());
+                    let calldata_len = try_state!(gas, retryable.calldata().get()).len() as u64;
+
+                    (timeout, calldata_len)
                 };
 
-                if timeout == 0 {
+                if timeout == 0 || timeout < current_time {
                     if context.cfg().arbos_version() >= 3 {
                         let output = ArbRetryableTx::NoTicketWithID {}.abi_encode();
 
@@ -360,9 +400,52 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
                     interpreter_revert!(gas, Bytes::from("ticketId not found"));
                 }
 
-                // For simplicity, we do not implement redeem logic here.
+                // Charge for accessing retryable storage slots.
+                let byte_count = retryable_size_bytes(calldata_len);
+                let write_words = byte_count.div_ceil(32);
+                try_record_cost!(gas, ISTANBUL_SLOAD_GAS.saturating_mul(write_words));
 
-                let output = ArbRetryableTx::redeemCall::abi_encode_returns(&call.ticketId);
+                let nonce = {
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                    let mut retryable = arb_state.retryable(call.ticketId);
+                    let num_tries = try_state!(gas, retryable.num_tries().get());
+                    try_state!(gas, retryable.num_tries().set(num_tries.saturating_add(1)));
+                    num_tries
+                };
+
+                // Derive a deterministic hash for the scheduled retry attempt.
+                let retry_tx_hash = {
+                    let mut hash_input =
+                        Vec::with_capacity(call.ticketId.as_slice().len() + 8 + 20);
+                    hash_input.extend_from_slice(call.ticketId.as_slice());
+                    hash_input.extend_from_slice(&nonce.to_be_bytes());
+                    hash_input.extend_from_slice(caller_address.as_slice());
+                    keccak256(&hash_input)
+                };
+
+                let gas_to_donate = gas.remaining();
+                let max_refund = U256::MAX;
+                let submission_fee_refund = U256::ZERO;
+
+                emit_event!(
+                    context,
+                    Log {
+                        address: *target_address,
+                        data: ArbRetryableTx::RedeemScheduled {
+                            ticketId: call.ticketId,
+                            retryTxHash: retry_tx_hash,
+                            sequenceNum: nonce,
+                            donatedGas: gas_to_donate,
+                            gasDonor: caller_address,
+                            maxRefund: max_refund,
+                            submissionFeeRefund: submission_fee_refund,
+                        }
+                        .into_log_data()
+                    },
+                    gas
+                );
+
+                let output = ArbRetryableTx::redeemCall::abi_encode_returns(&retry_tx_hash);
 
                 interpreter_return!(gas, Bytes::from(output));
             }
@@ -376,6 +459,16 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbRetryableTxPrecompil
             _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
         }
     }
+}
+
+fn retryable_size_bytes(calldata_length: u64) -> u64 {
+    let calldata_words = calldata_length.div_ceil(32);
+    // 6 storage words for the fixed fields plus a length word and the calldata contents.
+    6 * 32 + 32 + 32 * calldata_words
+}
+
+fn calculate_retryable_timeout(timeout: u64, windows_left: u64) -> u64 {
+    timeout.saturating_add(windows_left.saturating_mul(ARBOS_STATE_RETRYABLE_LIFETIME_SECONDS))
 }
 
 fn retryable_escrow_address(ticket_id: B256) -> Address {

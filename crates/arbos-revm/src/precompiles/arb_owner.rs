@@ -1,8 +1,9 @@
 use alloy_sol_types::{SolCall, sol};
 use revm::{
+    context::JournalTr,
     interpreter::{Gas, InterpreterResult},
     precompile::PrecompileId,
-    primitives::{Address, Bytes, U256, address},
+    primitives::{Address, Bytes, Log, U256, address, alloy_primitives::IntoLogData},
 };
 
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
     config::ArbitrumConfigTr,
     constants::{ARBOS_L1_PRICER_FUNDS_ADDRESS, COST_SCALAR_PERCENT},
     generate_state_mut_table,
-    macros::{interpreter_return, interpreter_revert},
+    macros::{emit_event, interpreter_return, interpreter_revert},
     precompile_impl,
     precompiles::{
         ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
@@ -280,7 +281,7 @@ pub(crate) fn require_chain_owner<CTX: ArbitrumContextTr>(
 ) -> Option<InterpreterResult> {
     let is_owner = try_state!(gas, context.arb_state(Some(gas), true).is_chain_owner(caller));
     if !is_owner {
-        const NOT_CHAIN_OWNER: &str = "must be called by chain owner";
+        const NOT_CHAIN_OWNER: &str = "unauthorized caller to access-controlled method";
         return Some(crate::macros::interpreter_result_revert_with_output(
             gas,
             NOT_CHAIN_OWNER.into(),
@@ -358,705 +359,781 @@ impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbOwnerPrecompile {
         is_static: bool,
         gas_limit: u64,
     ) -> Option<InterpreterResult> {
-        // Most methods simply gate on chain ownership and then update ArbOS state slots.
         let mut gas = Gas::new(gas_limit);
 
         let selector = selector_or_revert!(gas, input);
 
-        match selector {
-            ArbOwner::addChainOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::addChainOwnerCall, input);
+        require_chain_owner!(context, gas, caller_address);
 
-                require_chain_owner!(context, gas, caller_address);
+        fn run_arbos_owner<CTX: ArbitrumContextTr>(
+            context: &mut CTX,
+            selector: [u8; 4],
+            input: &[u8],
+            is_static: bool,
+            mut gas: Gas,
+        ) -> Option<InterpreterResult> {
+            match selector {
+                ArbOwner::addChainOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::addChainOwnerCall, input);
 
-                try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).chain_owners().add(call.newOwner)
-                );
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .chain_owners()
+                            .add(call.newOwner)
+                    );
 
-                let output = ArbOwner::addChainOwnerCall::abi_encode_returns(
-                    &ArbOwner::addChainOwnerReturn {},
-                );
+                    let output = ArbOwner::addChainOwnerCall::abi_encode_returns(
+                        &ArbOwner::addChainOwnerReturn {},
+                    );
 
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::addNativeTokenOwnerCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .native_token_owners()
-                        .add(call.newOwner)
-                );
-
-                let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(
-                    &ArbOwner::addNativeTokenOwnerReturn {},
-                );
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::addWasmCacheManagerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::addWasmCacheManagerCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .cache_managers()
-                        .add(call.manager)
-                );
-
-                let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(
-                    &ArbOwner::addWasmCacheManagerReturn {},
-                );
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::isChainOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::isChainOwnerCall, input);
-
-                let is_owner = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).is_chain_owner(call.addr)
-                );
-
-                let output = ArbOwner::isChainOwnerCall::abi_encode_returns(&is_owner);
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::isNativeTokenOwnerCall, input);
-
-                let is_owner = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).is_native_token_owner(call.addr)
-                );
-
-                let output = ArbOwner::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::removeChainOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::removeChainOwnerCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .chain_owners()
-                        .remove(&call.ownerToRemove)
-                );
-
-                let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
-                    &ArbOwner::removeChainOwnerReturn {},
-                );
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::removeNativeTokenOwnerCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .native_token_owners()
-                        .remove(&call.ownerToRemove)
-                );
-
-                let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
-                    &ArbOwner::removeNativeTokenOwnerReturn {},
-                );
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::removeWasmCacheManagerCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .cache_managers()
-                        .remove(&call.manager)
-                );
-
-                let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
-                    &ArbOwner::removeWasmCacheManagerReturn {},
-                );
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::getAllChainOwnersCall::SELECTOR => {
-                let _ = decode_call!(gas, ArbOwner::getAllChainOwnersCall, input);
-                let chains_owners = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).chain_owners().all()
-                );
-
-                let output = ArbOwner::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
-                let _ = decode_call!(gas, ArbOwner::getAllNativeTokenOwnersCall, input);
-                let native_token_owners = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).native_token_owners().all()
-                );
-
-                let output =
-                    ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(&native_token_owners);
-
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::setCalldataPriceIncreaseCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setCalldataPriceIncreaseCall, input);
-
-                require_chain_owner!(context, gas, caller_address);
-
-                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                let mut l1_pricing = arb_state.l1_pricing();
-                try_state!(
-                    gas,
-                    l1_pricing.gas_floor_per_token().set(if call.enable { 1 } else { 0 })
-                );
-
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setNativeTokenManagementFromCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setNativeTokenManagementFromCall, input);
-                require_chain_owner!(context, gas, caller_address);
-
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .native_token_enabled_time()
-                        .set(call.timestamp)
-                );
-
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1BaseFeeEstimateInertiaCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1BaseFeeEstimateInertiaCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .inertia()
-                        .set(call.inertia)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL2BaseFeeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL2BaseFeeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l2_pricing()
-                        .base_fee_wei()
-                        .set(call.priceInWei)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setMinimumL2BaseFeeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setMinimumL2BaseFeeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l2_pricing()
-                        .min_base_fee_wei()
-                        .set(call.priceInWei)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setSpeedLimitCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setSpeedLimitCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                if call.limit == 0 {
-                    interpreter_revert!(gas, Bytes::from("speed limit must be nonzero"));
+                    interpreter_return!(gas, Bytes::from(output));
                 }
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l2_pricing()
-                        .speed_limit_per_second()
-                        .set(call.limit)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setMaxTxGasLimitCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setMaxTxGasLimitCall, input);
-                require_chain_owner!(context, gas, caller_address);
+                ArbOwner::addNativeTokenOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::addNativeTokenOwnerCall, input);
 
-                if context.cfg().arbos_version() < 50 {
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .native_token_owners()
+                            .add(call.newOwner)
+                    );
+
+                    let output = ArbOwner::addNativeTokenOwnerCall::abi_encode_returns(
+                        &ArbOwner::addNativeTokenOwnerReturn {},
+                    );
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::addWasmCacheManagerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::addWasmCacheManagerCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .cache_managers()
+                            .add(call.manager)
+                    );
+
+                    let output = ArbOwner::addWasmCacheManagerCall::abi_encode_returns(
+                        &ArbOwner::addWasmCacheManagerReturn {},
+                    );
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::isChainOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::isChainOwnerCall, input);
+
+                    let is_owner = try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).is_chain_owner(call.addr)
+                    );
+
+                    let output = ArbOwner::isChainOwnerCall::abi_encode_returns(&is_owner);
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::isNativeTokenOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::isNativeTokenOwnerCall, input);
+
+                    let is_owner = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .is_native_token_owner(call.addr)
+                    );
+
+                    let output = ArbOwner::isNativeTokenOwnerCall::abi_encode_returns(&is_owner);
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::removeChainOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::removeChainOwnerCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .chain_owners()
+                            .remove(&call.ownerToRemove)
+                    );
+
+                    let output = ArbOwner::removeChainOwnerCall::abi_encode_returns(
+                        &ArbOwner::removeChainOwnerReturn {},
+                    );
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::removeNativeTokenOwnerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::removeNativeTokenOwnerCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .native_token_owners()
+                            .remove(&call.ownerToRemove)
+                    );
+
+                    let output = ArbOwner::removeNativeTokenOwnerCall::abi_encode_returns(
+                        &ArbOwner::removeNativeTokenOwnerReturn {},
+                    );
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::removeWasmCacheManagerCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::removeWasmCacheManagerCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .cache_managers()
+                            .remove(&call.manager)
+                    );
+
+                    let output = ArbOwner::removeWasmCacheManagerCall::abi_encode_returns(
+                        &ArbOwner::removeWasmCacheManagerReturn {},
+                    );
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::getAllChainOwnersCall::SELECTOR => {
+                    let _ = decode_call!(gas, ArbOwner::getAllChainOwnersCall, input);
+                    let chains_owners = try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).chain_owners().all()
+                    );
+
+                    let output =
+                        ArbOwner::getAllChainOwnersCall::abi_encode_returns(&chains_owners);
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::getAllNativeTokenOwnersCall::SELECTOR => {
+                    let _ = decode_call!(gas, ArbOwner::getAllNativeTokenOwnersCall, input);
+                    let native_token_owners = try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).native_token_owners().all()
+                    );
+
+                    let output = ArbOwner::getAllNativeTokenOwnersCall::abi_encode_returns(
+                        &native_token_owners,
+                    );
+
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::setCalldataPriceIncreaseCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setCalldataPriceIncreaseCall, input);
+
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                    let mut l1_pricing = arb_state.l1_pricing();
+                    try_state!(
+                        gas,
+                        l1_pricing.gas_floor_per_token().set(if call.enable { 1 } else { 0 })
+                    );
+
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setNativeTokenManagementFromCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setNativeTokenManagementFromCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .native_token_enabled_time()
+                            .set(call.timestamp)
+                    );
+
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1BaseFeeEstimateInertiaCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL1BaseFeeEstimateInertiaCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .inertia()
+                            .set(call.inertia)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL2BaseFeeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL2BaseFeeCall, input);
+
                     try_state!(
                         gas,
                         context
                             .arb_state(Some(&mut gas), is_static)
                             .l2_pricing()
-                            .per_block_gas_limit()
-                            .set(call.limit)
+                            .base_fee_wei()
+                            .set(call.priceInWei)
                     );
-                } else {
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setMinimumL2BaseFeeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setMinimumL2BaseFeeCall, input);
+
                     try_state!(
                         gas,
                         context
                             .arb_state(Some(&mut gas), is_static)
                             .l2_pricing()
-                            .per_tx_gas_limit()
+                            .min_base_fee_wei()
+                            .set(call.priceInWei)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setSpeedLimitCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setSpeedLimitCall, input);
+
+                    if call.limit == 0 {
+                        interpreter_revert!(gas, Bytes::from("speed limit must be nonzero"));
+                    }
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l2_pricing()
+                            .speed_limit_per_second()
                             .set(call.limit)
                     );
+                    interpreter_return!(gas, Bytes::new());
                 }
+                ArbOwner::setMaxTxGasLimitCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setMaxTxGasLimitCall, input);
 
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL2GasPricingInertiaCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL2GasPricingInertiaCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                if call.sec == 0 {
-                    interpreter_revert!(gas, Bytes::from("price inertia must be nonzero"));
+                    if context.cfg().arbos_version() < 50 {
+                        try_state!(
+                            gas,
+                            context
+                                .arb_state(Some(&mut gas), is_static)
+                                .l2_pricing()
+                                .per_block_gas_limit()
+                                .set(call.limit)
+                        );
+                    } else {
+                        try_state!(
+                            gas,
+                            context
+                                .arb_state(Some(&mut gas), is_static)
+                                .l2_pricing()
+                                .per_tx_gas_limit()
+                                .set(call.limit)
+                        );
+                    }
+
+                    interpreter_return!(gas, Bytes::new());
                 }
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l2_pricing()
-                        .pricing_inertia()
-                        .set(call.sec)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL2GasBacklogToleranceCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL2GasBacklogToleranceCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l2_pricing()
-                        .backlog_tolerance()
-                        .set(call.sec)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::getNetworkFeeAccountCall::SELECTOR => {
-                let _ = decode_call!(gas, ArbOwner::getNetworkFeeAccountCall, input);
-                let network_fee_account = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).network_fee_account().get()
-                );
-                let output =
-                    ArbOwner::getNetworkFeeAccountCall::abi_encode_returns(&network_fee_account);
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::getInfraFeeAccountCall::SELECTOR => {
-                let _ = decode_call!(gas, ArbOwner::getInfraFeeAccountCall, input);
-                let infra_fee_account = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).infra_fee_account().get()
-                );
-                let output =
-                    ArbOwner::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::setNetworkFeeAccountCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setNetworkFeeAccountCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .network_fee_account()
-                        .set(call.newNetworkFeeAccount)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setInfraFeeAccountCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setInfraFeeAccountCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .infra_fee_account()
-                        .set(call.newInfraFeeAccount)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::scheduleArbOSUpgradeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::scheduleArbOSUpgradeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                try_state!(gas, arb_state.upgrade_version().set(call.newVersion));
-                try_state!(gas, arb_state.upgrade_timestamp().set(call.timestamp));
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1PricingEquilibrationUnitsCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1PricingEquilibrationUnitsCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .equilibration_units()
-                        .set(call.equilibrationUnits)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1PricingInertiaCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1PricingInertiaCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .inertia()
-                        .set(call.inertia)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1PricingRewardRecipientCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1PricingRewardRecipientCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .reward_recipient()
-                        .set(call.recipient)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1PricingRewardRateCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1PricingRewardRateCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .per_unit_reward()
-                        .set(call.weiPerUnit)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setL1PricePerUnitCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setL1PricePerUnitCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .price_per_unit()
-                        .set(call.pricePerUnit)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setPerBatchGasChargeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setPerBatchGasChargeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                if call.cost < 0 {
-                    interpreter_revert!(gas, Bytes::from("negative cost not allowed"));
+                ArbOwner::setL2GasPricingInertiaCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL2GasPricingInertiaCall, input);
+
+                    if call.sec == 0 {
+                        interpreter_revert!(gas, Bytes::from("price inertia must be nonzero"));
+                    }
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l2_pricing()
+                            .pricing_inertia()
+                            .set(call.sec)
+                    );
+                    interpreter_return!(gas, Bytes::new());
                 }
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .per_batch_gas_cost()
-                        .set(call.cost as u64)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setBrotliCompressionLevelCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setBrotliCompressionLevelCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .brotli_compression_level()
-                        .set(call.level)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setAmortizedCostCapBipsCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setAmortizedCostCapBipsCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .l1_pricing()
-                        .amortized_cost_cap_bips()
-                        .set(call.cap)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::releaseL1PricerSurplusFundsCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::releaseL1PricerSurplusFundsCall, input);
-                require_chain_owner!(context, gas, caller_address);
+                ArbOwner::setL2GasBacklogToleranceCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL2GasBacklogToleranceCall, input);
 
-                let balance =
-                    context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default().data;
-                let mut arb_state = context.arb_state(Some(&mut gas), is_static);
-                let mut l1_pricing = arb_state.l1_pricing();
-                let recognized = try_state!(gas, l1_pricing.l1_fees_available().get());
-
-                let transferable =
-                    if balance > recognized { balance - recognized } else { U256::ZERO };
-                let amount = transferable.min(call.maxWeiToRelease);
-
-                if amount > U256::ZERO {
-                    let new_total = recognized.saturating_add(amount);
-                    try_state!(gas, l1_pricing.l1_fees_available().set(new_total));
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l2_pricing()
+                            .backlog_tolerance()
+                            .set(call.sec)
+                    );
+                    interpreter_return!(gas, Bytes::new());
                 }
-
-                let output = ArbOwner::releaseL1PricerSurplusFundsCall::abi_encode_returns(&amount);
-                interpreter_return!(gas, Bytes::from(output));
-            }
-            ArbOwner::setInkPriceCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setInkPriceCall, input);
-                require_chain_owner!(context, gas, caller_address);
-
-                if call.price == 0 || call.price > 0xFFFFFF {
-                    interpreter_revert!(gas, Bytes::from("ink price must be a positive uint24"));
+                ArbOwner::getNetworkFeeAccountCall::SELECTOR => {
+                    let _ = decode_call!(gas, ArbOwner::getNetworkFeeAccountCall, input);
+                    let network_fee_account = try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).network_fee_account().get()
+                    );
+                    let output = ArbOwner::getNetworkFeeAccountCall::abi_encode_returns(
+                        &network_fee_account,
+                    );
+                    interpreter_return!(gas, Bytes::from(output));
                 }
-
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.ink_price = call.price;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmMaxStackDepthCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmMaxStackDepthCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.max_stack_depth = call.depth;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmFreePagesCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmFreePagesCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.free_pages = call.pages;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmPageGasCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmPageGasCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.page_gas = call.gas;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmPageLimitCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmPageLimitCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.page_limit = call.limit;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmMaxSizeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmMaxSizeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.max_wasm_size = call.size;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmMinInitGasCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmMinInitGasCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                if call.cached > u16::from(u8::MAX) {
-                    interpreter_revert!(gas, Bytes::from("cached gas too large"));
+                ArbOwner::getInfraFeeAccountCall::SELECTOR => {
+                    let _ = decode_call!(gas, ArbOwner::getInfraFeeAccountCall, input);
+                    let infra_fee_account = try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).infra_fee_account().get()
+                    );
+                    let output =
+                        ArbOwner::getInfraFeeAccountCall::abi_encode_returns(&infra_fee_account);
+                    interpreter_return!(gas, Bytes::from(output));
                 }
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.min_init_gas = call.gas;
-                params.min_cached_init_gas = call.cached as u8;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmInitCostScalarCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmInitCostScalarCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                if call.percent == 0 {
-                    interpreter_revert!(gas, Bytes::from("init cost scalar must be nonzero"));
+                ArbOwner::setNetworkFeeAccountCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setNetworkFeeAccountCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .network_fee_account()
+                            .set(call.newNetworkFeeAccount)
+                    );
+                    interpreter_return!(gas, Bytes::new());
                 }
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                let scaled = call
-                    .percent
-                    .saturating_add(COST_SCALAR_PERCENT - 1)
-                    .saturating_div(COST_SCALAR_PERCENT);
-                params.init_cost_scalar = scaled.min(u8::MAX as u64) as u8;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmExpiryDaysCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmExpiryDaysCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
+                ArbOwner::setInfraFeeAccountCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setInfraFeeAccountCall, input);
 
-                params.expiry_days = call._days;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setWasmKeepaliveDaysCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmKeepaliveDaysCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .infra_fee_account()
+                            .set(call.newInfraFeeAccount)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::scheduleArbOSUpgradeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::scheduleArbOSUpgradeCall, input);
 
-                params.keepalive_days = call._days;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                    try_state!(gas, arb_state.upgrade_version().set(call.newVersion));
+                    try_state!(gas, arb_state.upgrade_timestamp().set(call.timestamp));
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1PricingEquilibrationUnitsCall::SELECTOR => {
+                    let call =
+                        decode_call!(gas, ArbOwner::setL1PricingEquilibrationUnitsCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .equilibration_units()
+                            .set(call.equilibrationUnits)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1PricingInertiaCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL1PricingInertiaCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .inertia()
+                            .set(call.inertia)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1PricingRewardRecipientCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL1PricingRewardRecipientCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .reward_recipient()
+                            .set(call.recipient)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1PricingRewardRateCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL1PricingRewardRateCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .per_unit_reward()
+                            .set(call.weiPerUnit)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setL1PricePerUnitCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setL1PricePerUnitCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .price_per_unit()
+                            .set(call.pricePerUnit)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setPerBatchGasChargeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setPerBatchGasChargeCall, input);
+
+                    if call.cost < 0 {
+                        interpreter_revert!(gas, Bytes::from("negative cost not allowed"));
+                    }
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .per_batch_gas_cost()
+                            .set(call.cost as u64)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setBrotliCompressionLevelCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setBrotliCompressionLevelCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .brotli_compression_level()
+                            .set(call.level)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setAmortizedCostCapBipsCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setAmortizedCostCapBipsCall, input);
+
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .l1_pricing()
+                            .amortized_cost_cap_bips()
+                            .set(call.cap)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::releaseL1PricerSurplusFundsCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::releaseL1PricerSurplusFundsCall, input);
+
+                    let balance =
+                        context.balance(ARBOS_L1_PRICER_FUNDS_ADDRESS).unwrap_or_default().data;
+                    let mut arb_state = context.arb_state(Some(&mut gas), is_static);
+                    let mut l1_pricing = arb_state.l1_pricing();
+                    let recognized = try_state!(gas, l1_pricing.l1_fees_available().get());
+
+                    let transferable =
+                        if balance > recognized { balance - recognized } else { U256::ZERO };
+                    let amount = transferable.min(call.maxWeiToRelease);
+
+                    if amount > U256::ZERO {
+                        let new_total = recognized.saturating_add(amount);
+                        try_state!(gas, l1_pricing.l1_fees_available().set(new_total));
+                    }
+
+                    let output =
+                        ArbOwner::releaseL1PricerSurplusFundsCall::abi_encode_returns(&amount);
+                    interpreter_return!(gas, Bytes::from(output));
+                }
+                ArbOwner::setInkPriceCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setInkPriceCall, input);
+
+                    if call.price == 0 || call.price > 0xFFFFFF {
+                        interpreter_revert!(
+                            gas,
+                            Bytes::from("ink price must be a positive uint24")
+                        );
+                    }
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.ink_price = call.price;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmMaxStackDepthCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmMaxStackDepthCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.max_stack_depth = call.depth;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmFreePagesCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmFreePagesCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.free_pages = call.pages;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmPageGasCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmPageGasCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.page_gas = call.gas;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmPageLimitCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmPageLimitCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.page_limit = call.limit;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmMaxSizeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmMaxSizeCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.max_wasm_size = call.size;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmMinInitGasCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmMinInitGasCall, input);
+
+                    if call.cached > u16::from(u8::MAX) {
+                        interpreter_revert!(gas, Bytes::from("cached gas too large"));
+                    }
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.min_init_gas = call.gas;
+                    params.min_cached_init_gas = call.cached as u8;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmInitCostScalarCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmInitCostScalarCall, input);
+
+                    if call.percent == 0 {
+                        interpreter_revert!(gas, Bytes::from("init cost scalar must be nonzero"));
+                    }
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    let scaled = call
+                        .percent
+                        .saturating_add(COST_SCALAR_PERCENT - 1)
+                        .saturating_div(COST_SCALAR_PERCENT);
+                    params.init_cost_scalar = scaled.min(u8::MAX as u64) as u8;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmExpiryDaysCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmExpiryDaysCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+
+                    params.expiry_days = call._days;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmKeepaliveDaysCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmKeepaliveDaysCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+
+                    params.keepalive_days = call._days;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setWasmBlockCacheSizeCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setWasmBlockCacheSizeCall, input);
+
+                    let mut params = try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .get()
+                    );
+                    params.block_cache_size = call.count;
+                    try_state!(
+                        gas,
+                        context
+                            .arb_state(Some(&mut gas), is_static)
+                            .programs()
+                            .stylus_params()
+                            .set(&params)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                ArbOwner::setChainConfigCall::SELECTOR => {
+                    let call = decode_call!(gas, ArbOwner::setChainConfigCall, input);
+
+                    let hash = revm::primitives::keccak256(&call.chainConfig);
+                    let value = U256::from_be_bytes(hash.0);
+                    try_state!(
+                        gas,
+                        context.arb_state(Some(&mut gas), is_static).chain_config().set(value)
+                    );
+                    interpreter_return!(gas, Bytes::new());
+                }
+                _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
             }
-            ArbOwner::setWasmBlockCacheSizeCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setWasmBlockCacheSizeCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let mut params = try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).programs().stylus_params().get()
-                );
-                params.block_cache_size = call.count;
-                try_state!(
-                    gas,
-                    context
-                        .arb_state(Some(&mut gas), is_static)
-                        .programs()
-                        .stylus_params()
-                        .set(&params)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            ArbOwner::setChainConfigCall::SELECTOR => {
-                let call = decode_call!(gas, ArbOwner::setChainConfigCall, input);
-                require_chain_owner!(context, gas, caller_address);
-                let hash = revm::primitives::keccak256(&call.chainConfig);
-                let value = U256::from_be_bytes(hash.0);
-                try_state!(
-                    gas,
-                    context.arb_state(Some(&mut gas), is_static).chain_config().set(value)
-                );
-                interpreter_return!(gas, Bytes::new());
-            }
-            _ => interpreter_revert!(gas, Bytes::from("Unknown selector")),
         }
+
+        let result = run_arbos_owner(context, selector, input, is_static, gas);
+
+        emit_event!(
+            context,
+            Log {
+                address: address!("0x0000000000000000000000000000000000000070"),
+                data: ArbOwner::OwnerActs {
+                    method: selector.into(),
+                    owner: caller_address,
+                    data: Bytes::from(input[4..].to_vec())
+                }
+                .to_log_data(),
+            },
+            gas
+        );
+
+        result
     }
 }
