@@ -19,9 +19,10 @@ use revm::{
     },
     primitives::{Address, Log, hardfork::SpecId},
 };
+use tracing::{debug, trace, warn};
 
 use crate::{
-    ArbitrumContextTr, ArbitrumEvm, buffer,
+    ArbitrumContextTr, ArbitrumEvm, Utf8OrHex, buffer,
     local_context::ArbitrumLocalContextTr,
     state::{ArbState, ArbStateGetter},
     stylus_executor::stylus_call_cost,
@@ -99,7 +100,28 @@ where
             (bytecode_address, input.target_address)
         };
 
+        trace!(
+            target: "arbos-revm::stylus-api",
+            ?req_type,
+            bytecode_address = %bytecode_address,
+            target_address = %target_address,
+            caller = %caller,
+            is_static,
+            gas_left,
+            gas_limit,
+            call_value = %value,
+            calldata_len = calldata.len(),
+            "Stylus host contract call"
+        );
+
         if is_static && !value.is_zero() {
+            debug!(
+                target: "arbos-revm::stylus-api",
+                target_address = %target_address,
+                bytecode_address = %bytecode_address,
+                call_value = %value,
+                "Rejecting Stylus call with value in static context"
+            );
             return (Status::WriteProtection.into(), VecReader::new(vec![]), ArbGas(gas_left));
         }
 
@@ -153,20 +175,37 @@ where
             if let Ok(FrameResult::Call(call_outcome)) = result {
                 gas.erase_cost(call_outcome.gas().remaining());
 
-                let status = if call_outcome.instruction_result().is_ok() {
-                    Status::Success
-                } else {
-                    Status::Failure
-                };
+                let instruction_result = *call_outcome.instruction_result();
+                let status =
+                    if instruction_result.is_ok() { Status::Success } else { Status::Failure };
 
-                return (
-                    status.into(),
-                    VecReader::new(call_outcome.output().to_vec()),
-                    ArbGas(gas.spent()),
+                let status_label = status.as_str();
+                let output = call_outcome.output().to_vec();
+
+                debug!(
+                    target: "arbos-revm::stylus-api",
+                    target_address = %target_address,
+                    bytecode_address = %bytecode_address,
+                    ?instruction_result,
+                    status = status_label,
+                    output_len = output.len(),
+                    output = %String::from_utf8_or_hex(output.clone()),
+                    gas_spent = gas.spent(),
+                    gas_remaining = call_outcome.gas().remaining(),
+                    "Stylus host call finished"
                 );
+
+                return (status.into(), VecReader::new(output), ArbGas(gas.spent()));
             }
         }
 
+        warn!(
+            target: "arbos-revm::stylus-api",
+            target_address = %target_address,
+            bytecode_address = %bytecode_address,
+            gas_spent = gas.spent(),
+            "Stylus host call returning failure response without call outcome"
+        );
         (Status::Failure.into(), VecReader::new(vec![]), ArbGas(gas.spent()))
     }
 
@@ -194,7 +233,25 @@ where
 
         let spec = self.ctx().cfg().spec().into();
 
+        trace!(
+            target: "arbos-revm::stylus-api",
+            ?req_type,
+            target_address = %input.target_address,
+            caller_address = %input.caller_address,
+            is_static,
+            gas_remaining,
+            value = %value,
+            salt = ?salt,
+            init_code_len = init_code.len(),
+            "Stylus contract creation request"
+        );
+
         if is_static {
+            debug!(
+                target: "arbos-revm::stylus-api",
+                target_address = %input.target_address,
+                "Rejecting create in static context"
+            );
             return (
                 [vec![0x00], "write protection".as_bytes().to_vec()].concat(),
                 VecReader::new(vec![]),
@@ -209,6 +266,11 @@ where
         );
 
         if is_create_2 && !spec.is_enabled_in(SpecId::PETERSBURG) {
+            debug!(
+                target: "arbos-revm::stylus-api",
+                target_address = %input.target_address,
+                "CREATE2 not enabled for current spec"
+            );
             return error_response;
         }
 
@@ -218,6 +280,13 @@ where
         if len != 0 && spec.is_enabled_in(SpecId::SHANGHAI) {
             let max_initcode_size = self.ctx().cfg().max_code_size().saturating_mul(2);
             if len > max_initcode_size {
+                debug!(
+                    target: "arbos-revm::stylus-api",
+                    target_address = %input.target_address,
+                    init_code_len = init_code.len(),
+                    max_initcode_size,
+                    "Init code too large for Stylus create"
+                );
                 return error_response;
             }
             gas_cost = initcode_cost(len);
@@ -238,6 +307,13 @@ where
         };
 
         if gas_remaining < gas_cost {
+            debug!(
+                target: "arbos-revm::stylus-api",
+                target_address = %input.target_address,
+                gas_cost,
+                gas_remaining,
+                "Insufficient gas for Stylus create"
+            );
             return (
                 [vec![0x00], "out of gas".as_bytes().to_vec()].concat(),
                 VecReader::new(vec![]),
@@ -277,8 +353,18 @@ where
 
             if let Ok(FrameResult::Create(create_outcome)) = result {
                 if InstructionResult::Revert == *create_outcome.instruction_result() {
+                    let output = create_outcome.output().to_vec();
+                    debug!(
+                        target: "arbos-revm::stylus-api",
+                        target_address = %input.target_address,
+                        output_len = output.len(),
+                        output = %String::from_utf8_or_hex(output.clone()),
+                        gas_spent = gas.spent(),
+                        gas_remaining = create_outcome.gas().remaining(),
+                        "Stylus create reverted"
+                    );
                     return (
-                        [vec![0x00], create_outcome.output().to_vec()].concat(),
+                        [vec![0x00], output].concat(),
                         VecReader::new(vec![]),
                         ArbGas(gas.spent()),
                     );
@@ -286,6 +372,15 @@ where
 
                 if let Some(address) = create_outcome.address {
                     gas.erase_cost(create_outcome.gas().remaining() + gas_stipend);
+
+                    debug!(
+                        target: "arbos-revm::stylus-api",
+                        target_address = %input.target_address,
+                        new_address = %address,
+                        gas_spent = gas.spent(),
+                        gas_remaining = create_outcome.gas().remaining(),
+                        "Stylus create succeeded"
+                    );
 
                     return (
                         [vec![0x01], address.to_vec()].concat(),
@@ -296,6 +391,11 @@ where
             }
         }
 
+        warn!(
+            target: "arbos-revm::stylus-api",
+            target_address = %input.target_address,
+            "Stylus create returning default failure response"
+        );
         error_response
     }
 
@@ -331,6 +431,16 @@ where
         req_type: EvmApiMethod,
         data: Vec<u8>,
     ) -> (Vec<u8>, VecReader, ArbGas) {
+        trace!(
+            target: "arbos-revm::stylus-api",
+            ?req_type,
+            target_address = %input.target_address,
+            caller_address = %input.caller_address,
+            is_static,
+            payload_len = data.len(),
+            "Stylus host request dispatch"
+        );
+
         match req_type {
             EvmApiMethod::ContractCall | EvmApiMethod::DelegateCall | EvmApiMethod::StaticCall => {
                 self.handle_contract_call(input, is_static, req_type, data, |evm, frame_init| {
@@ -384,6 +494,11 @@ where
                 let gas_left = buffer::take_u64(&mut data);
 
                 if is_static {
+                    debug!(
+                        target: "arbos-revm::stylus-api",
+                        target_address = %input.target_address,
+                        "Rejecting SetTrieSlots in static context"
+                    );
                     return (
                         Status::WriteProtection.into(),
                         VecReader::new(vec![]),
@@ -404,6 +519,13 @@ where
                             );
 
                             if gas_left < total_cost {
+                                debug!(
+                                    target: "arbos-revm::stylus-api",
+                                    target_address = %input.target_address,
+                                    gas_left,
+                                    total_cost,
+                                    "SetTrieSlots ran out of gas"
+                                );
                                 return (
                                     Status::OutOfGas.into(),
                                     VecReader::new(vec![]),
@@ -412,6 +534,11 @@ where
                             }
                         }
                         _ => {
+                            warn!(
+                                target: "arbos-revm::stylus-api",
+                                target_address = %input.target_address,
+                                "SetTrieSlots failed during storage update"
+                            );
                             return (
                                 Status::Failure.into(),
                                 VecReader::new(vec![]),
@@ -491,6 +618,17 @@ enum Status {
     Failure,
     OutOfGas,
     WriteProtection,
+}
+
+impl Status {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::OutOfGas => "out_of_gas",
+            Self::WriteProtection => "write_protection",
+        }
+    }
 }
 
 impl From<Status> for Vec<u8> {
