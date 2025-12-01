@@ -23,6 +23,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     origin: Address,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
+    stylus: Option<StylusConfig>,
 ) -> eyre::Result<(Env, N::BlockResponse)> {
     let block_number = if let Some(pin_block) = pin_block {
         pin_block
@@ -57,7 +58,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
         memory_limit,
         disable_block_gas_limit,
         enable_tx_gas_limit,
-        Some(StylusConfig::default()),
+        stylus,
     );
 
     let mut env = Env {
