@@ -1,0 +1,91 @@
+use alloy_sol_types::{SolCall, sol};
+use revm::{
+    interpreter::{Gas, InterpreterResult, gas::COLD_SLOAD_COST},
+    precompile::PrecompileId,
+    primitives::{Address, Bytes, U256, address},
+};
+
+use crate::{
+    ArbitrumContextTr, generate_state_mut_table,
+    macros::{interpreter_return, interpreter_revert},
+    precompile_impl,
+    precompiles::{
+        ArbPrecompileLogic, ExtendedPrecompile, StateMutability, decode_call, selector_or_revert,
+    },
+    try_record_cost,
+};
+
+sol! {
+/// @title Lookup for basic info about accounts and contracts.
+/// @notice Precompiled contract that exists in every Arbitrum chain at 0x0000000000000000000000000000000000000065.
+interface ArbInfo {
+    /// @notice Retrieves an account's balance
+    function getBalance(address account) external view returns (uint256);
+
+    /// @notice Retrieves a contract's deployed code
+    function getCode(address account) external view returns (bytes memory);
+}
+
+}
+
+pub fn arb_info_precompile<CTX: ArbitrumContextTr>() -> ExtendedPrecompile<CTX> {
+    ExtendedPrecompile::new(
+        PrecompileId::Custom(std::borrow::Cow::Borrowed("ArbInfo")),
+        address!("0x0000000000000000000000000000000000000065"),
+        precompile_impl!(ArbInfoPrecompile),
+    )
+}
+
+struct ArbInfoPrecompile;
+
+impl<CTX: ArbitrumContextTr> ArbPrecompileLogic<CTX> for ArbInfoPrecompile {
+    const STATE_MUT_TABLE: &'static [([u8; 4], StateMutability)] = generate_state_mut_table! {
+        ArbInfo => {
+            getBalanceCall(View),
+            getCodeCall(View),
+        }
+    };
+
+    fn inner(
+        context: &mut CTX,
+        input: &[u8],
+        _target_address: &Address,
+        _caller_address: Address,
+        _call_value: U256,
+        _is_static: bool,
+        gas_limit: u64,
+    ) -> Option<InterpreterResult> {
+        let mut gas = Gas::new(gas_limit);
+        let selector = selector_or_revert!(gas, input);
+
+        match selector {
+            ArbInfo::getBalanceCall::SELECTOR => {
+                let call = decode_call!(gas, ArbInfo::getBalanceCall, input);
+
+                try_record_cost!(gas, 700);
+
+                let balance = context.balance(call.account).unwrap_or_default().data;
+
+                let output = ArbInfo::getBalanceCall::abi_encode_returns(&balance);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            ArbInfo::getCodeCall::SELECTOR => {
+                let call = decode_call!(gas, ArbInfo::getCodeCall, input);
+
+                try_record_cost!(gas, COLD_SLOAD_COST);
+
+                let code = context.load_account_code(call.account).unwrap_or_default().data;
+
+                let words = code.len().div_ceil(32);
+                let additional_gas = words as u64 * revm::interpreter::gas::COPY;
+                try_record_cost!(gas, additional_gas);
+
+                let output = ArbInfo::getCodeCall::abi_encode_returns(&code);
+
+                interpreter_return!(gas, Bytes::from(output));
+            }
+            _ => interpreter_revert!(gas, Bytes::from("Unknown function selector")),
+        }
+    }
+}

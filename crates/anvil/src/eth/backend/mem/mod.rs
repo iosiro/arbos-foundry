@@ -49,9 +49,9 @@ use alloy_eips::{
     eip7910::SystemContract,
 };
 use alloy_evm::{
-    Database, Evm,
+    Database,
     overrides::{OverrideBlockHashes, apply_state_overrides},
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile},
 };
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
@@ -98,7 +98,7 @@ use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     core::{
-        evm::{BlockEnv, EthEvmContext},
+        evm::{BlockEnv, EthEvmContext, PrecompilesMap},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -1148,7 +1148,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap<WrapDatabaseRef<&'db DB>>>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
@@ -1345,6 +1345,7 @@ impl Backend {
                     blob_params: self.blob_params(),
                     cheats: self.cheats().clone(),
                 };
+
                 let executed_tx = executor.execute();
 
                 // we also need to update the new blockhash in the db itself
@@ -1942,7 +1943,6 @@ impl Backend {
                     }
                     #[cfg(feature = "js-tracer")]
                     GethDebugTracerType::JsTracer(code) => {
-                        use alloy_evm::IntoTxEnv;
                         let config = tracer_config.into_json();
                         let mut inspector =
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
@@ -1954,7 +1954,7 @@ impl Backend {
                         let result = evm.transact(env.tx.clone())?;
                         let res = evm
                             .inspector_mut()
-                            .json_result(result, &env.tx.into_tx_env(), &block, &cache_db)
+                            .json_result(result, &env.tx, &block, &cache_db)
                             .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
                         Ok(GethTrace::JS(res))
@@ -2665,7 +2665,6 @@ impl Backend {
 
         let trace = |parent_state: &StateDb| -> Result<T, BlockchainError> {
             let mut cache_db = CacheDB::new(Box::new(parent_state));
-
             // configure the blockenv for the block of the transaction
             let mut env = self.env.read().clone();
 
@@ -2743,12 +2742,7 @@ impl Backend {
             inspector,
             |result, cache_db, mut inspector, tx_env, env| {
                 inspector
-                    .json_result(
-                        result,
-                        &alloy_evm::IntoTxEnv::into_tx_env(tx_env),
-                        &env.evm_env.block_env,
-                        &cache_db,
-                    )
+                    .json_result(result, &tx_env, &env.evm_env.block_env, &cache_db)
                     .map_err(|e| BlockchainError::Message(e.to_string()))
             },
         )??;

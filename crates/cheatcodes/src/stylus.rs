@@ -155,7 +155,7 @@ fn get_artifact_code(state: &Cheatcodes, path: &str, compress: bool) -> Result<B
     let artifact = if artifact.starts_with(&[0x00, 0x61, 0x73, 0x6d]) && compress {
         // Compress the artifact if it is a Stylus artifact
         if let Ok(compressed) =
-            stylus::brotli::compress(&artifact, 11, 22, stylus::brotli::Dictionary::StylusProgram)
+            stylus::brotli::compress(&artifact, 11, 22, stylus::brotli::Dictionary::Empty)
         {
             compressed
         } else {
@@ -173,7 +173,7 @@ fn get_artifact_code(state: &Cheatcodes, path: &str, compress: bool) -> Result<B
         artifact
     } else {
         // If not, we need to prefix it with Stylus discriminant and compression level.
-        [arbos_revm::constants::STYLUS_DISCRIMINANT, &[compress as u8], artifact.as_ref()].concat()
+        [arbos_revm::constants::STYLUS_DISCRIMINANT, &[0], artifact.as_ref()].concat()
     };
 
     // add init code

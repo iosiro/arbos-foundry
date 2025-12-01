@@ -1,6 +1,6 @@
 [package]
-name = "arbos-revm"
-description = "Arbitrum variant of Revm"
+name = "alloy-evm"
+description = "Simplified parts of alloy-evm for use in other crates"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,29 +10,22 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
-[lib]
-doctest = false
-
 [lints]
 workspace = true
 
 [dependencies]
 revm = { workspace = true, default-features = false, features = ["serde", "optional_eip3541"]}
 serde = {  workspace = true, optional = true }
-arbutil = { workspace =  true, default-features = false }
-stylus = { workspace = true, default-features = false, features = ["cc_brotli"] }
-wasmer-types = { workspace = true, default-features = false }
 auto_impl = { workspace = true}
 alloy-rlp = { workspace = true }
-alloy-sol-types = { workspace = true }
+alloy-rpc-types = { workspace = true }
+thiserror = { workspace = true }
 
-lru = "0.14.0"
-lazy_static = "1.5.0"
-tracing = { workspace = true }
 
 
 [dev-dependencies]
 serde_json = { version = "1.0", default-features = false }
 
 [features]
-serde = ["dep:serde"]
+overrides = []
+call-util = ["overrides"]
