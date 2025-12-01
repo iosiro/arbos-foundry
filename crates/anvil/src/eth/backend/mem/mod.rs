@@ -91,11 +91,9 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
-use arbos_revm::state::ArbosStateParams;
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
-use foundry_config::apply_stylus_config;
 use foundry_evm::{
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
@@ -1240,7 +1238,7 @@ impl Backend {
 
         let storage = self.blockchain.storage.read();
 
-        let mut executor = TransactionExecutor {
+        let executor = TransactionExecutor {
             db: &mut cache_db,
             validator: self,
             pending: pool_transactions.into_iter(),
@@ -1258,13 +1256,6 @@ impl Backend {
             blob_params: self.blob_params(),
             cheats: self.cheats().clone(),
         };
-
-        let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-        executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-            if let Some(ref stylus_config) = stylus_config {
-                apply_stylus_config(params, stylus_config);
-            }
-        });
 
         // create a new pending block
         let executed = executor.execute();
@@ -1336,7 +1327,7 @@ impl Backend {
                 // to ensure the timestamp is as close as possible to the actual execution.
                 env.evm_env.block_env.timestamp = U256::from(self.time.next_timestamp());
 
-                let mut executor = TransactionExecutor {
+                let executor = TransactionExecutor {
                     db: &mut **db,
                     validator: self,
                     pending: pool_transactions.into_iter(),
@@ -1354,13 +1345,6 @@ impl Backend {
                     blob_params: self.blob_params(),
                     cheats: self.cheats().clone(),
                 };
-
-                let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-                executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-                    if let Some(ref stylus_config) = stylus_config {
-                        apply_stylus_config(params, stylus_config);
-                    }
-                });
 
                 let executed_tx = executor.execute();
 
@@ -2695,7 +2679,7 @@ impl Backend {
                 ..Default::default()
             };
 
-            let mut executor = TransactionExecutor {
+            let executor = TransactionExecutor {
                 db: &mut cache_db,
                 validator: self,
                 pending: pool_txs.into_iter(),
@@ -2713,13 +2697,6 @@ impl Backend {
                 blob_params: self.blob_params(),
                 cheats: self.cheats().clone(),
             };
-
-            let stylus_config = self.node_config.blocking_read().stylus_config.clone();
-            executor.apply_arbitrum_state_overrides(|params: &mut ArbosStateParams| {
-                if let Some(ref stylus_config) = stylus_config {
-                    apply_stylus_config(params, stylus_config);
-                }
-            });
 
             let _ = executor.execute();
 

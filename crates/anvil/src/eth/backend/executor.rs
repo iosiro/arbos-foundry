@@ -24,11 +24,10 @@ use anvil_core::eth::{
     block::{Block, BlockInfo, PartialHeader},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
-use arbos_revm::state::ArbState;
 use foundry_evm::{
     backend::DatabaseError,
     core::{
-        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext, PrecompilesMap, TxEnv},
+        evm::{BlockEnv, CfgEnv, EthEvm, EthEvmContext, LocalContext, PrecompilesMap},
         precompiles::EC_RECOVER,
     },
     traces::{CallTraceDecoder, CallTraceNode},
@@ -260,29 +259,6 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
         let tx_env = tx.to_revm_tx_env();
 
         Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
-    }
-
-    pub fn apply_arbitrum_state_overrides<F>(&mut self, f: F)
-    where
-        F: FnOnce(&mut arbos_revm::state::ArbosStateParams),
-    {
-        let mut context = EthEvmContext {
-            block: BlockEnv::default(),
-            tx: TxEnv::default(),
-            cfg: CfgEnv::default(),
-            journaled_state: { Journal::new(&mut self.db) },
-            chain: (),
-            local: LocalContext::default(),
-            error: Ok(()),
-        };
-
-        let mut state = context.arb_state(None, true);
-
-        let mut params: arbos_revm::state::ArbosStateParams = state.get().unwrap_or_default();
-
-        f(&mut params);
-
-        _ = state.initialize(&params);
     }
 }
 
