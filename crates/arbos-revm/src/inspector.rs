@@ -1,13 +1,17 @@
-use revm::context::{ContextError, ContextSetters, ContextTr};
+use revm::{
+    DatabaseCommit, InspectCommitEvm, InspectEvm,
+    context::{ContextError, ContextSetters, ContextTr, JournalTr},
+};
 
 use revm::{
     Database,
     handler::{
-        EvmTr, FrameInitOrResult, FrameResult, ItemOrResult, PrecompileProvider,
+        EthFrame, EvmTr, FrameInitOrResult, FrameResult, ItemOrResult, PrecompileProvider,
         evm::ContextDbError, instructions::InstructionProvider,
     },
-    inspector::{InspectorEvmTr, InspectorFrame, JournalExt, handler::frame_end},
+    inspector::{InspectorEvmTr, InspectorFrame, InspectorHandler, JournalExt, handler::frame_end},
     interpreter::interpreter_action::FrameInit,
+    state::EvmState,
 };
 
 use revm::{
@@ -15,7 +19,7 @@ use revm::{
     interpreter::{InterpreterResult, interpreter::EthInterpreter},
 };
 
-use crate::{ArbitrumContextTr, ArbitrumEvm};
+use crate::{ArbitrumContextTr, ArbitrumEvm, handler::ArbitrumHandler};
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I> {
     /// Consumed self and returns a new Evm type with given Inspector.
@@ -134,4 +138,36 @@ where
             }
         }
     }
+}
+
+// Implementing InspectEvm for Evm
+impl<CTX, INSP, INST, PRECOMPILES> InspectEvm
+    for ArbitrumEvm<CTX, INSP, PRECOMPILES, INST, EthFrame<EthInterpreter>>
+where
+    CTX: ContextSetters + ArbitrumContextTr<Journal: JournalTr<State = EvmState> + JournalExt>,
+    INSP: Inspector<CTX, EthInterpreter>,
+    INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
+    PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
+{
+    type Inspector = INSP;
+
+    fn set_inspector(&mut self, inspector: Self::Inspector) {
+        self.inspector = inspector;
+    }
+
+    fn inspect_one_tx(&mut self, tx: Self::Tx) -> Result<Self::ExecutionResult, Self::Error> {
+        self.set_tx(tx);
+        ArbitrumHandler::default().inspect_run(self)
+    }
+}
+
+impl<CTX, INSP, INST, PRECOMPILES> InspectCommitEvm
+    for ArbitrumEvm<CTX, INSP, PRECOMPILES, INST, EthFrame<EthInterpreter>>
+where
+    CTX: ContextSetters
+        + ArbitrumContextTr<Journal: JournalTr<State = EvmState> + JournalExt, Db: DatabaseCommit>,
+    INSP: Inspector<CTX, EthInterpreter>,
+    INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
+    PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
+{
 }

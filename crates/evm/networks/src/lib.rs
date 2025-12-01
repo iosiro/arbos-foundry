@@ -5,6 +5,7 @@
 use alloy_evm::precompiles::PrecompilesMap;
 use alloy_primitives::{Address, map::AddressHashMap};
 use clap::Parser;
+use revm::{context::ContextTr, handler::PrecompileProvider};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -17,7 +18,11 @@ impl NetworkConfigs {
     }
 
     /// Inject precompiles for configured networks.
-    pub fn inject_precompiles(self, _precompiles: &mut PrecompilesMap) {}
+    pub fn inject_precompiles<CTX: ContextTr, P: PrecompileProvider<CTX>>(
+        self,
+        _precompiles: &mut PrecompilesMap<CTX, P>,
+    ) {
+    }
 
     /// Returns precompiles label for configured networks, to be used in traces.
     pub fn precompiles_label(self) -> AddressHashMap<String> {

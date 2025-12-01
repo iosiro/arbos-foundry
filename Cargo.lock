@@ -248,18 +248,14 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.21.1"
-source = "git+https://github.com/iosiro/alloy-evm?rev=60dc4ec58100af8938ad090e7231bc064380dd34#60dc4ec58100af8938ad090e7231bc064380dd34"
+version = "1.4.4"
 dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-hardforks",
- "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-sol-types",
+ "alloy-rlp",
+ "alloy-rpc-types",
  "auto_impl",
- "derive_more 2.0.1",
  "revm",
+ "serde",
+ "serde_json",
  "thiserror 2.0.16",
 ]
 
@@ -1084,6 +1080,7 @@ dependencies = [
  "anvil-core",
  "anvil-rpc",
  "anvil-server",
+ "arbos-revm",
  "async-trait",
  "axum",
  "chrono",
@@ -1189,6 +1186,7 @@ name = "arbos-revm"
 version = "1.4.4"
 dependencies = [
  "alloy-rlp",
+ "alloy-sol-types",
  "arbutil",
  "auto_impl",
  "lazy_static",

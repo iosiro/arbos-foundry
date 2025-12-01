@@ -1,14 +1,19 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::ArbitrumContextTr;
+use crate::{ArbitrumContextTr, handler::ArbitrumHandler};
 use revm::{
-    Database, Inspector,
-    context::{ContextError, ContextSetters, ContextTr, Evm, FrameStack},
+    Database, DatabaseCommit, ExecuteCommitEvm, ExecuteEvm, Inspector,
+    context::{
+        ContextError, ContextSetters, ContextTr, Evm, FrameStack, JournalTr,
+        result::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, ResultAndState},
+    },
     handler::{
-        EthFrame, EvmTr, FrameInitOrResult, FrameResult, FrameTr, ItemOrResult, PrecompileProvider,
+        EthFrame, EvmTr, FrameInitOrResult, FrameResult, FrameTr, Handler, ItemOrResult,
+        MainnetHandler, PrecompileProvider,
         instructions::{EthInstructions, InstructionProvider},
     },
     interpreter::{InterpreterResult, interpreter::EthInterpreter, interpreter_action::FrameInit},
+    state::EvmState,
 };
 
 pub struct ArbitrumEvm<CTX, INSP, P, I = EthInstructions<EthInterpreter, CTX>, F = EthFrame>(
@@ -117,6 +122,58 @@ where
         ContextError<<<Self::Context as ContextTr>::Db as Database>::Error>,
     > {
         self.0.frame_return_result(result)
+    }
+}
+
+impl<CTX, INSP, INST, PRECOMPILES> ExecuteEvm
+    for ArbitrumEvm<CTX, INSP, PRECOMPILES, INST, EthFrame<EthInterpreter>>
+where
+    CTX: ArbitrumContextTr<Journal: JournalTr<State = EvmState>> + ContextSetters,
+    INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
+    PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
+{
+    type ExecutionResult = ExecutionResult<HaltReason>;
+    type State = EvmState;
+    type Error = EVMError<<CTX::Db as Database>::Error, InvalidTransaction>;
+    type Tx = <CTX as ContextTr>::Tx;
+    type Block = <CTX as ContextTr>::Block;
+
+    #[inline]
+    fn transact_one(&mut self, tx: Self::Tx) -> Result<Self::ExecutionResult, Self::Error> {
+        self.0.ctx.set_tx(tx);
+        MainnetHandler::default().run(self)
+    }
+
+    #[inline]
+    fn finalize(&mut self) -> Self::State {
+        self.0.journal_mut().finalize()
+    }
+
+    #[inline]
+    fn set_block(&mut self, block: Self::Block) {
+        self.0.ctx.set_block(block);
+    }
+
+    #[inline]
+    fn replay(&mut self) -> Result<ResultAndState<HaltReason>, Self::Error> {
+        ArbitrumHandler::default().run(self).map(|result| {
+            let state = self.finalize();
+            ResultAndState::new(result, state)
+        })
+    }
+}
+
+impl<CTX, INSP, INST, PRECOMPILES> ExecuteCommitEvm
+    for ArbitrumEvm<CTX, INSP, PRECOMPILES, INST, EthFrame<EthInterpreter>>
+where
+    CTX: ArbitrumContextTr<Journal: JournalTr<State = EvmState>, Db: DatabaseCommit>
+        + ContextSetters,
+    INST: InstructionProvider<Context = CTX, InterpreterTypes = EthInterpreter>,
+    PRECOMPILES: PrecompileProvider<CTX, Output = InterpreterResult>,
+{
+    #[inline]
+    fn commit(&mut self, state: Self::State) {
+        self.0.db_mut().commit(state);
     }
 }
 

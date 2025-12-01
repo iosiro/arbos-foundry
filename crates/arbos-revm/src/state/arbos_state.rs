@@ -7,10 +7,10 @@ use revm::{
 use crate::{
     ArbitrumContextTr,
     constants::{
-        ARBOS_CHAIN_CONFIG_KEY, ARBOS_CHAIN_OWNERS_KEY, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY,
-        ARBOS_STATE_ADDRESS, ARBOS_STATE_ADDRESS_TABLE_KEY, ARBOS_STATE_BLOCKHASHES_KEY,
-        ARBOS_STATE_FEATURES_KEY, ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY,
-        ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY, ARBOS_STATE_PROGRAMS_KEY, ARBOS_STATE_RETRYABLES_KEY,
+        ARBOS_CHAIN_CONFIG_KEY, ARBOS_CHAIN_OWNERS_KEY, ARBOS_STATE_ADDRESS,
+        ARBOS_STATE_ADDRESS_TABLE_KEY, ARBOS_STATE_BLOCKHASHES_KEY, ARBOS_STATE_FEATURES_KEY,
+        ARBOS_STATE_L1_PRICING_KEY, ARBOS_STATE_L2_PRICING_KEY, ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY,
+        ARBOS_STATE_PROGRAMS_KEY, ARBOS_STATE_RETRYABLES_KEY,
     },
     state::{
         address_table::AddressTable,
@@ -47,7 +47,6 @@ pub trait ArbStateGetter<CTX: ArbitrumContextTr> {
     fn programs(&mut self) -> Programs<'_, CTX>;
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
     fn native_token_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
-    fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX>;
     fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
     fn is_native_token_owner(&mut self, address: Address) -> Result<bool, ArbosStateError>;
     fn code_hash(&mut self, address: Address) -> Result<B256, ArbosStateError>;
@@ -256,8 +255,12 @@ where
     }
 
     fn chain_owners<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
-        let slot = map_address(&state_subkey(ARBOS_CHAIN_OWNERS_KEY), &B256::ZERO);
-        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
+        StorageBackedAddressSet::new(
+            self.context,
+            self.gas.as_deref_mut(),
+            self.is_static,
+            state_subkey(ARBOS_CHAIN_OWNERS_KEY),
+        )
     }
 
     fn chain_config(&mut self) -> StorageBackedU256<'_, CTX> {
@@ -277,12 +280,6 @@ where
             self.is_static,
             state_subkey(ARBOS_STATE_NATIVE_TOKEN_OWNER_KEY),
         )
-    }
-
-    fn cache_managers<'b>(&'b mut self) -> StorageBackedAddressSet<'b, CTX> {
-        let root = state_subkey(ARBOS_STATE_PROGRAMS_KEY);
-        let slot = substorage(&root, ARBOS_PROGRAMS_STATE_CACHE_MANAGERS_KEY);
-        StorageBackedAddressSet::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)
     }
 
     fn is_chain_owner(&mut self, address: Address) -> Result<bool, ArbosStateError> {

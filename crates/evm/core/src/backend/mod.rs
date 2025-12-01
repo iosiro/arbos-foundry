@@ -9,7 +9,6 @@ use crate::{
     utils::{configure_tx_env, configure_tx_req_env, get_blob_base_fee_update_fraction_by_spec_id},
 };
 use alloy_consensus::Typed2718;
-use alloy_evm::Evm;
 use alloy_genesis::GenesisAccount;
 use alloy_network::{AnyRpcBlock, AnyTxEnvelope, TransactionResponse};
 use alloy_primitives::{Address, B256, TxKind, U256, keccak256, uint};

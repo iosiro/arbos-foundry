@@ -1,7 +1,10 @@
-use crate::{ArbitrumContextTr, ArbitrumHaltReason, transaction::ArbitrumTransactionError};
+use crate::ArbitrumContextTr;
 use revm::{
     Inspector,
-    context::{JournalTr, result::FromStringError},
+    context::{
+        JournalTr,
+        result::{FromStringError, HaltReason},
+    },
     handler::{EthFrame, EvmTr, Handler, MainnetHandler, handler::EvmTrError},
     inspector::{InspectorEvmTr, InspectorHandler},
     interpreter::interpreter::EthInterpreter,
@@ -34,11 +37,11 @@ where
             Context: ArbitrumContextTr<Journal: JournalTr<State = EvmState>>,
             Frame = EthFrame<EthInterpreter>,
         >,
-    ERROR: EvmTrError<EVM> + From<ArbitrumTransactionError> + FromStringError,
+    ERROR: EvmTrError<EVM> + FromStringError,
 {
     type Evm = EVM;
     type Error = ERROR;
-    type HaltReason = ArbitrumHaltReason;
+    type HaltReason = HaltReason;
 }
 
 impl<EVM, ERROR> InspectorHandler for ArbitrumHandler<EVM, ERROR, EthFrame<EthInterpreter>>
@@ -48,7 +51,7 @@ where
             Frame = EthFrame<EthInterpreter>,
             Inspector: Inspector<<<Self as Handler>::Evm as EvmTr>::Context, EthInterpreter>,
         >,
-    ERROR: EvmTrError<EVM> + From<ArbitrumTransactionError> + FromStringError,
+    ERROR: EvmTrError<EVM> + FromStringError,
 {
     type IT = EthInterpreter;
 }
