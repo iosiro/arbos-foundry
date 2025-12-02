@@ -32,7 +32,7 @@ use foundry_evm_core::{
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
     },
     decode::{RevertDecoder, SkipReason},
-    evm::EvmEnv,
+    evm::{CfgEnv, EvmEnv},
     utils::StateChangeset,
 };
 use foundry_evm_coverage::HitMaps;
@@ -142,11 +142,7 @@ impl Executor {
             },
         );
 
-        let mut res = Self { backend, env, inspector, gas_limit, legacy_assertions };
-
-        res.apply_arbitrum_state_overrides(|_| {});
-
-        res
+        Self { backend, env, inspector, gas_limit, legacy_assertions }
     }
 
     fn clone_with_backend(&self, backend: Backend) -> Self {
@@ -336,23 +332,39 @@ impl Executor {
 
     #[inline]
     pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
-        let mut context = ArbitrumContext {
-            block: self.env.evm_env.block_env.clone(),
-            tx: self.env.tx.clone(),
-            cfg: self.env.evm_env.cfg_env.clone(),
-            journaled_state: { Journal::new(self.backend.db_mut()) },
-            chain: (),
-            local: ArbitrumLocalContext::default(),
-            error: Ok(()),
+        let changes = {
+            let is_fork = self.backend.is_in_forking_mode();
+
+            let mut context = ArbitrumContext {
+                block: BlockEnv::default(),
+                tx: TxEnv::default(),
+                cfg: CfgEnv::default(),
+                journaled_state: { Journal::new(self.backend.db_mut()) },
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            let mut params: ArbosStateParams =
+                if is_fork { state.get().unwrap() } else { ArbosStateParams::default() };
+
+            f(&mut params);
+
+            state.initialize(&params).unwrap();
+            context.journaled_state.finalize()
         };
 
-        let mut state = context.arb_state(None, false);
+        let changes = changes
+            .into_iter()
+            .map(|(address, account)| {
+                let account = account.with_touched_mark();
+                (address, account)
+            })
+            .collect();
 
-        let mut params: ArbosStateParams = state.get().unwrap_or_default();
-
-        f(&mut params);
-
-        _ = state.initialize(&params);
+        self.backend.commit(changes);
     }
 
     /// Deploys a contract and commits the new state to the underlying database.
