@@ -23,6 +23,7 @@ contract Issue2851Test is DSTest {
     }
 
     /// forge-config: default.fuzz.seed = '111'
+    /// forge-config: default.fuzz.runs = '1024'
     function invariantNotZero() public {
         assertEq(back.number(), 1);
     }

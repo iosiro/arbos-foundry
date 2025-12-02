@@ -767,6 +767,7 @@ forgetest_init!(should_revert_with_assume_code, |prj, cmd| {
         config.invariant.fail_on_revert = true;
         config.invariant.max_assume_rejects = 10;
         config.fuzz.seed = Some(U256::from(100u32));
+        config.fuzz.runs = 1000;
     });
 
     // Add initial test that breaks invariant.
@@ -1063,6 +1064,7 @@ contract InvariantSelectorsWeightTest is Test {
 forgetest_init!(invariant_sequence_len, |prj, cmd| {
     prj.update_config(|config| {
         config.fuzz.seed = Some(U256::from(10u32));
+        config.fuzz.runs = 1000;
     });
 
     prj.add_test(

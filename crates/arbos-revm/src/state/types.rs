@@ -331,7 +331,7 @@ where
             }
         }
 
-        _ = self.context.sstore(ARBOS_STATE_ADDRESS, self.slot.into(), value);
+        self.context.sstore(ARBOS_STATE_ADDRESS, self.slot.into(), value).unwrap();
 
         Ok(())
     }
