@@ -142,6 +142,7 @@ impl EvmOpts {
             self.sender,
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
+            self.stylus_config.clone(),
         )
         .await
         .wrap_err_with(|| {

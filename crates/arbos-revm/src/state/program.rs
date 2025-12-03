@@ -94,19 +94,19 @@ where
 
         let mut data = [0u8; 32];
         data[0..2].copy_from_slice(&params.version.to_be_bytes());
-        data[2..6].copy_from_slice(&params.ink_price.to_be_bytes());
-        data[6..10].copy_from_slice(&params.max_stack_depth.to_be_bytes());
-        data[10..12].copy_from_slice(&params.free_pages.to_be_bytes());
-        data[12..14].copy_from_slice(&params.page_gas.to_be_bytes());
-        data[14..16].copy_from_slice(&params.page_limit.to_be_bytes());
-        data[16] = params.min_init_gas;
-        data[17] = params.min_cached_init_gas;
-        data[18] = params.init_cost_scalar;
-        data[19] = params.cached_cost_scalar;
-        data[20..22].copy_from_slice(&params.expiry_days.to_be_bytes());
-        data[22..24].copy_from_slice(&params.keepalive_days.to_be_bytes());
-        data[24..26].copy_from_slice(&params.block_cache_size.to_be_bytes());
-        data[26..30].copy_from_slice(&params.max_wasm_size.to_be_bytes());
+        data[2..5].copy_from_slice(&params.ink_price.to_be_bytes()[1..4]);
+        data[5..9].copy_from_slice(&params.max_stack_depth.to_be_bytes());
+        data[9..11].copy_from_slice(&params.free_pages.to_be_bytes());
+        data[11..13].copy_from_slice(&params.page_gas.to_be_bytes());
+        data[13..15].copy_from_slice(&params.page_limit.to_be_bytes());
+        data[15] = params.min_init_gas;
+        data[16] = params.min_cached_init_gas;
+        data[17] = params.init_cost_scalar;
+        data[18] = params.cached_cost_scalar;
+        data[19..21].copy_from_slice(&params.expiry_days.to_be_bytes());
+        data[21..23].copy_from_slice(&params.keepalive_days.to_be_bytes());
+        data[23..25].copy_from_slice(&params.block_cache_size.to_be_bytes());
+        data[25..29].copy_from_slice(&params.max_wasm_size.to_be_bytes());
 
         let value = U256::from_be_bytes(data);
         StorageBackedB256::new(self.context, self.gas.as_deref_mut(), self.is_static, slot)

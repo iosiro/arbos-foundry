@@ -19,7 +19,9 @@ use revm::{
     interpreter::{InterpreterResult, interpreter::EthInterpreter},
 };
 
-use crate::{ArbitrumContextTr, ArbitrumEvm, handler::ArbitrumHandler};
+use crate::{
+    ArbitrumContextTr, ArbitrumEvm, constants::STYLUS_DISCRIMINANT, handler::ArbitrumHandler,
+};
 
 impl<CTX, INSP, P, I> ArbitrumEvm<CTX, INSP, P, I> {
     /// Consumed self and returns a new Evm type with given Inspector.
@@ -74,7 +76,9 @@ where
     fn inspect_frame_run(
         &mut self,
     ) -> Result<FrameInitOrResult<Self::Frame>, ContextDbError<Self::Context>> {
-        if let Some(next_action) = self.inspect_frame_run_stylus() {
+        if self.frame_stack.get().interpreter.bytecode.bytes().starts_with(STYLUS_DISCRIMINANT)
+            && let Some(next_action) = self.inspect_frame_run_stylus()
+        {
             let frame = self.0.frame_stack.get();
             let context = &mut self.0.ctx;
             let mut result = frame.process_next_action(context, next_action);
