@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{ArbitrumContextTr, handler::ArbitrumHandler};
+use crate::{ArbitrumContextTr, constants::STYLUS_DISCRIMINANT, handler::ArbitrumHandler};
 use revm::{
     Database, DatabaseCommit, ExecuteCommitEvm, ExecuteEvm, Inspector,
     context::{
@@ -101,7 +101,9 @@ where
         FrameInitOrResult<Self::Frame>,
         ContextError<<<Self::Context as ContextTr>::Db as Database>::Error>,
     > {
-        if let Some(action) = self.frame_run_stylus() {
+        if self.frame_stack().get().interpreter.bytecode.bytes().starts_with(STYLUS_DISCRIMINANT)
+            && let Some(action) = self.frame_run_stylus()
+        {
             let frame = self.0.frame_stack.get();
             let context = &mut self.0.ctx;
             return frame.process_next_action(context, action).inspect(|i| {
