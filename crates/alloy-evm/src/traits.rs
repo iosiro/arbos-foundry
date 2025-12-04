@@ -43,10 +43,7 @@ impl EvmInternalsError {
 /// This trait provides an abstraction over journal operations without exposing
 /// associated types, making it object-safe and suitable for dynamic dispatch.
 trait EvmInternalsTr: Database<Error = ErasedError> + Debug {
-    fn load_account(
-        &mut self,
-        address: Address,
-    ) -> Result<StateLoad<&Account>, EvmInternalsError>;
+    fn load_account(&mut self, address: Address) -> Result<StateLoad<&Account>, EvmInternalsError>;
 
     fn load_account_code(
         &mut self,
@@ -112,10 +109,7 @@ where
     T: ContextTr + Debug,
     T::Db: Database,
 {
-    fn load_account(
-        &mut self,
-        address: Address,
-    ) -> Result<StateLoad<&Account>, EvmInternalsError> {
+    fn load_account(&mut self, address: Address) -> Result<StateLoad<&Account>, EvmInternalsError> {
         self.0.journal_mut().load_account(address).map_err(EvmInternalsError::database)
     }
 

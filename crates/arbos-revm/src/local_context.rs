@@ -23,7 +23,6 @@ pub struct ArbitrumLocalContext {
     pub stylus_pages_open: u16,
     /// Recently invoked Stylus wasm code hashes (block-local LRU).
     pub recent_wasms: VecDeque<B256>,
-    
 }
 
 impl Default for ArbitrumLocalContext {
@@ -47,11 +46,11 @@ impl LocalContextTr for ArbitrumLocalContext {
     fn shared_memory_buffer(&self) -> &Rc<RefCell<Vec<u8>>> {
         &self.shared_memory_buffer
     }
-    
+
     fn set_precompile_error_context(&mut self, output: String) {
         self.precompile_error_message = Some(output);
     }
-    
+
     fn take_precompile_error_context(&mut self) -> Option<String> {
         self.precompile_error_message.take()
     }

@@ -7,7 +7,7 @@ use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
     interpreter::{
-        CallInput, CallInputs, Gas, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS
+        CallInput, CallInputs, Gas, InstructionResult, InterpreterResult, gas::ISTANBUL_SLOAD_GAS,
     },
     precompile::{PrecompileError, PrecompileId, PrecompileSpecId, Precompiles},
     primitives::{
@@ -144,9 +144,7 @@ impl<CTX: ArbitrumContextTr> PrecompileProvider<CTX> for ArbitrumPrecompileProvi
         };
 
         // revert for mutating calls to code addresses other than their own
-        if !inputs.is_static
-            && inputs.target_address != inputs.bytecode_address
-        {
+        if !inputs.is_static && inputs.target_address != inputs.bytecode_address {
             return Ok(Some(InterpreterResult {
                 result: InstructionResult::Revert,
                 output: Bytes::default(),

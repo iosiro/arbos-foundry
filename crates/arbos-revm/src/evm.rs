@@ -125,25 +125,22 @@ where
     > {
         self.0.frame_return_result(result)
     }
-    
 
-    fn all(&self,) -> (&Self::Context, &Self::Instructions, &Self::Precompiles, &FrameStack<Self::Frame> ,) {
-        (
-            &self.0.ctx,
-            &self.0.instruction,
-            &self.0.precompiles,
-            &self.0.frame_stack,
-        )
+    fn all(
+        &self,
+    ) -> (&Self::Context, &Self::Instructions, &Self::Precompiles, &FrameStack<Self::Frame>) {
+        (&self.0.ctx, &self.0.instruction, &self.0.precompiles, &self.0.frame_stack)
     }
-    
 
-    fn all_mut(&mut self,) -> (&mut Self::Context, &mut Self::Instructions, &mut Self::Precompiles, &mut FrameStack<Self::Frame> ,) {
-        (
-            &mut self.0.ctx,
-            &mut self.0.instruction,
-            &mut self.0.precompiles,
-            &mut self.0.frame_stack,
-        )
+    fn all_mut(
+        &mut self,
+    ) -> (
+        &mut Self::Context,
+        &mut Self::Instructions,
+        &mut Self::Precompiles,
+        &mut FrameStack<Self::Frame>,
+    ) {
+        (&mut self.0.ctx, &mut self.0.instruction, &mut self.0.precompiles, &mut self.0.frame_stack)
     }
 }
 

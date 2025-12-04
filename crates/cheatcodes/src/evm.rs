@@ -1,7 +1,10 @@
 //! Implementations of [`Evm`](spec::Group::Evm) cheatcodes.
 
 use crate::{
-    BroadcastableTransaction, Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Error, Result, Vm::*, evm::record_debug_step::convert_call_trace_ctx_to_debug_step, inspector::{Ecx, RecordDebugStepInfo}
+    BroadcastableTransaction, Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Error, Result,
+    Vm::*,
+    evm::record_debug_step::convert_call_trace_ctx_to_debug_step,
+    inspector::{Ecx, RecordDebugStepInfo},
 };
 use alloy_consensus::TxEnvelope;
 use alloy_genesis::{Genesis, GenesisAccount};

@@ -128,7 +128,11 @@ impl Default for ArbosStateParams {
 
 impl<'a, CTX: ArbitrumContextTr> ArbStateWrapper<'a, CTX> {
     pub fn new(context: &'a mut CTX, mut gas: Option<&'a mut Gas>, is_static: bool) -> Self {
-        if let Err(err) = context.journal_mut().load_account_info_skip_cold_load(ARBOS_STATE_ADDRESS, false, false) {
+        if let Err(err) = context.journal_mut().load_account_info_skip_cold_load(
+            ARBOS_STATE_ADDRESS,
+            false,
+            false,
+        ) {
             // Consume all gas so downstream callers see a consistent failure state rather than a
             // panic.
             if let Some(gas) = gas.as_deref_mut() {

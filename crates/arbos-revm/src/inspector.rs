@@ -93,7 +93,7 @@ where
 
         self.0.inspect_frame_run()
     }
-    
+
     fn all_inspector(
         &self,
     ) -> (
@@ -111,7 +111,7 @@ where
             &self.0.inspector,
         )
     }
-    
+
     fn all_mut_inspector(
         &mut self,
     ) -> (

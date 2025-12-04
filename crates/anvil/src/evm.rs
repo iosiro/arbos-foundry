@@ -1,15 +1,15 @@
 use alloy_evm::{
     Database,
-    precompiles::{DynPrecompile, PrecompileInput},
+    precompiles::DynPrecompile,
 };
+use alloy_primitives::Address;
 use core::ops::{Deref, DerefMut};
-use foundry_evm::core::evm::{EthEvm, EthEvmContext, PrecompilesMap, TxEnv};
+use foundry_evm::core::evm::{EthEvm, EthEvmContext, TxEnv};
 use revm::{
     DatabaseCommit, ExecuteEvm, InspectEvm, Inspector,
     context::result::{EVMError, ExecutionResult, HaltReason, ResultAndState},
     handler::PrecompileProvider,
     interpreter::InterpreterResult,
-    precompile::Precompile,
 };
 use std::fmt::Debug;
 
@@ -17,25 +17,9 @@ use std::fmt::Debug;
 /// `anvil` as a library.
 pub trait PrecompileFactory: Send + Sync + Unpin + Debug {
     /// Returns a set of precompiles to extend the EVM with.
-    fn precompiles(&self) -> Vec<(Precompile, u64)>;
+    fn precompiles(&self) -> Vec<(Address, DynPrecompile)>;
 }
 
-/// Inject custom precompiles into the EVM dynamically.
-pub fn inject_custom_precompiles<DB, I>(
-    evm: &mut AnvilEvm<DB, I, PrecompilesMap<DB>>,
-    precompiles: Vec<(Precompile, u64)>,
-) where
-    DB: Database,
-    I: Inspector<EthEvmContext<DB>>,
-{
-    for (precompile, gas) in precompiles {
-        let addr = *precompile.address();
-        let func = *precompile.precompile();
-        evm.precompiles_mut().apply_precompile(&addr, move |_| {
-            Some(DynPrecompile::from(move |input: PrecompileInput<'_>| func(input.data, gas)))
-        });
-    }
-}
 
 pub struct AnvilEvm<DB: Database, I, P> {
     inner: EthEvm<DB, I, P>,
@@ -124,6 +108,7 @@ mod tests {
     use std::{borrow::Cow, convert::Infallible};
 
     use crate::{PrecompileFactory, evm::AnvilEvm, inject_custom_precompiles};
+    use alloy_evm::precompiles::DynPrecompile;
     use alloy_primitives::{Address, Bytes, TxKind, address};
     use arbos_revm::precompiles::ArbitrumPrecompileProvider;
     use foundry_evm::{
@@ -138,7 +123,7 @@ mod tests {
         handler::instructions::EthInstructions,
         inspector::NoOpInspector,
         interpreter::interpreter::EthInterpreter,
-        precompile::{Precompile, PrecompileId, PrecompileOutput, PrecompileResult},
+        precompile::PrecompileOutput,
         primitives::hardfork::SpecId,
     };
 
@@ -153,7 +138,8 @@ mod tests {
     struct CustomPrecompileFactory;
 
     impl PrecompileFactory for CustomPrecompileFactory {
-        fn precompiles(&self) -> Vec<(Precompile, u64)> {
+        fn precompiles(&self) -> Vec<(Address, DynPrecompile)> {
+            use alloy_evm::precompiles::PrecompileInput;
             vec![(
                 PRECOMPILE_ADDR,
                 DynPrecompile::from(|input: PrecompileInput<'_>| {
@@ -166,12 +152,6 @@ mod tests {
                 }),
             )]
         }
-    }
-
-    /// Custom precompile that echoes the input data.
-    /// In this example it uses `0xdeadbeef` as the input data, returning it as output.
-    fn custom_echo_precompile(input: &[u8], _gas_limit: u64) -> PrecompileResult {
-        Ok(PrecompileOutput { bytes: Bytes::copy_from_slice(input), gas_used: 0, reverted: false })
     }
 
     pub type TestEvm =
