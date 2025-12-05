@@ -1,0 +1,8 @@
+[toolchain]
+channel = "1.91.0"
+components = ["rustfmt", "clippy"]
+
+# Pinned nightly used by scripts/CI/tools (ignored by rustup)
+[nightly]
+channel = "nightly-2025-10-30"
+components = ["rustfmt", "clippy"]
