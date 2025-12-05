@@ -105,9 +105,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, convert::Infallible};
+    use std::convert::Infallible;
 
-    use crate::{PrecompileFactory, evm::AnvilEvm, inject_custom_precompiles};
+    use crate::{PrecompileFactory, evm::AnvilEvm};
     use alloy_evm::precompiles::DynPrecompile;
     use alloy_primitives::{Address, Bytes, TxKind, address};
     use arbos_revm::precompiles::ArbitrumPrecompileProvider;
@@ -202,7 +202,7 @@ mod tests {
 
         assert!(!evm.precompiles().contains(&PRECOMPILE_ADDR));
 
-        inject_custom_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
+        evm.precompiles_mut().extend_precompiles(CustomPrecompileFactory.precompiles());
 
         assert!(evm.precompiles().contains(&PRECOMPILE_ADDR));
 
@@ -221,7 +221,7 @@ mod tests {
 
         assert!(!evm.precompiles().contains(&PRECOMPILE_ADDR));
 
-        inject_custom_precompiles(&mut evm, CustomPrecompileFactory.precompiles());
+        evm.precompiles_mut().extend_precompiles(CustomPrecompileFactory.precompiles());
 
         assert!(evm.precompiles().contains(&PRECOMPILE_ADDR));
 
