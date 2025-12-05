@@ -16,6 +16,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
   RUSTC_WRAPPER: "sccache"
+  NIGHTLY_TOOLCHAIN: nightly-2025-10-30
 
 jobs:
   nextest:
@@ -37,7 +38,7 @@ jobs:
   #         persist-credentials: false
   #     - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
   #       with:
-  #         toolchain: nightly
+  #         toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
   #     - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
   #     - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
   #     - name: Build documentation
@@ -105,8 +106,15 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: clippy
+      - name: Point cargo +nightly to pinned toolchain
+        run: |
+          pinned_path="$(rustup run "$NIGHTLY_TOOLCHAIN" rustc --print sysroot)"
+          host=$(rustup run "$NIGHTLY_TOOLCHAIN" rustc -Vv | awk '/host: / { print $2 }')
+          nightly_path="$(rustup show home)/toolchains/nightly-$host"
+          rm -rf "$nightly_path"
+          ln -s "$pinned_path" "$nightly_path"
       - uses: rui314/setup-mold@725a8794d15fc7563f59595bd9556495c0564878 # v1
       - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - run: cargo clippy --workspace --all-targets --all-features
@@ -124,8 +132,15 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: rustfmt
+      - name: Point cargo +nightly to pinned toolchain
+        run: |
+          pinned_path="$(rustup run "$NIGHTLY_TOOLCHAIN" rustc --print sysroot)"
+          host=$(rustup run "$NIGHTLY_TOOLCHAIN" rustc -Vv | awk '/host: / { print $2 }')
+          nightly_path="$(rustup show home)/toolchains/nightly-$host"
+          rm -rf "$nightly_path"
+          ln -s "$pinned_path" "$nightly_path"
       - run: cargo fmt --all --check
 
   forge-fmt:

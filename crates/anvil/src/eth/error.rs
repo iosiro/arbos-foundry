@@ -254,7 +254,7 @@ pub enum InvalidTransactionError {
     /// Thrown when the block's `blob_gas_price` is greater than tx-specified
     /// `max_fee_per_blob_gas` after Cancun.
     #[error("Block `blob_gas_price` is greater than tx-specified `max_fee_per_blob_gas`")]
-    BlobFeeCapTooLow,
+    BlobFeeCapTooLow(u128, u128),
     /// Thrown when we receive a tx with `blob_versioned_hashes` and we're not on the Cancun hard
     /// fork.
     #[error("Block `blob_versioned_hashes` is not supported before the Cancun hardfork")]
@@ -290,6 +290,9 @@ pub enum InvalidTransactionError {
     /// Deposit transaction error post regolith
     #[error("op-deposit failure post regolith")]
     DepositTxErrorPostRegolith,
+    /// Missing enveloped transaction
+    #[error("missing enveloped transaction")]
+    MissingEnvelopedTx,
 }
 
 impl From<InvalidTransaction> for InvalidTransactionError {
@@ -315,7 +318,10 @@ impl From<InvalidTransaction> for InvalidTransactionError {
             InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
             InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
             InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
-            InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
+            InvalidTransaction::BlobGasPriceGreaterThanMax {
+                block_blob_gas_price,
+                tx_max_fee_per_blob_gas,
+            } => Self::BlobFeeCapTooLow(block_blob_gas_price, tx_max_fee_per_blob_gas),
             InvalidTransaction::BlobVersionedHashesNotSupported => {
                 Self::BlobVersionedHashesNotSupported
             }
@@ -339,7 +345,8 @@ impl From<InvalidTransaction> for InvalidTransactionError {
             | InvalidTransaction::EmptyAuthorizationList
             | InvalidTransaction::Eip7873NotSupported
             | InvalidTransaction::Eip7873MissingTarget
-            | InvalidTransaction::MissingChainId => Self::Revm(err),
+            | InvalidTransaction::MissingChainId
+            | InvalidTransaction::Str(_) => Self::Revm(err),
         }
     }
 }

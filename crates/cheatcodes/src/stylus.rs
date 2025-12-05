@@ -123,6 +123,7 @@ fn deploy_stylus_code(
                 value: revm::interpreter::CallValue::Transfer(value.unwrap_or(U256::ZERO)),
                 scheme: CallScheme::Call,
                 is_static: false,
+                known_bytecode: None,
             },
             ccx,
         )?;

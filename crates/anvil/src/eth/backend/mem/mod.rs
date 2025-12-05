@@ -28,7 +28,6 @@ use crate::{
         sign::build_typed_transaction,
     },
     evm::AnvilEvm,
-    inject_custom_precompiles,
     mem::{
         inspector::AnvilInspector,
         storage::{BlockchainStorage, InMemoryBlockStates, MinedBlockOutcome},
@@ -804,8 +803,8 @@ impl Backend {
         precompiles_map.extend(self.env.read().networks.precompiles());
 
         if let Some(factory) = &self.precompile_factory {
-            for (precompile, _) in &factory.precompiles() {
-                precompiles_map.insert(precompile.id().name().to_string(), *precompile.address());
+            for (address, precompile) in factory.precompiles() {
+                precompiles_map.insert(precompile.precompile_id().to_string(), address);
             }
         }
 
@@ -1158,7 +1157,7 @@ impl Backend {
         self.env.read().networks.inject_precompiles(evm.precompiles_mut());
 
         if let Some(factory) = &self.precompile_factory {
-            inject_custom_precompiles(&mut evm, factory.precompiles());
+            evm.precompiles_mut().extend_precompiles(factory.precompiles());
         }
 
         let cheats = Arc::new(self.cheats.clone());
@@ -1861,8 +1860,9 @@ impl Backend {
         block_request: Option<BlockRequest>,
         opts: GethDebugTracingCallOptions,
     ) -> Result<GethTrace, BlockchainError> {
-        let GethDebugTracingCallOptions { tracing_options, block_overrides, state_overrides } =
-            opts;
+        let GethDebugTracingCallOptions {
+            tracing_options, block_overrides, state_overrides, ..
+        } = opts;
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
         self.with_database_at(block_request, |state, mut block| {
@@ -3584,7 +3584,10 @@ impl TransactionValidator for Backend {
                 && max_fee_per_blob_gas < blob_gas_and_price.blob_gasprice
             {
                 warn!(target: "backend", "max fee per blob gas={}, too low, block blob gas price={}", max_fee_per_blob_gas, blob_gas_and_price.blob_gasprice);
-                return Err(InvalidTransactionError::BlobFeeCapTooLow);
+                return Err(InvalidTransactionError::BlobFeeCapTooLow(
+                    max_fee_per_blob_gas,
+                    blob_gas_and_price.blob_gasprice,
+                ));
             }
 
             let max_cost = tx.max_cost();

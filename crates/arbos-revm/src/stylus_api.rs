@@ -155,6 +155,7 @@ where
             value: revm::interpreter::CallValue::Transfer(value),
             scheme: revm::interpreter::CallScheme::Call,
             is_static,
+            known_bytecode: None,
         }));
 
         let next_action = InterpreterAction::NewFrame(first_frame_input);

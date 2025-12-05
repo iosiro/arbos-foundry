@@ -865,7 +865,7 @@ mod tests {
 
         let code_address = Address::from_slice(&keccak256(&wasm)[12..32]);
 
-        context.journal_mut().warm_account(code_address).unwrap();
+        context.journal_mut().load_account(code_address).unwrap();
 
         context.journal_mut().set_code(code_address, Bytecode::new_raw(Bytes::from(wasm)));
 

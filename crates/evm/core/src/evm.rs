@@ -119,6 +119,7 @@ fn get_create2_factory_call_inputs(
     CallInputs {
         caller: inputs.caller,
         bytecode_address: deployer,
+        known_bytecode: None,
         target_address: deployer,
         scheme: CallScheme::Call,
         value: CallValue::Transfer(inputs.value),
@@ -262,6 +263,8 @@ impl<'db, I: InspectorExt> FoundryHandler<'db, I> {
                             gas: Gas::new(gas_limit),
                         },
                         memory_offset: 0..0,
+                        was_precompile_called: false,
+                        precompile_call_logs: vec![],
                     })));
                 } else if code_hash != DEFAULT_CREATE2_DEPLOYER_CODEHASH {
                     return Ok(Some(FrameResult::Call(CallOutcome {
@@ -271,6 +274,8 @@ impl<'db, I: InspectorExt> FoundryHandler<'db, I> {
                             gas: Gas::new(gas_limit),
                         },
                         memory_offset: 0..0,
+                        was_precompile_called: false,
+                        precompile_call_logs: vec![],
                     })));
                 }
 

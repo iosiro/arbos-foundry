@@ -2,7 +2,7 @@ use core::fmt::Debug;
 use revm::{
     context::{Cfg, ContextTr, LocalContextTr},
     handler::PrecompileProvider,
-    interpreter::{CallInput, Gas, InputsImpl, InstructionResult, InterpreterResult},
+    interpreter::{CallInput, CallInputs, Gas, InstructionResult, InterpreterResult},
     precompile::{PrecompileError, PrecompileFn, PrecompileId, PrecompileResult},
     primitives::{
         Address, Bytes, U256,
@@ -271,6 +271,61 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX>> PrecompilesMap<CTX, P> {
 
         false
     }
+
+    /// Extends the precompile map with multiple precompiles.
+    ///
+    /// This is a convenience method for inserting or replacing multiple precompiles at once.
+    /// Each precompile in the iterator is applied to its corresponding address.
+    ///
+    /// **Note**: This method will **replace** any existing precompiles at the given addresses.
+    /// If you need to modify existing precompiles, use [`map_precompile`](Self::map_precompile)
+    /// or [`apply_precompile`](Self::apply_precompile) instead.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let precompiles = vec![
+    ///     (address1, my_precompile1),
+    ///     (address2, my_precompile2),
+    /// ];
+    /// precompiles_map.extend_precompiles(precompiles);
+    /// ```
+    pub fn extend_precompiles<I>(&mut self, precompiles: I)
+    where
+        I: IntoIterator<Item = (Address, DynPrecompile)>,
+    {
+        for (addr, precompile) in precompiles {
+            self.apply_precompile(&addr, |_| Some(precompile));
+        }
+    }
+
+    /// Builder-style method that extends the precompile map with multiple precompiles.
+    ///
+    /// This is a consuming version of [`extend_precompiles`](Self::extend_precompiles) that returns
+    /// `Self`.
+    ///
+    /// **Note**: This method will **replace** any existing precompiles at the given addresses.
+    /// If you need to modify existing precompiles, use
+    /// [`with_mapped_precompile`](Self::with_mapped_precompile)
+    /// or [`with_applied_precompile`](Self::with_applied_precompile) instead.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let precompiles = vec![
+    ///     (address1, my_precompile1),
+    ///     (address2, my_precompile2),
+    /// ];
+    /// let map = PrecompilesMap::new(precompiles_cow)
+    ///     .with_extended_precompiles(precompiles);
+    /// ```
+    pub fn with_extended_precompiles<I>(mut self, precompiles: I) -> Self
+    where
+        I: IntoIterator<Item = (Address, DynPrecompile)>,
+    {
+        self.extend_precompiles(precompiles);
+        self
+    }
 }
 
 impl<CTX: ContextTr, P: PrecompileProvider<CTX> + Debug> From<P> for PrecompilesMap<CTX, P> {
@@ -304,23 +359,22 @@ where
     fn run(
         &mut self,
         context: &mut CTX,
-        address: &Address,
-        inputs: &InputsImpl,
-        _is_static: bool,
-        gas_limit: u64,
+        inputs: &CallInputs,
     ) -> Result<Option<Self::Output>, String> {
         // Check if address matches either static or dynamic precompiles
-        if !self.contains(address) {
+        if !self.contains(&inputs.bytecode_address) {
             return Ok(None);
         }
 
         let mut result = InterpreterResult {
             result: InstructionResult::Return,
-            gas: Gas::new(gas_limit),
+            gas: Gas::new(inputs.gas_limit),
             output: Bytes::new(),
         };
 
-        let result = if let Some(precompile) = self.dyn_precompiles.inner.get(address) {
+        let result = if let Some(precompile) =
+            self.dyn_precompiles.inner.get(&inputs.bytecode_address)
+        {
             // === Dynamic precompile ===
 
             // Execute the precompile
@@ -338,12 +392,12 @@ where
 
             let precompile_result = precompile.call(PrecompileInput {
                 data: &input_bytes,
-                gas: gas_limit,
-                caller: inputs.caller_address,
-                value: inputs.call_value,
+                gas: inputs.gas_limit,
+                caller: inputs.caller,
+                value: inputs.call_value(),
                 internals: EvmInternals::new(context),
                 target_address: inputs.target_address,
-                bytecode_address: inputs.bytecode_address.expect("always set for precompile calls"),
+                bytecode_address: inputs.bytecode_address,
             });
 
             match precompile_result {
@@ -368,9 +422,7 @@ where
                     result
                 }
             }
-        } else if let Some(inner_result) =
-            self.inner.run(context, address, inputs, _is_static, gas_limit)?
-        {
+        } else if let Some(inner_result) = self.inner.run(context, inputs)? {
             // === Inner provider ===
             inner_result
         } else {
