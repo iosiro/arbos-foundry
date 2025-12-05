@@ -1,7 +1,4 @@
-use alloy_evm::{
-    Database,
-    precompiles::DynPrecompile,
-};
+use alloy_evm::{Database, precompiles::DynPrecompile};
 use alloy_primitives::Address;
 use core::ops::{Deref, DerefMut};
 use foundry_evm::core::evm::{EthEvm, EthEvmContext, TxEnv};
@@ -19,7 +16,6 @@ pub trait PrecompileFactory: Send + Sync + Unpin + Debug {
     /// Returns a set of precompiles to extend the EVM with.
     fn precompiles(&self) -> Vec<(Address, DynPrecompile)>;
 }
-
 
 pub struct AnvilEvm<DB: Database, I, P> {
     inner: EthEvm<DB, I, P>,

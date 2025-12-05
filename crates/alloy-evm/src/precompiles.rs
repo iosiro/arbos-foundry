@@ -272,7 +272,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX>> PrecompilesMap<CTX, P> {
         false
     }
 
- /// Extends the precompile map with multiple precompiles.
+    /// Extends the precompile map with multiple precompiles.
     ///
     /// This is a convenience method for inserting or replacing multiple precompiles at once.
     /// Each precompile in the iterator is applied to its corresponding address.
@@ -325,7 +325,7 @@ impl<CTX: ContextTr, P: PrecompileProvider<CTX>> PrecompilesMap<CTX, P> {
     {
         self.extend_precompiles(precompiles);
         self
-    }    
+    }
 }
 
 impl<CTX: ContextTr, P: PrecompileProvider<CTX> + Debug> From<P> for PrecompilesMap<CTX, P> {

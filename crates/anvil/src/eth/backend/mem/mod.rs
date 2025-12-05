@@ -789,7 +789,7 @@ impl Backend {
         (self.spec_id() as u8) >= (SpecId::PRAGUE as u8)
     }
 
-     /// Returns the precompiles for the current spec.
+    /// Returns the precompiles for the current spec.
     pub fn precompiles(&self) -> BTreeMap<String, Address> {
         let spec_id = self.env.read().evm_env.cfg_env.spec;
         let precompiles = Precompiles::new(PrecompileSpecId::from_spec_id(spec_id));
