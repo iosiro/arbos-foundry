@@ -3545,16 +3545,6 @@ Error: Failed to estimate gas: server returned an error response: error code 3: 
 "#]]);
 });
 
-// <https://basescan.org/block/30558838>
-casttest!(estimate_base_da, |_prj, cmd| {
-    cmd.args(["da-estimate", "30558838", "-r", "https://mainnet.base.org/"])
-        .assert_success()
-        .stdout_eq(str![[r#"
-Estimated data availability size for block 30558838 with 225 transactions: 52916546100
-
-"#]]);
-});
-
 // <https://github.com/foundry-rs/foundry/issues/10705>
 casttest!(cast_call_return_array_of_tuples, |_prj, cmd| {
     cmd.args([
@@ -3587,21 +3577,6 @@ Warning: Contract code is empty
 "#]])
     .stdout_eq(str![[r#"
 0x
-
-"#]]);
-});
-
-// <https://github.com/foundry-rs/foundry/issues/10740>
-casttest!(tx_raw_opstack_deposit, |_prj, cmd| {
-    cmd.args([
-        "tx",
-        "0xf403cba612d1c01c027455c0d97427ccd5f7f99aac30017e065f81d1e30244ea",
-        "--raw",
-        "--rpc-url",
-        "https://sepolia.base.org",
-    ]).assert_success()
-            .stdout_eq(str![[r#"
-0x7ef90207a0cbde10ec697aff886f95d2514bab434e455620627b9bb8ba33baaaa4d537d62794d45955f4de64f1840e5686e64278da901e263031944200000000000000000000000000000000000007872386f26fc10000872386f26fc1000083096c4980b901a4d764ad0b0001000000000000000000000000000000000000000000000000000000065132000000000000000000000000fd0bf71f60660e2f608ed56e1659c450eb1131200000000000000000000000004200000000000000000000000000000000000010000000000000000000000000000000000000000000000000002386f26fc1000000000000000000000000000000000000000000000000000000000000000493e000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000a41635f5fd000000000000000000000000ca11bde05977b3631167028862be2a173976ca110000000000000000000000005703b26fe5a7be820db1bf34c901a79da1a46ba4000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 
 "#]]);
 });
@@ -4201,37 +4176,6 @@ casttest!(abi_encode_event_dynamic_indexed, |_prj, cmd| {
 "#]]);
 });
 
-// Test cast run Celo transfer with precompiles.
-casttest!(
-    #[ignore = "flaky celo rpc url"]
-    run_celo_with_precompiles,
-    |_prj, cmd| {
-        let rpc = next_rpc_endpoint(NamedChain::Celo);
-        cmd.args([
-        "run",
-        "0xa652b9f41bb1a617ea6b2835b3316e79f0f21b8264e7bcd20e57c4092a70a0f6",
-        "--quick",
-        "--rpc-url",
-        rpc.as_str(),
-    ])
-    .assert_success()
-    .stdout_eq(str![[r#"
-Traces:
-  [17776] 0x471EcE3750Da237f93B8E339c536989b8978a438::transfer(0xD2eB2d37d238Caeff39CFA36A013299C6DbAC56A, 138000000000000000 [1.38e17])
-    ├─ [12370] 0xFeA1B35f1D5f2A58532a70e7A32e6F2D3Bc4F7B1::transfer(0xD2eB2d37d238Caeff39CFA36A013299C6DbAC56A, 138000000000000000 [1.38e17]) [delegatecall]
-    │   ├─ [9000] CELO_TRANSFER_PRECOMPILE::00000000(00000000000000008106680ba7095cfd8f4351a8b7041da3060afb83000000000000000000000000d2eb2d37d238caeff39cfa36a013299c6dbac56a00000000000000000000000000000000000000000000000001ea4644d3010000)
-    │   │   └─ ← [Return]
-    │   ├─ emit Transfer(param0: 0x8106680Ba7095CfD8F4351a8B7041da3060Afb83, param1: 0xD2eB2d37d238Caeff39CFA36A013299C6DbAC56A, param2: 138000000000000000 [1.38e17])
-    │   └─ ← [Return] 0x0000000000000000000000000000000000000000000000000000000000000001
-    └─ ← [Return] 0x0000000000000000000000000000000000000000000000000000000000000001
-
-
-Transaction successfully executed.
-[GAS]
-
-"#]]);
-    }
-);
 casttest!(keccak_stdin_bytes, |_prj, cmd| {
     cmd.args(["keccak"]).stdin("0x12").assert_success().stdout_eq(str![[r#"
 0x5fa2358263196dbbf23d1ca7a509451f7a2f64c15837bfbb81298b1e3e24e4fa

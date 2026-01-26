@@ -39,6 +39,7 @@ use foundry_compilers::{
     multi::{MultiCompilerParser, MultiCompilerRestrictions},
     solc::{CliSettings, SolcLanguage, SolcSettings},
 };
+use foundry_evm_networks::NetworkConfigs;
 use regex::Regex;
 use revm::primitives::hardfork::SpecId;
 use semver::Version;
@@ -128,7 +129,6 @@ pub use compilation::{CompilationRestrictions, SettingsOverrides};
 pub mod extend;
 use extend::Extends;
 
-use foundry_evm_networks::NetworkConfigs;
 pub use semver;
 
 /// Foundry configuration

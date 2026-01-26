@@ -4,7 +4,6 @@ use crate::{
     eth::{EthApi, backend::db::SerializableState, pool::transactions::TransactionOrder},
 };
 use alloy_genesis::Genesis;
-use alloy_op_hardforks::OpHardfork;
 use alloy_primitives::{B256, U256, utils::Unit};
 use alloy_signer_local::coins_bip39::{English, Mnemonic};
 use anvil_server::ServerConfig;
@@ -217,13 +216,7 @@ impl NodeArgs {
             if self.evm.no_rate_limit { Some(u64::MAX) } else { self.evm.compute_units_per_second };
 
         let hardfork = match &self.hardfork {
-            Some(hf) => {
-                if self.evm.networks.is_optimism() {
-                    Some(OpHardfork::from_str(hf)?.into())
-                } else {
-                    Some(EthereumHardfork::from_str(hf)?.into())
-                }
-            }
+            Some(hf) => Some(EthereumHardfork::from_str(hf)?.into()),
             None => None,
         };
 
@@ -835,14 +828,6 @@ mod tests {
         let args: NodeArgs = NodeArgs::parse_from(["anvil", "--hardfork", "berlin"]);
         let config = args.into_node_config().unwrap();
         assert_eq!(config.hardfork, Some(EthereumHardfork::Berlin.into()));
-    }
-
-    #[test]
-    fn can_parse_optimism_hardfork() {
-        let args: NodeArgs =
-            NodeArgs::parse_from(["anvil", "--optimism", "--hardfork", "Regolith"]);
-        let config = args.into_node_config().unwrap();
-        assert_eq!(config.hardfork, Some(OpHardfork::Regolith.into()));
     }
 
     #[test]

@@ -259,7 +259,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-hardforks",
- "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -362,36 +361,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-serde",
  "serde",
-]
-
-[[package]]
-name = "alloy-op-evm"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "231262d7e06000f3fb642d32d38ca75e09e78e04977c10be0a07a5ee2c869cfd"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-evm",
- "alloy-op-hardforks",
- "alloy-primitives",
- "auto_impl",
- "op-alloy",
- "op-revm",
- "revm",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "alloy-op-hardforks"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95ac97adaba4c26e17192d81f49186ac20c1e844e35a00e169c8d3d58bc84e6b"
-dependencies = [
- "alloy-chains",
- "alloy-hardforks",
- "alloy-primitives",
- "auto_impl",
 ]
 
 [[package]]
@@ -1117,8 +1086,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-hardforks",
  "alloy-network",
- "alloy-op-evm",
- "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-provider",
  "alloy-pubsub",
@@ -1152,9 +1119,6 @@ dependencies = [
  "futures",
  "hyper",
  "itertools 0.14.0",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
- "op-revm",
  "parking_lot",
  "rand 0.8.5",
  "rand 0.9.2",
@@ -1188,8 +1152,6 @@ dependencies = [
  "bytes",
  "foundry-common",
  "foundry-evm",
- "op-alloy-consensus",
- "op-revm",
  "rand 0.9.2",
  "revm",
  "serde",
@@ -2642,8 +2604,6 @@ dependencies = [
  "foundry-wallets",
  "futures",
  "itertools 0.14.0",
- "op-alloy-consensus",
- "op-alloy-flz",
  "rand 0.8.5",
  "rand 0.9.2",
  "rayon",
@@ -4921,7 +4881,6 @@ dependencies = [
  "alloy-hardforks",
  "alloy-json-abi",
  "alloy-network",
- "alloy-op-evm",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
@@ -4937,7 +4896,6 @@ dependencies = [
  "foundry-test-utils",
  "futures",
  "itertools 0.14.0",
- "op-revm",
  "parking_lot",
  "revm",
  "revm-inspectors",
@@ -7147,12 +7105,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "op-alloy-flz"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
-
-[[package]]
 name = "op-alloy-network"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7226,7 +7178,8 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "14.0.0"
-source = "git+https://github.com/bluealloy/revm.git?rev=7e59936#7e59936c87794d0bc1d1d2d18b754f5a76fc37aa"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f887a8353e22df6ce5b150e4d3a51838bc6a64d4644c5f7416bef70f442c2857"
 dependencies = [
  "auto_impl",
  "revm",

@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-use alloy_consensus::{EthereumTxEnvelope, Header, TxEip4844Variant};
+use alloy_consensus::{EthereumTxEnvelope, Header, TxEip4844Variant, TxEnvelope};
 use alloy_dyn_abi::{DynSolType, DynSolValue, FunctionExt};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_ens::NameOrAddress;
@@ -37,7 +37,6 @@ use foundry_common::{
 use foundry_config::Chain;
 use foundry_evm::core::bytecode::InstIter;
 use futures::{FutureExt, StreamExt, future::Either};
-use op_alloy_consensus::OpTxEnvelope;
 use rayon::prelude::*;
 use std::{
     borrow::Cow,
@@ -825,7 +824,7 @@ impl<P: Provider<AnyNetwork>> Cast<P> {
 
         Ok(if raw {
             // also consider opstack deposit transactions
-            let either_tx = tx.try_into_either::<OpTxEnvelope>()?;
+            let either_tx = tx.try_into_either::<TxEnvelope>()?;
             let encoded = either_tx.encoded_2718();
             format!("0x{}", hex::encode(encoded))
         } else if let Some(field) = field {

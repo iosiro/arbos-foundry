@@ -1,14 +1,11 @@
 use alloy_hardforks::EthereumHardfork;
-use alloy_op_hardforks::OpHardfork::{self};
 use alloy_rpc_types::BlockNumberOrTag;
 
-use op_revm::OpSpecId;
 use revm::primitives::hardfork::SpecId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ChainHardfork {
     Ethereum(EthereumHardfork),
-    Optimism(OpHardfork),
 }
 
 impl From<EthereumHardfork> for ChainHardfork {
@@ -17,17 +14,10 @@ impl From<EthereumHardfork> for ChainHardfork {
     }
 }
 
-impl From<OpHardfork> for ChainHardfork {
-    fn from(value: OpHardfork) -> Self {
-        Self::Optimism(value)
-    }
-}
-
 impl From<ChainHardfork> for SpecId {
     fn from(fork: ChainHardfork) -> Self {
         match fork {
             ChainHardfork::Ethereum(hardfork) => spec_id_from_ethereum_hardfork(hardfork),
-            ChainHardfork::Optimism(hardfork) => spec_id_from_optimism_hardfork(hardfork).into(),
         }
     }
 }
@@ -62,23 +52,6 @@ pub fn spec_id_from_ethereum_hardfork(hardfork: EthereumHardfork) -> SpecId {
     }
 }
 
-/// Map an OptimismHardfork enum into its corresponding OpSpecId.
-pub fn spec_id_from_optimism_hardfork(hardfork: OpHardfork) -> OpSpecId {
-    match hardfork {
-        OpHardfork::Bedrock => OpSpecId::BEDROCK,
-        OpHardfork::Regolith => OpSpecId::REGOLITH,
-        OpHardfork::Canyon => OpSpecId::CANYON,
-        OpHardfork::Ecotone => OpSpecId::ECOTONE,
-        OpHardfork::Fjord => OpSpecId::FJORD,
-        OpHardfork::Granite => OpSpecId::GRANITE,
-        OpHardfork::Holocene => OpSpecId::HOLOCENE,
-        OpHardfork::Isthmus => OpSpecId::ISTHMUS,
-        OpHardfork::Interop => OpSpecId::INTEROP,
-        OpHardfork::Jovian => OpSpecId::JOVIAN,
-        f => unreachable!("unimplemented {}", f),
-    }
-}
-
 /// Convert a `BlockNumberOrTag` into an `EthereumHardfork`.
 pub fn ethereum_hardfork_from_block_tag(block: impl Into<BlockNumberOrTag>) -> EthereumHardfork {
     let num = match block.into() {
@@ -103,16 +76,6 @@ mod tests {
         // Test latest hardforks
         assert_eq!(spec_id_from_ethereum_hardfork(EthereumHardfork::Cancun), SpecId::CANCUN);
         assert_eq!(spec_id_from_ethereum_hardfork(EthereumHardfork::Prague), SpecId::PRAGUE);
-    }
-
-    #[test]
-    fn test_optimism_spec_id_mapping() {
-        assert_eq!(spec_id_from_optimism_hardfork(OpHardfork::Bedrock), OpSpecId::BEDROCK);
-        assert_eq!(spec_id_from_optimism_hardfork(OpHardfork::Regolith), OpSpecId::REGOLITH);
-
-        // Test latest hardforks
-        assert_eq!(spec_id_from_optimism_hardfork(OpHardfork::Holocene), OpSpecId::HOLOCENE);
-        assert_eq!(spec_id_from_optimism_hardfork(OpHardfork::Interop), OpSpecId::INTEROP);
     }
 
     #[test]
