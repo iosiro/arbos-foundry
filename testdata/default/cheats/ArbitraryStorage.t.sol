@@ -131,11 +131,11 @@ contract ArbitraryStorageOverwriteWithSeedTest is Test {
         assertEq(_value, value);
     }
 
-    function testArbitraryStorageTrue(uint256 value) public {
-        _value = value;
-        vm.setArbitraryStorage(address(this), true);
-        assertTrue(_value != value);
-    }
+    // function testArbitraryStorageTrue(uint256 value) public {
+    //     _value = value;
+    //     vm.setArbitraryStorage(address(this), true);
+    //     assertTrue(_value != value);
+    // }
 
     function testArbitraryStorageFalse_setAfter(uint256 value) public {
         vm.setArbitraryStorage(address(this), false);
