@@ -14,8 +14,13 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "anvil"
+name = "arbos-anvil"
 path = "bin/main.rs"
+required-features = ["cli"]
+
+[[bin]]
+name = "anvil"
+path = "bin/anvil.rs"
 required-features = ["cli"]
 
 [dependencies]

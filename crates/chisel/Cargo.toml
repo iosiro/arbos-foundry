@@ -14,8 +14,12 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "chisel"
+name = "arbos-chisel"
 path = "bin/main.rs"
+
+[[bin]]
+name = "chisel"
+path = "bin/chisel.rs"
 
 [dependencies]
 # forge
