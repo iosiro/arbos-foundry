@@ -1,7 +1,7 @@
 //! In-memory blockchain backend.
 
 use self::state::trie_storage;
-use super::executor::new_evm_with_inspector_ref;
+use super::executor::{AnvilInnerEvm, new_evm_with_inspector_ref};
 use crate::{
     ForkChoice, NodeConfig, PrecompileFactory,
     config::PruneStateHistoryConfig,
@@ -24,6 +24,7 @@ use crate::{
         error::{BlockchainError, ErrDetail, InvalidTransactionError},
         fees::{FeeDetails, FeeManager, MIN_SUGGESTED_PRIORITY_FEE},
         macros::node_info,
+        overrides::{OverrideBlockHashes, apply_state_overrides},
         pool::transactions::PoolTransaction,
         sign::build_typed_transaction,
     },
@@ -45,11 +46,6 @@ use alloy_eips::{
     eip4844::{BlobTransactionSidecar, kzg_to_versioned_hash},
     eip7840::BlobParams,
     eip7910::SystemContract,
-};
-use alloy_evm::{
-    Database, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
-    overrides::{OverrideBlockHashes, apply_state_overrides},
 };
 use alloy_network::{
     AnyHeader, AnyRpcBlock, AnyRpcHeader, AnyRpcTransaction, AnyTxEnvelope, EthereumWallet,
@@ -93,6 +89,7 @@ use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use foundry_evm::{
+    FoundryContext, FromRecoveredTx,
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
     core::{
@@ -110,7 +107,7 @@ use foundry_evm::{
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    DatabaseCommit, Inspector,
+    DatabaseCommit, InspectEvm, Inspector,
     context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
@@ -1163,23 +1160,25 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>
+    ) -> EitherEvm<
+        AnvilInnerEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>,
+    >
     where
         DB: DatabaseRef + ?Sized,
-        I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
-        WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
+        I: Inspector<FoundryContext<WrapDatabaseRef<&'db DB>>>,
+        WrapDatabaseRef<&'db DB>: revm::Database<Error = DatabaseError>,
     {
         let mut evm = new_evm_with_inspector_ref(db, env, inspector);
-        self.env.read().networks.inject_precompiles(evm.precompiles_mut());
+        self.env.read().networks.inject_precompiles(&mut evm.precompiles);
 
         if let Some(factory) = &self.precompile_factory {
-            evm.precompiles_mut().extend(factory.precompiles());
+            evm.precompiles.extend(factory.precompiles());
         }
 
         let cheats = Arc::new(self.cheats.clone());
         if cheats.has_recover_overrides() {
             let cheat_ecrecover = CheatEcrecover::new(Arc::clone(&cheats));
-            evm.precompiles_mut().insert_precompile(
+            evm.precompiles.insert_precompile(
                 EC_RECOVER,
                 DynPrecompile::new_stateful(
                     cheat_ecrecover.precompile_id().clone(),
@@ -1208,7 +1207,7 @@ impl Backend {
         let db = self.db.read().await;
         let mut inspector = self.build_inspector();
         let mut evm = self.new_evm_with_inspector_ref(&**db, &env, &mut inspector);
-        let ResultAndState { result, state } = evm.transact(env.tx)?;
+        let ResultAndState { result, state } = evm.inspect_tx(env.tx)?;
         let (exit_reason, gas_used, out, logs) = match result {
             ExecutionResult::Success { reason, gas_used, logs, output, .. } => {
                 (reason.into(), gas_used, Some(output), Some(logs))
@@ -1467,7 +1466,7 @@ impl Backend {
 
         self.fees.set_blob_excess_gas_and_price(BlobExcessGasAndPrice::new(
             next_block_excess_blob_gas,
-            get_blob_base_fee_update_fraction_by_spec_id(*self.env.read().evm_env.spec_id()),
+            get_blob_base_fee_update_fraction_by_spec_id(self.env.read().evm_env.spec_id()),
         ));
 
         // notify all listeners
@@ -1689,7 +1688,7 @@ impl Backend {
 
                     let mut inspector = self.build_inspector();
 
-                    // transact
+                    // transact (using inspect_tx to invoke inspectors)
                     let ResultAndState { result, state } = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are
                         // recorded and included in logs
@@ -1701,7 +1700,7 @@ impl Backend {
                         );
 
                         trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.spec_id(),"simulate evm env");
-                        evm.transact(env.tx)?
+                        evm.inspect_tx(env.tx)?
                     } else {
                         let mut evm = self.new_evm_with_inspector_ref(
                             &cache_db,
@@ -1709,7 +1708,7 @@ impl Backend {
                             &mut inspector,
                         );
                         trace!(target: "backend", env=?env.evm_env, spec=?env.evm_env.spec_id(),"simulate evm env");
-                        evm.transact(env.tx)?
+                        evm.inspect_tx(env.tx)?
                     };
                     trace!(target: "backend", ?result, ?request, "simulate call");
 
@@ -1855,7 +1854,7 @@ impl Backend {
 
         let env = self.build_call_env(request, fee_details, block_env);
         let mut evm = self.new_evm_with_inspector_ref(state, &env, &mut inspector);
-        let ResultAndState { result, state } = evm.transact(env.tx)?;
+        let ResultAndState { result, state } = evm.inspect_tx(env.tx)?;
         let (exit_reason, gas_used, out) = match result {
             ExecutionResult::Success { reason, gas_used, output, .. } => {
                 (reason.into(), gas_used, Some(output))
@@ -1913,7 +1912,7 @@ impl Backend {
                             let env = self.build_call_env(request, fee_details, block);
                             let mut evm =
                                 self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
-                            let ResultAndState { result, state: _ } = evm.transact(env.tx)?;
+                            let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
 
                             drop(evm);
 
@@ -1943,7 +1942,7 @@ impl Backend {
                             let env = self.build_call_env(request, fee_details, block);
                             let mut evm =
                                 self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
-                            let result = evm.transact(env.tx)?;
+                            let result = evm.inspect_tx(env.tx)?;
 
                             drop(evm);
 
@@ -1965,7 +1964,7 @@ impl Backend {
                     }
                     #[cfg(feature = "js-tracer")]
                     GethDebugTracerType::JsTracer(code) => {
-                        use alloy_evm::IntoTxEnv;
+                        use foundry_evm::IntoTxEnv;
                         let config = tracer_config.into_json();
                         let mut inspector =
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
@@ -1974,10 +1973,10 @@ impl Backend {
                         let env = self.build_call_env(request, fee_details, block.clone());
                         let mut evm =
                             self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
-                        let result = evm.transact(env.tx.clone())?;
+                        let result = evm.inspect_tx(env.tx.clone())?;
                         let res = evm
-                            .inspector_mut()
-                            .json_result(result, &env.tx.into_tx_env(), &block, &cache_db)
+                            .inspector
+                            .json_result(result, &env.tx.clone().into_tx_env(), &block, &cache_db)
                             .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
                         Ok(GethTrace::JS(res))
@@ -1992,7 +1991,7 @@ impl Backend {
 
             let env = self.build_call_env(request, fee_details, block);
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
-            let ResultAndState { result, state: _ } = evm.transact(env.tx)?;
+            let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
 
             let (exit_reason, gas_used, out) = match result {
                 ExecutionResult::Success { reason, gas_used, output, .. } => {
@@ -2032,7 +2031,7 @@ impl Backend {
 
         let env = self.build_call_env(request, fee_details, block_env);
         let mut evm = self.new_evm_with_inspector_ref(state, &env, &mut inspector);
-        let ResultAndState { result, state: _ } = evm.transact(env.tx)?;
+        let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
         let (exit_reason, gas_used, out) = match result {
             ExecutionResult::Success { reason, gas_used, output, .. } => {
                 (reason.into(), gas_used, Some(output))
@@ -2662,7 +2661,7 @@ impl Backend {
         f: F,
     ) -> Result<T, BlockchainError>
     where
-        for<'a> I: Inspector<EthEvmContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>> + 'a,
+        for<'a> I: Inspector<FoundryContext<WrapDatabaseRef<&'a CacheDB<Box<&'a StateDb>>>>> + 'a,
         for<'a> F:
             FnOnce(ResultAndState<HaltReason>, CacheDB<Box<&'a StateDb>>, I, TxEnv, Env) -> T,
     {
@@ -2746,7 +2745,7 @@ impl Backend {
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
 
             let result = evm
-                .transact(tx_env.clone())
+                .inspect_tx(tx_env.clone())
                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
             Ok(f(result, cache_db, inspector, tx_env, env))
@@ -2783,7 +2782,7 @@ impl Backend {
                 inspector
                     .json_result(
                         result,
-                        &alloy_evm::IntoTxEnv::into_tx_env(tx_env),
+                        &foundry_evm::IntoTxEnv::into_tx_env(tx_env),
                         &env.evm_env.block_env,
                         &cache_db,
                     )

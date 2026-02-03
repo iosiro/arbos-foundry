@@ -21,7 +21,6 @@ use crate::{
     utils::IgnoredTraces,
 };
 use alloy_consensus::BlobTransactionSidecar;
-use alloy_evm::eth::EthEvmContext;
 use alloy_network::TransactionBuilder4844;
 use alloy_primitives::{
     Address, B256, Bytes, Log, TxKind, U256, hex,
@@ -37,7 +36,7 @@ use foundry_common::{
     mapping_slots::{MappingSlots, step as mapping_step},
 };
 use foundry_evm_core::{
-    Breakpoints, ContextExt, InspectorExt,
+    Breakpoints, ContextExt, FoundryContext, InspectorExt,
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
@@ -79,7 +78,7 @@ mod utils;
 pub mod analysis;
 pub use analysis::CheatcodeAnalysis;
 
-pub type Ecx<'a, 'b, 'c> = &'a mut EthEvmContext<&'b mut (dyn DatabaseExt + 'c)>;
+pub type Ecx<'a, 'b, 'c> = &'a mut FoundryContext<&'b mut (dyn DatabaseExt + 'c)>;
 
 /// Helper trait for obtaining complete [revm::Inspector] instance from mutable reference to
 /// [Cheatcodes].
@@ -138,7 +137,7 @@ where
     let mut inspector = executor.get_inspector(ccx.state);
     let error = std::mem::replace(&mut ccx.ecx.error, Ok(()));
 
-    let ctx = EthEvmContext {
+    let ctx = FoundryContext {
         block: ccx.ecx.block.clone(),
         cfg: ccx.ecx.cfg.clone(),
         tx: ccx.ecx.tx.clone(),
@@ -1114,7 +1113,7 @@ impl Cheatcodes {
     }
 }
 
-impl Inspector<EthEvmContext<&mut dyn DatabaseExt>> for Cheatcodes {
+impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for Cheatcodes {
     fn initialize_interp(&mut self, interpreter: &mut Interpreter, ecx: Ecx) {
         // When the first interpreter is initialized we've circumvented the balance and gas checks,
         // so we apply our actual block data with the correct fees and all.

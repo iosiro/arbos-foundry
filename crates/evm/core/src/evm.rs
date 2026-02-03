@@ -4,11 +4,10 @@ use std::{
 };
 
 use crate::{
-    Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
-    precompiles::FoundryPrecompiles,
+    Env, EvmEnv, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
+    context::FoundryContext, evm_trait::Evm, precompiles::FoundryPrecompiles,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{Evm, EvmEnv, eth::EthEvmContext};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
@@ -37,7 +36,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
     env: Env,
     inspector: I,
 ) -> FoundryEvm<'db, I> {
-    let mut ctx = EthEvmContext {
+    let mut ctx = FoundryContext {
         journaled_state: {
             let mut journal = Journal::new(db);
             journal.set_spec_id(env.evm_env.cfg_env.spec);
@@ -67,7 +66,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
 }
 
 pub fn new_evm_with_existing_context<'a>(
-    ctx: EthEvmContext<&'a mut dyn DatabaseExt>,
+    ctx: FoundryContext<&'a mut dyn DatabaseExt>,
     inspector: &'a mut dyn InspectorExt,
 ) -> FoundryEvm<'a, &'a mut dyn InspectorExt> {
     let spec = ctx.cfg.spec;
@@ -117,16 +116,16 @@ fn get_create2_factory_call_inputs(
 pub struct FoundryEvm<'db, I: InspectorExt> {
     #[allow(clippy::type_complexity)]
     inner: RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+        FoundryContext<&'db mut dyn DatabaseExt>,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
+        EthInstructions<EthInterpreter, FoundryContext<&'db mut dyn DatabaseExt>>,
         FoundryPrecompiles<EthPrecompiles>,
         EthFrame<EthInterpreter>,
     >,
 }
 impl<'db, I: InspectorExt> FoundryEvm<'db, I> {
     /// Consumes the EVM and returns the inner context.
-    pub fn into_context(self) -> EthEvmContext<&'db mut dyn DatabaseExt> {
+    pub fn into_context(self) -> FoundryContext<&'db mut dyn DatabaseExt> {
         self.inner.ctx
     }
 
@@ -265,9 +264,9 @@ impl<I: InspectorExt> Default for FoundryHandler<'_, I> {
 // trait.
 impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
     type Evm = RevmEvm<
-        EthEvmContext<&'db mut dyn DatabaseExt>,
+        FoundryContext<&'db mut dyn DatabaseExt>,
         I,
-        EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
+        EthInstructions<EthInterpreter, FoundryContext<&'db mut dyn DatabaseExt>>,
         FoundryPrecompiles<EthPrecompiles>,
         EthFrame<EthInterpreter>,
     >;

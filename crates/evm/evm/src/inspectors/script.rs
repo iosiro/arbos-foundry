@@ -1,8 +1,7 @@
-use alloy_evm::Database;
 use alloy_primitives::{Address, Bytes};
 use foundry_evm_core::backend::DatabaseError;
 use revm::{
-    Inspector,
+    Database, Inspector,
     bytecode::opcode::ADDRESS,
     context::ContextTr,
     inspector::JournalExt,

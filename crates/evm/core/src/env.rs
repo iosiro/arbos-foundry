@@ -1,9 +1,47 @@
-pub use alloy_evm::EvmEnv;
 use revm::{
     Context, Database, Journal, JournalEntry,
-    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, TxEnv},
+    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, LocalContextTr, TxEnv},
     primitives::hardfork::SpecId,
 };
+
+/// Container type that holds both the configuration and block environment for EVM execution.
+///
+/// Vendored from `alloy-evm` to remove the dependency.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EvmEnv<Spec = SpecId> {
+    /// The configuration environment.
+    pub cfg_env: CfgEnv<Spec>,
+    /// The block environment.
+    pub block_env: BlockEnv,
+}
+
+impl<Spec: Copy> EvmEnv<Spec> {
+    /// Creates a new `EvmEnv` from the given configuration and block environments.
+    pub fn new(cfg_env: CfgEnv<Spec>, block_env: BlockEnv) -> Self {
+        Self { cfg_env, block_env }
+    }
+
+    /// Returns a reference to the block environment.
+    pub fn block_env(&self) -> &BlockEnv {
+        &self.block_env
+    }
+
+    /// Returns a reference to the configuration environment.
+    pub fn cfg_env(&self) -> &CfgEnv<Spec> {
+        &self.cfg_env
+    }
+
+    /// Returns the spec ID.
+    pub fn spec_id(&self) -> Spec {
+        self.cfg_env.spec
+    }
+}
+
+impl<Spec> From<(CfgEnv<Spec>, BlockEnv)> for EvmEnv<Spec> {
+    fn from((cfg_env, block_env): (CfgEnv<Spec>, BlockEnv)) -> Self {
+        Self { cfg_env, block_env }
+    }
+}
 
 /// Helper container type for [`EvmEnv`] and [`TxEnv`].
 #[derive(Clone, Debug, Default)]
@@ -70,8 +108,8 @@ impl AsEnvMut for Env {
     }
 }
 
-impl<DB: Database, J: JournalTr<Database = DB>, C> AsEnvMut
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C>
+impl<DB: Database, J: JournalTr<Database = DB>, C, L: LocalContextTr> AsEnvMut
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C, L>
 {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
         EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
@@ -86,8 +124,8 @@ pub trait ContextExt {
     ) -> (&mut Self::DB, &mut JournalInner<JournalEntry>, EnvMut<'_>);
 }
 
-impl<DB: Database, C> ContextExt
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C>
+impl<DB: Database, C, L: LocalContextTr> ContextExt
+    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C, L>
 {
     type DB = DB;
 

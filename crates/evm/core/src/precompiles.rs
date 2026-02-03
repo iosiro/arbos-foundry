@@ -404,15 +404,16 @@ impl<P> ExtendablePrecompiles for FoundryPrecompiles<P> {
     }
 }
 
-impl<BLOCK, TX, CFG, DB, CHAIN, P>
-    PrecompileProvider<Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN>> for FoundryPrecompiles<P>
+impl<BLOCK, TX, CFG, DB, CHAIN, L, P>
+    PrecompileProvider<Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN, L>> for FoundryPrecompiles<P>
 where
     BLOCK: revm::context::Block,
     TX: revm::context::Transaction,
     CFG: Cfg,
     DB: Database,
+    L: LocalContextTr,
     P: PrecompileProvider<
-            Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN>,
+            Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN, L>,
             Output = InterpreterResult,
         >,
 {
@@ -424,7 +425,7 @@ where
 
     fn run(
         &mut self,
-        context: &mut Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN>,
+        context: &mut Context<BLOCK, TX, CFG, DB, Journal<DB>, CHAIN, L>,
         inputs: &CallInputs,
     ) -> Result<Option<Self::Output>, String> {
         // Check dynamic precompiles first (priority)

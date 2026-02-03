@@ -1,5 +1,4 @@
-use alloy_evm::EvmEnv;
-use foundry_evm::{EnvMut, core::AsEnvMut};
+use foundry_evm::{EnvMut, EvmEnv, core::AsEnvMut};
 use foundry_evm_networks::NetworkConfigs;
 use revm::context::{BlockEnv, CfgEnv, TxEnv};
 

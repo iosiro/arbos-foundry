@@ -21,13 +21,13 @@ use alloy_eips::{
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     eip7840::BlobParams,
 };
-use alloy_evm::{EthEvm, Evm, FromRecoveredTx, eth::EthEvmContext};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
 use foundry_evm::{
+    FoundryContext, FromRecoveredTx,
     backend::DatabaseError,
     core::{
         either_evm::EitherEvm,
@@ -37,7 +37,7 @@ use foundry_evm::{
 };
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
-    Database, DatabaseRef, Inspector, Journal,
+    Database, DatabaseRef, InspectCommitEvm, Inspector, Journal,
     context::{
         Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv,
     },
@@ -378,16 +378,16 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
 
         let exec_result = {
             let mut evm = new_evm_with_inspector(&mut *self.db, &env, &mut inspector);
-            self.networks.inject_precompiles(evm.precompiles_mut());
+            self.networks.inject_precompiles(&mut evm.precompiles);
 
             if let Some(factory) = &self.precompile_factory {
-                evm.precompiles_mut().extend(factory.precompiles());
+                evm.precompiles.extend(factory.precompiles());
             }
 
             let cheats = Arc::new(self.cheats.clone());
             if cheats.has_recover_overrides() {
                 let cheat_ecrecover = CheatEcrecover::new(Arc::clone(&cheats));
-                evm.precompiles_mut().insert_precompile(
+                evm.precompiles.insert_precompile(
                     EC_RECOVER,
                     DynPrecompile::new_stateful(
                         cheat_ecrecover.precompile_id().clone(),
@@ -397,8 +397,8 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
             }
 
             trace!(target: "backend", "[{:?}] executing", transaction.hash());
-            // transact and commit the transaction
-            match evm.transact_commit(env.tx) {
+            // transact and commit the transaction (using inspect_tx_commit to invoke inspectors)
+            match evm.inspect_tx_commit(env.tx) {
                 Ok(exec_result) => exec_result,
                 Err(err) => {
                     warn!(target: "backend", "[{:?}] failed to execute: {:?}", transaction.hash(), err);
@@ -479,18 +479,27 @@ fn build_logs_bloom(logs: &[Log], bloom: &mut Bloom) {
     }
 }
 
+/// Type alias for the inner EVM used by anvil.
+pub type AnvilInnerEvm<DB, I, P> = RevmEvm<
+    FoundryContext<DB>,
+    I,
+    EthInstructions<revm::interpreter::interpreter::EthInterpreter, FoundryContext<DB>>,
+    P,
+    revm::handler::EthFrame<revm::interpreter::interpreter::EthInterpreter>,
+>;
+
 /// Creates a database with given database and inspector.
 pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> EitherEvm<DB, I, FoundryPrecompiles<EthPrecompiles>>
+) -> EitherEvm<AnvilInnerEvm<DB, I, FoundryPrecompiles<EthPrecompiles>>>
 where
     DB: Database<Error = DatabaseError> + Debug,
-    I: Inspector<EthEvmContext<DB>>,
+    I: Inspector<FoundryContext<DB>>,
 {
     let spec = env.evm_env.cfg_env.spec;
-    let eth_context = EthEvmContext {
+    let context = FoundryContext {
         journaled_state: {
             let mut journal = Journal::new(db);
             journal.set_spec_id(spec);
@@ -508,16 +517,14 @@ where
         precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
         spec,
     };
-    let eth_evm = RevmEvm::new_with_inspector(
-        eth_context,
+    let evm = RevmEvm::new_with_inspector(
+        context,
         inspector,
         EthInstructions::default(),
         FoundryPrecompiles::new(eth_precompiles),
     );
 
-    let eth = EthEvm::new(eth_evm, true);
-
-    EitherEvm(eth)
+    EitherEvm(evm)
 }
 
 /// Creates a new EVM with the given inspector and wraps the database in a `WrapDatabaseRef`.
@@ -525,10 +532,12 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>
+) -> EitherEvm<
+    AnvilInnerEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>,
+>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
-    I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
+    I: Inspector<FoundryContext<WrapDatabaseRef<&'db DB>>>,
     WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
 {
     new_evm_with_inspector(WrapDatabaseRef(db), env, inspector)

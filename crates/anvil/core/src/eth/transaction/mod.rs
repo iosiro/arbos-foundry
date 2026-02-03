@@ -9,7 +9,6 @@ use alloy_consensus::{
 };
 
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Encodable2718};
-use alloy_evm::FromRecoveredTx;
 use alloy_network::{AnyReceiptEnvelope, AnyRpcTransaction, AnyTransactionReceipt, AnyTxEnvelope};
 use alloy_primitives::{Address, B256, Bloom, Bytes, Signature, TxHash, TxKind, U256};
 use alloy_rlp::{Decodable, Encodable, Header};
@@ -19,7 +18,7 @@ use alloy_rpc_types::{
 };
 use alloy_serde::WithOtherFields;
 use bytes::BufMut;
-use foundry_evm::traces::CallTraceNode;
+use foundry_evm::{core::FromRecoveredTx, traces::CallTraceNode};
 
 use revm::{context::TxEnv, interpreter::InstructionResult};
 use serde::{Deserialize, Serialize};

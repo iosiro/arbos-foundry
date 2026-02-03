@@ -228,8 +228,6 @@ dependencies = [
  "c-kzg",
  "derive_more",
  "either",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "serde",
  "serde_with",
  "sha2",
@@ -247,27 +245,6 @@ dependencies = [
  "alloy-provider",
  "alloy-sol-types",
  "async-trait",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "alloy-evm"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01be36ba6f5e6e62563b369e03ca529eac46aea50677f84655084b4750816574"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-hardforks",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "alloy-sol-types",
- "auto_impl",
- "derive_more",
- "op-alloy",
- "op-revm",
- "revm",
  "thiserror 2.0.17",
 ]
 
@@ -587,8 +564,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-serde",
  "derive_more",
- "ethereum_ssz",
- "ethereum_ssz_derive",
  "jsonwebtoken",
  "rand 0.8.5",
  "serde",
@@ -1082,7 +1057,6 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip5792",
  "alloy-eips",
- "alloy-evm",
  "alloy-genesis",
  "alloy-hardforks",
  "alloy-network",
@@ -1143,7 +1117,6 @@ dependencies = [
  "alloy-dyn-abi",
  "alloy-eip5792",
  "alloy-eips",
- "alloy-evm",
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
@@ -3963,46 +3936,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ethereum_serde_utils"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3dc1355dbb41fbbd34ec28d4fb2a57d9a70c67ac3c19f6a5ca4d4a176b9e997a"
-dependencies = [
- "alloy-primitives",
- "hex",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
-name = "ethereum_ssz"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dcddb2554d19cde19b099fadddde576929d7a4d0c1cd3512d1fd95cf174375c"
-dependencies = [
- "alloy-primitives",
- "ethereum_serde_utils",
- "itertools 0.13.0",
- "serde",
- "serde_derive",
- "smallvec",
- "typenum",
-]
-
-[[package]]
-name = "ethereum_ssz_derive"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a657b6b3b7e153637dc6bdc6566ad9279d9ee11a15b12cfb24a2e04360637e9f"
-dependencies = [
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.110",
-]
-
-[[package]]
 name = "event-listener"
 version = "4.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4486,7 +4419,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
  "alloy-ens",
- "alloy-evm",
  "alloy-genesis",
  "alloy-json-abi",
  "alloy-network",
@@ -4830,7 +4762,6 @@ name = "foundry-evm"
 version = "1.5.1"
 dependencies = [
  "alloy-dyn-abi",
- "alloy-evm",
  "alloy-json-abi",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -4876,7 +4807,7 @@ dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-dyn-abi",
- "alloy-evm",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-hardforks",
  "alloy-json-abi",
@@ -4953,7 +4884,6 @@ name = "foundry-evm-networks"
 version = "1.5.1"
 dependencies = [
  "alloy-chains",
- "alloy-evm",
  "alloy-primitives",
  "clap",
  "revm",
@@ -7071,119 +7001,6 @@ dependencies = [
  "hashbrown 0.16.0",
  "parking_lot",
  "stable_deref_trait",
-]
-
-[[package]]
-name = "op-alloy"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da980f0756a505bf7f2ab9f0be886c8b3213b9c23a19fff6c1c6afa53803c3a"
-dependencies = [
- "op-alloy-consensus",
- "op-alloy-network",
- "op-alloy-provider",
- "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine",
-]
-
-[[package]]
-name = "op-alloy-consensus"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0d7ec388eb83a3e6c71774131dbbb2ba9c199b6acac7dce172ed8de2f819e91"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "derive_more",
- "serde",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "op-alloy-network"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "979fe768bbb571d1d0bd7f84bc35124243b4db17f944b94698872a4701e743a0"
-dependencies = [
- "alloy-consensus",
- "alloy-network",
- "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types-eth",
- "alloy-signer",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
-]
-
-[[package]]
-name = "op-alloy-provider"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0594687a750dff379f16219c7441bfa8979f11aeda440981e32e65a9e28c3c6"
-dependencies = [
- "alloy-network",
- "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-types-engine",
- "alloy-transport",
- "async-trait",
- "op-alloy-rpc-types-engine",
-]
-
-[[package]]
-name = "op-alloy-rpc-types"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc252b5fa74dbd33aa2f9a40e5ff9cfe34ed2af9b9b235781bc7cc8ec7d6aca8"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network-primitives",
- "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "derive_more",
- "op-alloy-consensus",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "op-alloy-rpc-types-engine"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1abe694cd6718b8932da3f824f46778be0f43289e4103c88abc505c63533a04"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-engine",
- "alloy-serde",
- "derive_more",
- "ethereum_ssz",
- "ethereum_ssz_derive",
- "op-alloy-consensus",
- "serde",
- "snap",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "op-revm"
-version = "14.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f887a8353e22df6ce5b150e4d3a51838bc6a64d4644c5f7416bef70f442c2857"
-dependencies = [
- "auto_impl",
- "revm",
- "serde",
 ]
 
 [[package]]
@@ -9416,12 +9233,6 @@ name = "smawk"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
-
-[[package]]
-name = "snap"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b6b67fb9a61334225b5b790716f609cd58395f895b3fe8b328786812a40bc3b"
 
 [[package]]
 name = "snapbox"

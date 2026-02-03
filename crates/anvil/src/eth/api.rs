@@ -18,6 +18,7 @@ use crate::{
         fees::{FeeDetails, FeeHistoryCache, MIN_SUGGESTED_PRIORITY_FEE},
         macros::node_info,
         miner::FixedBlockTimeMiner,
+        overrides::{OverrideBlockHashes, apply_state_overrides},
         pool::{
             Pool,
             transactions::{
@@ -39,7 +40,6 @@ use alloy_eips::{
     eip4844::BlobTransactionSidecar,
     eip7910::{EthConfig, EthForkConfig},
 };
-use alloy_evm::overrides::{OverrideBlockHashes, apply_state_overrides};
 use alloy_network::{
     AnyRpcBlock, AnyRpcTransaction, BlockResponse, TransactionBuilder, TransactionResponse,
     eip2718::Decodable2718,

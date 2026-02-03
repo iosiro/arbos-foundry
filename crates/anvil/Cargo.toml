@@ -35,7 +35,6 @@ foundry-evm.workspace = true
 foundry-evm-networks.workspace = true
 
 # alloy
-alloy-evm = { workspace = true, features = ["call-util"] }
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-consensus = { workspace = true, features = ["k256", "kzg"] }
 alloy-contract = { workspace = true, features = ["pubsub"] }
