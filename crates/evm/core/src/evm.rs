@@ -5,9 +5,10 @@ use std::{
 
 use crate::{
     Env, InspectorExt, backend::DatabaseExt, constants::DEFAULT_CREATE2_DEPLOYER_CODEHASH,
+    precompiles::FoundryPrecompiles,
 };
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_evm::{Evm, EvmEnv, eth::EthEvmContext, precompiles::PrecompilesMap};
+use alloy_evm::{Evm, EvmEnv, eth::EthEvmContext};
 use alloy_primitives::{Address, Bytes, U256};
 use foundry_fork_db::DatabaseError;
 use revm::{
@@ -85,14 +86,11 @@ pub fn new_evm_with_existing_context<'a>(
 }
 
 /// Get the precompiles for the given spec.
-fn get_precompiles(spec: SpecId) -> PrecompilesMap {
-    PrecompilesMap::from_static(
-        EthPrecompiles {
-            precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-            spec,
-        }
-        .precompiles,
-    )
+fn get_precompiles(spec: SpecId) -> FoundryPrecompiles<EthPrecompiles> {
+    FoundryPrecompiles::new(EthPrecompiles {
+        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
+        spec,
+    })
 }
 
 /// Get the call inputs for the CREATE2 factory.
@@ -122,7 +120,7 @@ pub struct FoundryEvm<'db, I: InspectorExt> {
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
-        PrecompilesMap,
+        FoundryPrecompiles<EthPrecompiles>,
         EthFrame<EthInterpreter>,
     >,
 }
@@ -154,7 +152,7 @@ impl<'db, I: InspectorExt> FoundryEvm<'db, I> {
 }
 
 impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
-    type Precompiles = PrecompilesMap;
+    type Precompiles = FoundryPrecompiles<EthPrecompiles>;
     type Inspector = I;
     type DB = &'db mut dyn DatabaseExt;
     type Error = EVMError<DatabaseError>;
@@ -270,7 +268,7 @@ impl<'db, I: InspectorExt> Handler for FoundryHandler<'db, I> {
         EthEvmContext<&'db mut dyn DatabaseExt>,
         I,
         EthInstructions<EthInterpreter, EthEvmContext<&'db mut dyn DatabaseExt>>,
-        PrecompilesMap,
+        FoundryPrecompiles<EthPrecompiles>,
         EthFrame<EthInterpreter>,
     >;
     type Error = EVMError<DatabaseError>;

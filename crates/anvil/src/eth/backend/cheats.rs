@@ -1,10 +1,10 @@
 //! Support for "cheat codes" / bypass functions
 
-use alloy_evm::precompiles::{Precompile, PrecompileInput};
 use alloy_primitives::{
     Address, Bytes,
     map::{AddressHashSet, foldhash::HashMap},
 };
+use foundry_evm::core::precompiles::{Precompile, PrecompileInput};
 use parking_lot::RwLock;
 use revm::precompile::{
     PrecompileError, PrecompileId, PrecompileOutput, PrecompileResult, secp256k1::ec_recover_run,

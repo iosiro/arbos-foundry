@@ -21,11 +21,7 @@ use alloy_eips::{
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
     eip7840::BlobParams,
 };
-use alloy_evm::{
-    EthEvm, Evm, FromRecoveredTx,
-    eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
-};
+use alloy_evm::{EthEvm, Evm, FromRecoveredTx, eth::EthEvmContext};
 use alloy_primitives::{B256, Bloom, BloomInput, Log};
 use anvil_core::eth::{
     block::{BlockInfo, create_block},
@@ -33,7 +29,10 @@ use anvil_core::eth::{
 };
 use foundry_evm::{
     backend::DatabaseError,
-    core::{either_evm::EitherEvm, precompiles::EC_RECOVER},
+    core::{
+        either_evm::EitherEvm,
+        precompiles::{DynPrecompile, EC_RECOVER, FoundryPrecompiles, Precompile},
+    },
     traces::{CallTraceDecoder, CallTraceNode},
 };
 use foundry_evm_networks::NetworkConfigs;
@@ -382,18 +381,19 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
             self.networks.inject_precompiles(evm.precompiles_mut());
 
             if let Some(factory) = &self.precompile_factory {
-                evm.precompiles_mut().extend_precompiles(factory.precompiles());
+                evm.precompiles_mut().extend(factory.precompiles());
             }
 
             let cheats = Arc::new(self.cheats.clone());
             if cheats.has_recover_overrides() {
                 let cheat_ecrecover = CheatEcrecover::new(Arc::clone(&cheats));
-                evm.precompiles_mut().apply_precompile(&EC_RECOVER, move |_| {
-                    Some(DynPrecompile::new_stateful(
+                evm.precompiles_mut().insert_precompile(
+                    EC_RECOVER,
+                    DynPrecompile::new_stateful(
                         cheat_ecrecover.precompile_id().clone(),
                         move |input| cheat_ecrecover.call(input),
-                    ))
-                });
+                    ),
+                );
             }
 
             trace!(target: "backend", "[{:?}] executing", transaction.hash());
@@ -484,7 +484,7 @@ pub fn new_evm_with_inspector<DB, I>(
     db: DB,
     env: &Env,
     inspector: I,
-) -> EitherEvm<DB, I, PrecompilesMap>
+) -> EitherEvm<DB, I, FoundryPrecompiles<EthPrecompiles>>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<EthEvmContext<DB>>,
@@ -507,13 +507,12 @@ where
     let eth_precompiles = EthPrecompiles {
         precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
         spec,
-    }
-    .precompiles;
+    };
     let eth_evm = RevmEvm::new_with_inspector(
         eth_context,
         inspector,
         EthInstructions::default(),
-        PrecompilesMap::from_static(eth_precompiles),
+        FoundryPrecompiles::new(eth_precompiles),
     );
 
     let eth = EthEvm::new(eth_evm, true);
@@ -526,7 +525,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, PrecompilesMap>
+) -> EitherEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<EthEvmContext<WrapDatabaseRef<&'db DB>>>,
