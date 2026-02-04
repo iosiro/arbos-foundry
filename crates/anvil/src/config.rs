@@ -1151,6 +1151,13 @@ impl NodeConfig {
         )
         .await?;
 
+        // Apply Arbitrum state overrides with default parameters
+        backend
+            .apply_arbitrum_state_overrides(|_params| {
+                // Default parameters are used
+            })
+            .await;
+
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.
         if !self.disable_default_create2_deployer && self.eth_rpc_url.is_none() {

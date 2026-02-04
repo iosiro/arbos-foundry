@@ -85,6 +85,11 @@ use anvil_core::eth::{
     wallet::WalletCapabilities,
 };
 use anvil_rpc::error::RpcError;
+use arbos_revm::{
+    ArbitrumContext,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbosStateParams},
+};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -92,7 +97,10 @@ use foundry_evm::{
     FoundryContext, FromRecoveredTx,
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::precompiles::{DynPrecompile, EC_RECOVER, Precompile},
+    core::{
+        FoundryTxEnv,
+        precompiles::{DynPrecompile, EC_RECOVER, Precompile},
+    },
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -104,8 +112,8 @@ use foundry_evm::{
 use futures::channel::mpsc::{UnboundedSender, unbounded};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
-    DatabaseCommit, InspectEvm, Inspector,
-    context::{Block as RevmBlock, BlockEnv, Cfg, TxEnv, result::HaltReason},
+    DatabaseCommit, InspectEvm, Inspector, Journal,
+    context::{Block as RevmBlock, BlockEnv, Cfg, JournalTr, TxEnv, result::HaltReason},
     context_interface::{
         block::BlobExcessGasAndPrice,
         result::{ExecutionResult, Output, ResultAndState},
@@ -441,6 +449,74 @@ impl Backend {
         trace!(target: "backend", "set genesis balances");
 
         Ok(())
+    }
+
+    /// Applies Arbitrum state overrides (ArbOS initialization) using the provided closure.
+    ///
+    /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
+    /// populated from context if state is empty), applies the closure to modify them,
+    /// and only initializes/commits if the params were actually changed.
+    pub async fn apply_arbitrum_state_overrides(&self, f: impl FnOnce(&mut ArbosStateParams)) {
+        let is_fork = self.fork.read().is_some();
+
+        // First, check if the closure would make any changes using default params.
+        // This avoids touching the database/journal if nothing would change.
+        // For non-fork mode, we can safely skip if defaults are unchanged.
+        let default_params = ArbosStateParams::default();
+        let mut test_params = default_params.clone();
+        f(&mut test_params);
+
+        // If no changes would be made and we're not in fork mode, skip journal operations
+        // In fork mode, we need to read actual state to compare
+        if test_params == default_params && !is_fork {
+            return;
+        }
+
+        let mut db = self.db.write().await;
+        let env = self.env.read();
+
+        let changes = {
+            let mut context = ArbitrumContext {
+                block: env.evm_env.block_env.clone(),
+                tx: FoundryTxEnv::default(),
+                cfg: env.evm_env.cfg_env.clone(),
+                journaled_state: Journal::new(&mut **db),
+                chain: (),
+                local: ArbitrumLocalContext::default(),
+                error: Ok(()),
+            };
+
+            let mut state = context.arb_state(None, false);
+
+            // Get current state (with defaults populated from context if empty)
+            let original_params = state.get().unwrap();
+
+            // In non-fork mode, use the pre-computed test_params
+            // In fork mode, we already checked that test_params != default_params,
+            // so we should initialize
+            if is_fork {
+                // For fork mode, always initialize with the modified params
+                state.initialize(&test_params).unwrap();
+                context.journaled_state.finalize()
+            } else if test_params != original_params {
+                state.initialize(&test_params).unwrap();
+                context.journaled_state.finalize()
+            } else {
+                Default::default()
+            }
+        };
+
+        if !changes.is_empty() {
+            let changes = changes
+                .into_iter()
+                .map(|(address, account)| {
+                    let account = account.with_touched_mark();
+                    (address, account)
+                })
+                .collect();
+
+            db.commit(changes);
+        }
     }
 
     /// Sets the account to impersonate

@@ -371,7 +371,7 @@ impl TestRunnerConfig {
             Some(known_contracts),
             Some(artifact_id.clone()),
         ));
-        ExecutorBuilder::new()
+        let mut executor = ExecutorBuilder::new()
             .inspectors(|stack| {
                 stack
                     .cheatcodes(cheats_config)
@@ -385,7 +385,14 @@ impl TestRunnerConfig {
             .spec_id(self.spec_id)
             .gas_limit(self.evm_opts.gas_limit())
             .legacy_assertions(self.config.legacy_assertions)
-            .build(self.env.clone(), db)
+            .build(self.env.clone(), db);
+
+        // Apply Arbitrum state overrides with default parameters
+        executor.apply_arbitrum_state_overrides(|_params| {
+            // Default parameters are used
+        });
+
+        executor
     }
 
     fn trace_mode(&self) -> TraceMode {

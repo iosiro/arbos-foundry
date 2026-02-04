@@ -5138,6 +5138,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-sol-types",
+ "arbos-revm",
  "eyre",
  "foundry-cheatcodes",
  "foundry-common",
