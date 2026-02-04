@@ -36,9 +36,9 @@ use foundry_common::{
 };
 use foundry_compilers::ArtifactId;
 use foundry_config::{
-    Config, figment,
+    Config, apply_stylus_config,
     figment::{
-        Metadata, Profile, Provider,
+        self, Metadata, Profile, Provider,
         value::{Dict, Map},
     },
 };
@@ -673,9 +673,8 @@ impl ScriptConfig {
 
         let mut executor = builder.build(env, db);
 
-        // Apply Arbitrum state overrides with default parameters
-        executor.apply_arbitrum_state_overrides(|_params| {
-            // Default parameters are used
+        executor.apply_arbitrum_state_overrides(|state| {
+            apply_stylus_config(state, &self.evm_opts.stylus_config);
         });
 
         Ok(ScriptRunner::new(executor, self.evm_opts.clone()))

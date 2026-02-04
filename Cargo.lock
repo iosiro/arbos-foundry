@@ -5076,6 +5076,7 @@ version = "1.5.1"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
+ "arbos-revm",
  "clap 4.5.51",
  "dirs",
  "dunce",

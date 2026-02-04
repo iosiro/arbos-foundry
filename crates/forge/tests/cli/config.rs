@@ -12,6 +12,7 @@ use foundry_config::{
     cache::{CachedChains, CachedEndpoints, StorageCachingConfig},
     filter::GlobMatcher,
     fs_permissions::{FsAccessPermission, PathPermission},
+    stylus::StylusConfig,
 };
 use foundry_evm::opts::EvmOpts;
 use foundry_test_utils::{
@@ -355,6 +356,7 @@ forgetest!(can_extract_config_values, |prj, cmd| {
         additional_compiler_profiles: Default::default(),
         compilation_restrictions: Default::default(),
         script_execution_protection: true,
+        stylus: StylusConfig::default(),
         _non_exhaustive: (),
     };
     prj.write_config(input.clone());

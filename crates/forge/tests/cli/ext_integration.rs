@@ -76,6 +76,7 @@ fn snekmate() {
         .install_command(&["pnpm", "install", "--prefer-offline"])
         // Try npm if pnpm fails / is not installed.
         .install_command(&["npm", "install", "--prefer-offline"])
+        .arg("--stylus-disable-deployment") // Reenforce EIP-3541
         .run();
 }
 

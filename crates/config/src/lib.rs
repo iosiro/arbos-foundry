@@ -8,7 +8,7 @@
 #[macro_use]
 extern crate tracing;
 
-use crate::cache::StorageCachingConfig;
+use crate::{cache::StorageCachingConfig, stylus::StylusConfig};
 use alloy_primitives::{Address, B256, FixedBytes, U256, address, map::AddressHashMap};
 use eyre::{ContextCompat, WrapErr};
 use figment::{
@@ -128,6 +128,8 @@ pub use compilation::{CompilationRestrictions, SettingsOverrides};
 
 pub mod extend;
 use extend::Extends;
+
+pub mod stylus;
 
 pub use semver;
 
@@ -552,6 +554,10 @@ pub struct Config {
 
     /// Whether to enable script execution protection.
     pub script_execution_protection: bool,
+
+    /// Configuration for Stylus programs.
+    #[serde(default, skip_serializing_if = "StylusConfig::is_default")]
+    pub stylus: StylusConfig,
 
     /// PRIVATE: This structure may grow, As such, constructing this structure should
     /// _always_ be done using a public constructor or update syntax:
@@ -2583,6 +2589,7 @@ impl Default for Config {
             additional_compiler_profiles: Default::default(),
             compilation_restrictions: Default::default(),
             script_execution_protection: true,
+            stylus: Default::default(),
             _non_exhaustive: (),
         }
     }

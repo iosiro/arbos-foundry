@@ -16,7 +16,7 @@ use foundry_compilers::{
     Artifact, ArtifactId, Compiler, ProjectCompileOutput,
     artifacts::{Contract, Libraries},
 };
-use foundry_config::{Config, InlineConfig};
+use foundry_config::{Config, InlineConfig, apply_stylus_config};
 use foundry_evm::{
     Env,
     backend::Backend,
@@ -329,6 +329,7 @@ impl TestRunnerConfig {
 
         // TODO: self.evm_opts
         self.evm_opts.always_use_create_2_factory = config.always_use_create_2_factory;
+        self.evm_opts.stylus_config = config.stylus.clone();
 
         // TODO: self.env
 
@@ -355,6 +356,11 @@ impl TestRunnerConfig {
         executor.set_spec_id(self.spec_id);
         // executor.set_gas_limit(self.evm_opts.gas_limit());
         executor.set_legacy_assertions(self.config.legacy_assertions);
+
+        // Re-apply stylus config from inline config
+        executor.apply_arbitrum_state_overrides(|params| {
+            apply_stylus_config(params, &self.evm_opts.stylus_config);
+        });
     }
 
     /// Creates a new executor with this configuration.
@@ -387,9 +393,8 @@ impl TestRunnerConfig {
             .legacy_assertions(self.config.legacy_assertions)
             .build(self.env.clone(), db);
 
-        // Apply Arbitrum state overrides with default parameters
-        executor.apply_arbitrum_state_overrides(|_params| {
-            // Default parameters are used
+        executor.apply_arbitrum_state_overrides(|params| {
+            apply_stylus_config(params, &self.evm_opts.stylus_config);
         });
 
         executor

@@ -10,6 +10,7 @@ use foundry_config::{
         error::Kind::InvalidType,
         value::{Dict, Map, Value},
     },
+    stylus::StylusConfig,
 };
 use serde::Serialize;
 
@@ -136,6 +137,11 @@ pub struct EvmArgs {
     #[arg(long)]
     #[serde(skip)]
     pub isolate: bool,
+
+    /// All stylus related arguments
+    #[command(flatten)]
+    #[serde(default)]
+    pub stylus: StylusConfig,
 }
 
 // Make this set of options a `figment::Provider` so that it can be merged into the `Config`
@@ -179,6 +185,14 @@ impl Provider for EvmArgs {
 
         if let Some(fork_url) = &self.fork_url {
             dict.insert("eth_rpc_url".to_string(), fork_url.clone().into());
+        }
+
+        let stylus_dict = Value::serialize(&self.stylus)?
+            .into_dict()
+            .ok_or(InvalidType(Value::serialize(&self.stylus)?.to_actual(), "map".into()))?;
+
+        if !stylus_dict.is_empty() {
+            dict.insert("stylus".to_string(), Value::from(stylus_dict));
         }
 
         Ok(Map::from([(Config::selected_profile(), dict)]))

@@ -13,7 +13,7 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS,
     provider::{ProviderBuilder, RetryProvider},
 };
-use foundry_config::{Chain, Config, GasLimit};
+use foundry_config::{Chain, Config, GasLimit, stylus::StylusConfig};
 use foundry_evm_networks::NetworkConfigs;
 use revm::context::TxEnv;
 use serde::{Deserialize, Serialize};
@@ -87,6 +87,10 @@ pub struct EvmOpts {
 
     /// The CREATE2 deployer's address.
     pub create2_deployer: Address,
+
+    /// Stylus configuration options.
+    #[serde(default)]
+    pub stylus_config: StylusConfig,
 }
 
 impl Default for EvmOpts {
@@ -112,6 +116,7 @@ impl Default for EvmOpts {
             enable_tx_gas_limit: false,
             networks: NetworkConfigs::default(),
             create2_deployer: DEFAULT_CREATE2_DEPLOYER,
+            stylus_config: StylusConfig::default(),
         }
     }
 }
@@ -163,6 +168,7 @@ impl EvmOpts {
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
             self.networks,
+            self.stylus_config.clone(),
         )
         .await
         .wrap_err_with(|| {
@@ -183,6 +189,7 @@ impl EvmOpts {
             self.memory_limit,
             self.disable_block_gas_limit,
             self.enable_tx_gas_limit,
+            self.stylus_config.clone(),
         );
 
         crate::Env {

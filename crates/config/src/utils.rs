@@ -1,7 +1,8 @@
 //! Utility functions
 
-use crate::Config;
+use crate::{Config, stylus::StylusConfig};
 use alloy_primitives::U256;
+use arbos_revm::state::ArbosStateParams;
 use figment::value::Value;
 use foundry_compilers::artifacts::{
     EvmVersion,
@@ -299,5 +300,54 @@ pub fn evm_spec_id(evm_version: EvmVersion) -> SpecId {
         EvmVersion::Cancun => SpecId::CANCUN,
         EvmVersion::Prague => SpecId::PRAGUE,
         EvmVersion::Osaka => SpecId::OSAKA,
+    }
+}
+
+/// Applies Stylus configuration overrides to ArbOS state parameters.
+pub fn apply_stylus_config(params: &mut ArbosStateParams, override_config: &StylusConfig) {
+    if let Some(v) = override_config.stylus_version {
+        params.stylus_params.version = v;
+    }
+    if let Some(v) = override_config.ink_price {
+        params.stylus_params.ink_price = v;
+    }
+    if let Some(v) = override_config.max_stack_depth {
+        params.stylus_params.max_stack_depth = v;
+    }
+    if let Some(v) = override_config.free_pages {
+        params.stylus_params.free_pages = v;
+    }
+    if let Some(v) = override_config.page_gas {
+        params.stylus_params.page_gas = v;
+    }
+    if let Some(v) = override_config.page_ramp {
+        params.stylus_params.page_ramp = v;
+    }
+    if let Some(v) = override_config.page_limit {
+        params.stylus_params.page_limit = v;
+    }
+    if let Some(v) = override_config.min_init_gas {
+        params.stylus_params.min_init_gas = v;
+    }
+    if let Some(v) = override_config.min_cached_init_gas {
+        params.stylus_params.min_cached_init_gas = v;
+    }
+    if let Some(v) = override_config.init_cost_scalar {
+        params.stylus_params.init_cost_scalar = v;
+    }
+    if let Some(v) = override_config.cached_cost_scalar {
+        params.stylus_params.cached_cost_scalar = v;
+    }
+    if let Some(v) = override_config.expiry_days {
+        params.stylus_params.expiry_days = v;
+    }
+    if let Some(v) = override_config.keepalive_days {
+        params.stylus_params.keepalive_days = v;
+    }
+    if let Some(v) = override_config.block_cache_size {
+        params.stylus_params.block_cache_size = v;
+    }
+    if let Some(v) = override_config.max_wasm_size {
+        params.stylus_params.max_wasm_size = v;
     }
 }

@@ -237,6 +237,8 @@ pub trait LoadConfig {
             evm_opts.fork_url = Some(fork_url?.into_owned());
         }
 
+        evm_opts.stylus_config = config.stylus.clone();
+
         Ok((config, evm_opts))
     }
 }
