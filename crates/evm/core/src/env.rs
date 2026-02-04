@@ -1,71 +1,83 @@
+use crate::context::{FoundryBlockEnv, FoundryCfgEnv, FoundryTxEnv};
 use revm::{
-    Context, Database, Journal, JournalEntry,
-    context::{BlockEnv, CfgEnv, JournalInner, JournalTr, LocalContextTr, TxEnv},
+    Database, Journal, JournalEntry,
+    context::{JournalInner, JournalTr, LocalContextTr},
     primitives::hardfork::SpecId,
 };
 
 /// Container type that holds both the configuration and block environment for EVM execution.
 ///
 /// Vendored from `alloy-evm` to remove the dependency.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvmEnv<Spec = SpecId> {
     /// The configuration environment.
-    pub cfg_env: CfgEnv<Spec>,
+    pub cfg_env: FoundryCfgEnv<Spec>,
     /// The block environment.
-    pub block_env: BlockEnv,
+    pub block_env: FoundryBlockEnv,
+}
+
+impl Default for EvmEnv<SpecId> {
+    fn default() -> Self {
+        Self { cfg_env: FoundryCfgEnv::default(), block_env: FoundryBlockEnv::default() }
+    }
 }
 
 impl<Spec: Copy> EvmEnv<Spec> {
     /// Creates a new `EvmEnv` from the given configuration and block environments.
-    pub fn new(cfg_env: CfgEnv<Spec>, block_env: BlockEnv) -> Self {
+    pub fn new(cfg_env: FoundryCfgEnv<Spec>, block_env: FoundryBlockEnv) -> Self {
         Self { cfg_env, block_env }
     }
 
     /// Returns a reference to the block environment.
-    pub fn block_env(&self) -> &BlockEnv {
+    pub fn block_env(&self) -> &FoundryBlockEnv {
         &self.block_env
     }
 
     /// Returns a reference to the configuration environment.
-    pub fn cfg_env(&self) -> &CfgEnv<Spec> {
+    pub fn cfg_env(&self) -> &FoundryCfgEnv<Spec> {
         &self.cfg_env
     }
 
     /// Returns the spec ID.
     pub fn spec_id(&self) -> Spec {
-        self.cfg_env.spec
+        self.cfg_env.inner.spec
     }
 }
 
-impl<Spec> From<(CfgEnv<Spec>, BlockEnv)> for EvmEnv<Spec> {
-    fn from((cfg_env, block_env): (CfgEnv<Spec>, BlockEnv)) -> Self {
+impl<Spec> From<(FoundryCfgEnv<Spec>, FoundryBlockEnv)> for EvmEnv<Spec> {
+    fn from((cfg_env, block_env): (FoundryCfgEnv<Spec>, FoundryBlockEnv)) -> Self {
         Self { cfg_env, block_env }
     }
 }
 
-/// Helper container type for [`EvmEnv`] and [`TxEnv`].
+/// Helper container type for [`EvmEnv`] and [`FoundryTxEnv`].
 #[derive(Clone, Debug, Default)]
 pub struct Env {
     pub evm_env: EvmEnv,
-    pub tx: TxEnv,
+    pub tx: FoundryTxEnv,
 }
 
-/// Helper container type for [`EvmEnv`] and [`TxEnv`].
+/// Helper container type for [`EvmEnv`] and [`FoundryTxEnv`].
 impl Env {
     pub fn default_with_spec_id(spec_id: SpecId) -> Self {
-        let mut cfg = CfgEnv::default();
-        cfg.spec = spec_id;
+        let mut cfg = FoundryCfgEnv::default();
+        cfg.inner.spec = spec_id;
 
-        Self::from(cfg, BlockEnv::default(), TxEnv::default())
+        Self::from(cfg, FoundryBlockEnv::default(), FoundryTxEnv::default())
     }
 
-    pub fn from(cfg: CfgEnv, block: BlockEnv, tx: TxEnv) -> Self {
+    pub fn from(cfg: FoundryCfgEnv, block: FoundryBlockEnv, tx: FoundryTxEnv) -> Self {
         Self { evm_env: EvmEnv { cfg_env: cfg, block_env: block }, tx }
     }
 
-    pub fn new_with_spec_id(cfg: CfgEnv, block: BlockEnv, tx: TxEnv, spec_id: SpecId) -> Self {
+    pub fn new_with_spec_id(
+        cfg: FoundryCfgEnv,
+        block: FoundryBlockEnv,
+        tx: FoundryTxEnv,
+        spec_id: SpecId,
+    ) -> Self {
         let mut cfg = cfg;
-        cfg.spec = spec_id;
+        cfg.inner.spec = spec_id;
 
         Self::from(cfg, block, tx)
     }
@@ -73,9 +85,9 @@ impl Env {
 
 /// Helper struct with mutable references to the block and cfg environments.
 pub struct EnvMut<'a> {
-    pub block: &'a mut BlockEnv,
-    pub cfg: &'a mut CfgEnv,
-    pub tx: &'a mut TxEnv,
+    pub block: &'a mut FoundryBlockEnv,
+    pub cfg: &'a mut FoundryCfgEnv,
+    pub tx: &'a mut FoundryTxEnv,
 }
 
 impl EnvMut<'_> {
@@ -109,7 +121,7 @@ impl AsEnvMut for Env {
 }
 
 impl<DB: Database, J: JournalTr<Database = DB>, C, L: LocalContextTr> AsEnvMut
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, J, C, L>
+    for revm::Context<FoundryBlockEnv, FoundryTxEnv, FoundryCfgEnv, DB, J, C, L>
 {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
         EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
@@ -125,7 +137,15 @@ pub trait ContextExt {
 }
 
 impl<DB: Database, C, L: LocalContextTr> ContextExt
-    for Context<BlockEnv, TxEnv, CfgEnv, DB, Journal<DB, JournalEntry>, C, L>
+    for revm::Context<
+        FoundryBlockEnv,
+        FoundryTxEnv,
+        FoundryCfgEnv,
+        DB,
+        Journal<DB, JournalEntry>,
+        C,
+        L,
+    >
 {
     type DB = DB;
 

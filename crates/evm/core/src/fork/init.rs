@@ -1,11 +1,15 @@
-use crate::{AsEnvMut, Env, EvmEnv, utils::apply_chain_and_block_specific_env_changes};
+use crate::{
+    AsEnvMut, Env, EvmEnv,
+    context::{FoundryBlockEnv, FoundryCfgEnv},
+    utils::apply_chain_and_block_specific_env_changes,
+};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Network, Provider, network::BlockResponse};
 use alloy_rpc_types::BlockNumberOrTag;
 use foundry_common::NON_ARCHIVE_NODE_WARNING;
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use revm::context::TxEnv;
 
 /// Initializes a REVM block environment based on a forked
 /// ethereum provider.
@@ -67,7 +71,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
     let mut env = Env {
         evm_env: EvmEnv {
             cfg_env: cfg,
-            block_env: BlockEnv {
+            block_env: FoundryBlockEnv {
                 number: U256::from(block.header().number()),
                 timestamp: U256::from(block.header().timestamp()),
                 beneficiary: block.header().beneficiary(),
@@ -84,7 +88,8 @@ pub async fn environment<N: Network, P: Provider<N>>(
             chain_id: Some(chain_id),
             gas_limit: block.header().gas_limit(),
             ..Default::default()
-        },
+        }
+        .into(),
     };
 
     apply_chain_and_block_specific_env_changes::<N>(env.as_env_mut(), &block, configs);
@@ -105,21 +110,21 @@ pub fn configure_env(
     memory_limit: u64,
     disable_block_gas_limit: bool,
     enable_tx_gas_limit: bool,
-) -> CfgEnv {
-    let mut cfg = CfgEnv::default();
-    cfg.chain_id = chain_id;
-    cfg.memory_limit = memory_limit;
-    cfg.limit_contract_code_size = Some(usize::MAX);
+) -> FoundryCfgEnv {
+    let mut cfg = FoundryCfgEnv::default();
+    cfg.inner.chain_id = chain_id;
+    cfg.inner.memory_limit = memory_limit;
+    cfg.inner.limit_contract_code_size = Some(usize::MAX);
     // EIP-3607 rejects transactions from senders with deployed code.
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
-    cfg.disable_eip3607 = true;
-    cfg.disable_block_gas_limit = disable_block_gas_limit;
-    cfg.disable_nonce_check = true;
+    cfg.inner.disable_eip3607 = true;
+    cfg.inner.disable_block_gas_limit = disable_block_gas_limit;
+    cfg.inner.disable_nonce_check = true;
     // By default do not enforce transaction gas limits imposed by Osaka (EIP-7825).
     // Users can opt-in to enable these limits by setting `enable_tx_gas_limit` to true.
     if !enable_tx_gas_limit {
-        cfg.tx_gas_limit_cap = Some(u64::MAX);
+        cfg.inner.tx_gas_limit_cap = Some(u64::MAX);
     }
     cfg
 }

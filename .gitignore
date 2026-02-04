@@ -24,3 +24,9 @@ _
 .vite
 .wrangler
 *.zip
+
+# Generated wasm
+testdata/fixtures/Stylus/foundry_stylus_program.wasm
+testdata/fixtures/Stylus/foundry_stylus_program.wasm.br
+
+.pyenv

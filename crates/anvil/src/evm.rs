@@ -18,13 +18,14 @@ mod tests {
     use foundry_evm::{
         EvmEnv, FoundryContext,
         core::{
+            context::{FoundryCfgEnv, FoundryLocalContext},
             either_evm::EitherEvm,
             precompiles::{DynPrecompile, FoundryPrecompiles, PrecompileInput},
         },
     };
     use revm::{
         ExecuteEvm, Journal,
-        context::{CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv},
+        context::{Evm as RevmEvm, JournalTr, TxEnv},
         database::{EmptyDB, EmptyDBTyped},
         handler::{EthFrame, EthPrecompiles, instructions::EthInstructions},
         inspector::NoOpInspector,
@@ -71,12 +72,16 @@ mod tests {
     /// Creates a new EVM instance with the custom precompile factory.
     fn create_eth_evm(spec: SpecId) -> (foundry_evm::Env, EitherEvm<TestEvm>) {
         let eth_env = foundry_evm::Env {
-            evm_env: EvmEnv { block_env: Default::default(), cfg_env: CfgEnv::new_with_spec(spec) },
+            evm_env: EvmEnv {
+                block_env: Default::default(),
+                cfg_env: FoundryCfgEnv::new_with_spec(spec),
+            },
             tx: TxEnv {
                 kind: TxKind::Call(PRECOMPILE_ADDR),
                 data: PAYLOAD.into(),
                 ..Default::default()
-            },
+            }
+            .into(),
         };
 
         let context = FoundryContext {
@@ -85,7 +90,7 @@ mod tests {
             cfg: eth_env.evm_env.cfg_env.clone(),
             tx: eth_env.tx.clone(),
             chain: (),
-            local: LocalContext::default(),
+            local: FoundryLocalContext::default(),
             error: Ok(()),
         };
 

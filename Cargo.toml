@@ -219,6 +219,9 @@ foundry-test-utils = { path = "crates/test-utils" }
 foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
 
+# arbos-revm
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "9b002b02c6f63cdf9047df67a337c2a3561fa0ce", default-features = false }
+
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }
 foundry-compilers = { version = "0.19.6", default-features = false, features = [

@@ -1186,6 +1186,12 @@ impl FromRecoveredTx<TypedTransaction> for TxEnv {
     }
 }
 
+impl FromRecoveredTx<TypedTransaction> for foundry_evm::core::FoundryTxEnv {
+    fn from_recovered_tx(tx: &TypedTransaction, caller: Address) -> Self {
+        TxEnv::from_recovered_tx(tx, caller).into()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

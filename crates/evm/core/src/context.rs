@@ -3,22 +3,26 @@
 //! This module provides type aliases for EVM context types, allowing for future
 //! flexibility in customizing block, transaction, and configuration environments.
 
-use revm::{
-    Context,
-    context::{BlockEnv, CfgEnv, TxEnv},
+use arbos_revm::{
+    ArbitrumContext, config::ArbitrumConfig, local_context::ArbitrumLocalContext,
+    transaction::ArbitrumTransaction,
 };
+use revm::{context::BlockEnv, primitives::hardfork::SpecId};
 
 /// Foundry's block environment type.
 pub type FoundryBlockEnv = BlockEnv;
 
 /// Foundry's transaction environment type.
-pub type FoundryTxEnv = TxEnv;
+pub type FoundryTxEnv = ArbitrumTransaction;
 
 /// Foundry's configuration environment type.
-pub type FoundryCfgEnv = CfgEnv;
+pub type FoundryCfgEnv<Spec = SpecId> = ArbitrumConfig<Spec>;
+
+/// Foundry's local context type.
+pub type FoundryLocalContext = ArbitrumLocalContext;
 
 /// Foundry's EVM context type.
 ///
-/// This is equivalent to `alloy_evm::eth::EthEvmContext<DB>` but defined locally
-/// to remove the dependency on `alloy-evm`.
-pub type FoundryContext<DB> = Context<FoundryBlockEnv, FoundryTxEnv, FoundryCfgEnv, DB>;
+/// This uses `ArbitrumContext` from arbos-revm which extends the standard revm
+/// Context with Arbitrum-specific functionality.
+pub type FoundryContext<DB> = ArbitrumContext<DB>;

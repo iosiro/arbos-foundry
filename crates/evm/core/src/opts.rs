@@ -2,6 +2,7 @@ use super::fork::environment;
 use crate::{
     EvmEnv,
     constants::DEFAULT_CREATE2_DEPLOYER,
+    context::FoundryBlockEnv,
     fork::{CreateFork, configure_env},
 };
 use alloy_network::Network;
@@ -14,7 +15,7 @@ use foundry_common::{
 };
 use foundry_config::{Chain, Config, GasLimit};
 use foundry_evm_networks::NetworkConfigs;
-use revm::context::{BlockEnv, TxEnv};
+use revm::context::TxEnv;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 use url::Url;
@@ -187,7 +188,7 @@ impl EvmOpts {
         crate::Env {
             evm_env: EvmEnv {
                 cfg_env: cfg,
-                block_env: BlockEnv {
+                block_env: FoundryBlockEnv {
                     number: self.env.block_number,
                     beneficiary: self.env.block_coinbase,
                     timestamp: self.env.block_timestamp,
@@ -203,7 +204,8 @@ impl EvmOpts {
                 gas_limit: self.gas_limit(),
                 caller: self.sender,
                 ..Default::default()
-            },
+            }
+            .into(),
         }
     }
 

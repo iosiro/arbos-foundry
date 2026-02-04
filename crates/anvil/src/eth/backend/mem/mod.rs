@@ -1,7 +1,7 @@
 //! In-memory blockchain backend.
 
 use self::state::trie_storage;
-use super::executor::{AnvilInnerEvm, new_evm_with_inspector_ref};
+use super::executor::{AnvilEvm, new_evm_with_inspector_ref};
 use crate::{
     ForkChoice, NodeConfig, PrecompileFactory,
     config::PruneStateHistoryConfig,
@@ -92,10 +92,7 @@ use foundry_evm::{
     FoundryContext, FromRecoveredTx,
     backend::{DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE,
-    core::{
-        either_evm::EitherEvm,
-        precompiles::{DynPrecompile, EC_RECOVER, FoundryPrecompiles, Precompile},
-    },
+    core::precompiles::{DynPrecompile, EC_RECOVER, Precompile},
     decode::RevertDecoder,
     inspectors::AccessListInspector,
     traces::{
@@ -114,7 +111,6 @@ use revm::{
         result::{ExecutionResult, Output, ResultAndState},
     },
     database::{CacheDB, DbAccount, WrapDatabaseRef},
-    handler::EthPrecompiles,
     interpreter::InstructionResult,
     precompile::{PrecompileSpecId, Precompiles},
     primitives::{KECCAK_EMPTY, hardfork::SpecId},
@@ -1160,9 +1156,7 @@ impl Backend {
         db: &'db DB,
         env: &Env,
         inspector: &'db mut I,
-    ) -> EitherEvm<
-        AnvilInnerEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>,
-    >
+    ) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
     where
         DB: DatabaseRef + ?Sized,
         I: Inspector<FoundryContext<WrapDatabaseRef<&'db DB>>>,
@@ -1597,7 +1591,7 @@ impl Backend {
             ..Default::default()
         };
         base.set_signed_authorization(authorization_list.unwrap_or_default());
-        env.tx = base;
+        env.tx = base.into();
 
         if let Some(nonce) = nonce {
             env.tx.nonce = nonce;
@@ -2745,7 +2739,7 @@ impl Backend {
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
 
             let result = evm
-                .inspect_tx(tx_env.clone())
+                .inspect_tx(tx_env.clone().into())
                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
             Ok(f(result, cache_db, inspector, tx_env, env))

@@ -39,14 +39,14 @@ use foundry_config::Config;
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
-    core::AsEnvMut,
+    core::{AsEnvMut, FoundryCfgEnv},
     utils::{apply_chain_and_block_specific_env_changes, get_blob_base_fee_update_fraction},
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rand_08::thread_rng;
 use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
+    context::{BlockEnv, TxEnv},
     context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
 };
@@ -1050,26 +1050,26 @@ impl NodeConfig {
     pub(crate) async fn setup(&mut self) -> Result<mem::Backend> {
         // configure the revm environment
 
-        let mut cfg = CfgEnv::default();
-        cfg.spec = self.get_hardfork().into();
+        let mut cfg = FoundryCfgEnv::default();
+        cfg.inner.spec = self.get_hardfork().into();
 
-        cfg.chain_id = self.get_chain_id();
-        cfg.limit_contract_code_size = self.code_size_limit;
+        cfg.inner.chain_id = self.get_chain_id();
+        cfg.inner.limit_contract_code_size = self.code_size_limit;
         // EIP-3607 rejects transactions from senders with deployed code.
         // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the
         // caller is a contract. So we disable the check by default.
-        cfg.disable_eip3607 = true;
-        cfg.disable_block_gas_limit = self.disable_block_gas_limit;
+        cfg.inner.disable_eip3607 = true;
+        cfg.inner.disable_block_gas_limit = self.disable_block_gas_limit;
 
         if !self.enable_tx_gas_limit {
-            cfg.tx_gas_limit_cap = Some(u64::MAX);
+            cfg.inner.tx_gas_limit_cap = Some(u64::MAX);
         }
 
         if let Some(value) = self.memory_limit {
-            cfg.memory_limit = value;
+            cfg.inner.memory_limit = value;
         }
 
-        let spec_id = cfg.spec;
+        let spec_id = cfg.inner.spec;
         let mut env = Env::new(
             cfg,
             BlockEnv {
@@ -1077,7 +1077,7 @@ impl NodeConfig {
                 basefee: self.get_base_fee(),
                 ..Default::default()
             },
-            TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() },
+            TxEnv { chain_id: Some(self.get_chain_id()), ..Default::default() }.into(),
             self.networks,
         );
 

@@ -128,13 +128,14 @@ impl From<RpcError> for BlockchainError {
     }
 }
 
-impl<T> From<EVMError<T>> for BlockchainError
+impl<T, TX> From<EVMError<T, TX>> for BlockchainError
 where
     T: Into<Self>,
+    TX: Into<InvalidTransactionError>,
 {
-    fn from(err: EVMError<T>) -> Self {
+    fn from(err: EVMError<T, TX>) -> Self {
         match err {
-            EVMError::Transaction(err) => InvalidTransactionError::from(err).into(),
+            EVMError::Transaction(err) => err.into().into(),
             EVMError::Header(err) => match err {
                 InvalidHeader::ExcessBlobGasNotSet => Self::ExcessBlobGasNotSet,
                 InvalidHeader::PrevrandaoNotSet => Self::PrevrandaoNotSet,
@@ -286,6 +287,15 @@ pub enum InvalidTransactionError {
     /// Forwards error from the revm
     #[error(transparent)]
     Revm(revm::context_interface::result::InvalidTransaction),
+}
+
+impl From<arbos_revm::transaction::ArbitrumTransactionError> for InvalidTransactionError {
+    fn from(err: arbos_revm::transaction::ArbitrumTransactionError) -> Self {
+        match err {
+            arbos_revm::transaction::ArbitrumTransactionError::Base(err) => err.into(),
+            other => Self::Revm(InvalidTransaction::Str(other.to_string().into())),
+        }
+    }
 }
 
 impl From<InvalidTransaction> for InvalidTransactionError {

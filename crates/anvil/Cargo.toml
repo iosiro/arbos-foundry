@@ -70,6 +70,7 @@ revm = { workspace = true, features = [
     "c-kzg",
 ] }
 revm-inspectors.workspace = true
+arbos-revm.workspace = true
 
 # axum related
 axum.workspace = true

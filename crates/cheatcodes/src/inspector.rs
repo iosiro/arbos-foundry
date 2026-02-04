@@ -36,7 +36,7 @@ use foundry_common::{
     mapping_slots::{MappingSlots, step as mapping_step},
 };
 use foundry_evm_core::{
-    Breakpoints, ContextExt, FoundryContext, InspectorExt,
+    Breakpoints, ContextExt, FoundryContext, FoundryLocalContext, InspectorExt,
     abi::Vm::stopExpectSafeMemoryCall,
     backend::{DatabaseError, DatabaseExt, RevertDiagnostic},
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, MAGIC_ASSUME},
@@ -52,7 +52,7 @@ use rand::Rng;
 use revm::{
     Inspector, Journal,
     bytecode::opcode as op,
-    context::{BlockEnv, JournalTr, LocalContext, TransactionType, result::EVMError},
+    context::{BlockEnv, JournalTr, TransactionType, result::EVMError},
     context_interface::{CreateScheme, transaction::SignedAuthorization},
     handler::FrameResult,
     interpreter::{
@@ -145,7 +145,7 @@ where
             inner: ccx.ecx.journaled_state.inner.clone(),
             database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
         },
-        local: LocalContext::default(),
+        local: FoundryLocalContext::default(),
         chain: (),
         error,
     };

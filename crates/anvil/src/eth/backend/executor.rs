@@ -26,10 +26,12 @@ use anvil_core::eth::{
     block::{BlockInfo, create_block},
     transaction::{PendingTransaction, TransactionInfo, TypedReceipt, TypedTransaction},
 };
+use arbos_revm::{ArbitrumEvm, precompiles::ArbitrumPrecompileProvider};
 use foundry_evm::{
     FoundryContext, FromRecoveredTx,
     backend::DatabaseError,
     core::{
+        FoundryCfgEnv, FoundryLocalContext,
         either_evm::EitherEvm,
         precompiles::{DynPrecompile, EC_RECOVER, FoundryPrecompiles, Precompile},
     },
@@ -38,14 +40,11 @@ use foundry_evm::{
 use foundry_evm_networks::NetworkConfigs;
 use revm::{
     Database, DatabaseRef, InspectCommitEvm, Inspector, Journal,
-    context::{
-        Block as RevmBlock, BlockEnv, Cfg, CfgEnv, Evm as RevmEvm, JournalTr, LocalContext, TxEnv,
-    },
+    context::{Block as RevmBlock, BlockEnv, Cfg, JournalTr, TxEnv},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::{EthPrecompiles, instructions::EthInstructions},
+    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
-    precompile::{PrecompileSpecId, Precompiles},
     primitives::hardfork::SpecId,
 };
 use std::{fmt::Debug, sync::Arc};
@@ -111,7 +110,7 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
     /// The configuration environment and spec id
-    pub cfg_env: CfgEnv,
+    pub cfg_env: FoundryCfgEnv,
     pub parent_hash: B256,
     /// Cumulative gas used by all executed transactions
     pub gas_used: u64,
@@ -296,7 +295,7 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
             tx_env.authorization_list = cheated_auths;
         }
 
-        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env, self.networks)
+        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env.into(), self.networks)
     }
 }
 
@@ -480,20 +479,22 @@ fn build_logs_bloom(logs: &[Log], bloom: &mut Bloom) {
 }
 
 /// Type alias for the inner EVM used by anvil.
-pub type AnvilInnerEvm<DB, I, P> = RevmEvm<
+pub type AnvilInnerEvm<DB, I, P> = ArbitrumEvm<
     FoundryContext<DB>,
     I,
-    EthInstructions<revm::interpreter::interpreter::EthInterpreter, FoundryContext<DB>>,
     P,
+    EthInstructions<revm::interpreter::interpreter::EthInterpreter, FoundryContext<DB>>,
     revm::handler::EthFrame<revm::interpreter::interpreter::EthInterpreter>,
 >;
 
+/// Type alias for Anvil precompiles using Arbitrum precompile provider.
+pub type AnvilPrecompiles<DB> = FoundryPrecompiles<ArbitrumPrecompileProvider<FoundryContext<DB>>>;
+
+/// Type alias for the full Anvil EVM with precompiles.
+pub type AnvilEvm<DB, I> = EitherEvm<AnvilInnerEvm<DB, I, AnvilPrecompiles<DB>>>;
+
 /// Creates a database with given database and inspector.
-pub fn new_evm_with_inspector<DB, I>(
-    db: DB,
-    env: &Env,
-    inspector: I,
-) -> EitherEvm<AnvilInnerEvm<DB, I, FoundryPrecompiles<EthPrecompiles>>>
+pub fn new_evm_with_inspector<DB, I>(db: DB, env: &Env, inspector: I) -> AnvilEvm<DB, I>
 where
     DB: Database<Error = DatabaseError> + Debug,
     I: Inspector<FoundryContext<DB>>,
@@ -509,19 +510,16 @@ where
         cfg: env.evm_env.cfg_env.clone(),
         tx: env.tx.clone(),
         chain: (),
-        local: LocalContext::default(),
+        local: FoundryLocalContext::default(),
         error: Ok(()),
     };
 
-    let eth_precompiles = EthPrecompiles {
-        precompiles: Precompiles::new(PrecompileSpecId::from_spec_id(spec)),
-        spec,
-    };
-    let evm = RevmEvm::new_with_inspector(
+    let arb_precompiles = ArbitrumPrecompileProvider::new(spec);
+    let evm = ArbitrumEvm::new_with_inspector(
         context,
         inspector,
         EthInstructions::default(),
-        FoundryPrecompiles::new(eth_precompiles),
+        FoundryPrecompiles::new(arb_precompiles),
     );
 
     EitherEvm(evm)
@@ -532,9 +530,7 @@ pub fn new_evm_with_inspector_ref<'db, DB, I>(
     db: &'db DB,
     env: &Env,
     inspector: &'db mut I,
-) -> EitherEvm<
-    AnvilInnerEvm<WrapDatabaseRef<&'db DB>, &'db mut I, FoundryPrecompiles<EthPrecompiles>>,
->
+) -> AnvilEvm<WrapDatabaseRef<&'db DB>, &'db mut I>
 where
     DB: DatabaseRef<Error = DatabaseError> + Debug + 'db + ?Sized,
     I: Inspector<FoundryContext<WrapDatabaseRef<&'db DB>>>,
