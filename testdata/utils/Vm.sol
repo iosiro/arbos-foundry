@@ -168,6 +168,8 @@ interface Vm {
     function broadcast() external;
     function broadcast(address signer) external;
     function broadcast(uint256 privateKey) external;
+    function brotliCompress(bytes calldata data) external pure returns (bytes memory compressed);
+    function brotliDecompress(bytes calldata compressed) external pure returns (bytes memory data);
     function chainId(uint256 newChainId) external;
     function clearMockedCalls() external;
     function cloneAccount(address source, address target) external;
@@ -204,6 +206,14 @@ interface Vm {
     function deployCode(string calldata artifactPath, bytes calldata constructorArgs, bytes32 salt) external returns (address deployedAddress);
     function deployCode(string calldata artifactPath, uint256 value, bytes32 salt) external returns (address deployedAddress);
     function deployCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value, bytes32 salt) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, uint256 value) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, bytes32 salt) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, bytes32 salt) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, uint256 value, bytes32 salt) external returns (address deployedAddress);
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value, bytes32 salt) external returns (address deployedAddress);
     function deriveKey(string calldata mnemonic, uint32 index) external pure returns (uint256 privateKey);
     function deriveKey(string calldata mnemonic, string calldata derivationPath, uint32 index) external pure returns (uint256 privateKey);
     function deriveKey(string calldata mnemonic, uint32 index, string calldata language) external pure returns (uint256 privateKey);
@@ -323,6 +333,7 @@ interface Vm {
     function getStateDiffJson() external view returns (string memory diff);
     function getStorageAccesses() external view returns (StorageAccess[] memory storageAccesses);
     function getStorageSlots(address target, string calldata variableName) external view returns (uint256[] memory slots);
+    function getStylusCode(string calldata artifactPath) external view returns (bytes memory);
     function getWallets() external view returns (address[] memory wallets);
     function indexOf(string calldata input, string calldata key) external pure returns (uint256);
     function interceptInitcode() external;

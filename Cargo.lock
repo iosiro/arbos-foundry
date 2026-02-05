@@ -4801,6 +4801,7 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "alloy-sol-types",
+ "arbos-revm",
  "base64 0.22.1",
  "dialoguer",
  "ecdsa",

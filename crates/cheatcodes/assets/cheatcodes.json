@@ -3502,6 +3502,46 @@
     },
     {
       "func": {
+        "id": "brotliCompress",
+        "description": "Compresses the given data using Brotli compression (quality: 11, window: 22).",
+        "declaration": "function brotliCompress(bytes calldata data) external pure returns (bytes memory compressed);",
+        "visibility": "external",
+        "mutability": "pure",
+        "signature": "brotliCompress(bytes)",
+        "selector": "0x5d8ce3aa",
+        "selectorBytes": [
+          93,
+          140,
+          227,
+          170
+        ]
+      },
+      "group": "string",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "brotliDecompress",
+        "description": "Decompresses Brotli-compressed data.",
+        "declaration": "function brotliDecompress(bytes calldata compressed) external pure returns (bytes memory data);",
+        "visibility": "external",
+        "mutability": "pure",
+        "signature": "brotliDecompress(bytes)",
+        "selector": "0x62d47882",
+        "selectorBytes": [
+          98,
+          212,
+          120,
+          130
+        ]
+      },
+      "group": "string",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
         "id": "chainId",
         "description": "Sets `block.chainid`.",
         "declaration": "function chainId(uint256 newChainId) external;",
@@ -4218,6 +4258,166 @@
           167,
           115,
           234
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_0",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.",
+        "declaration": "function deployStylusCode(string calldata artifactPath) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string)",
+        "selector": "0x4cba9375",
+        "selectorBytes": [
+          76,
+          186,
+          147,
+          117
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_1",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nAdditionally accepts abi-encoded constructor arguments.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,bytes)",
+        "selector": "0x1ae55108",
+        "selectorBytes": [
+          26,
+          229,
+          81,
+          8
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_2",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nAdditionally accepts `msg.value`.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, uint256 value) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,uint256)",
+        "selector": "0x8e51ed12",
+        "selectorBytes": [
+          142,
+          81,
+          237,
+          18
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_3",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nAdditionally accepts abi-encoded constructor arguments and `msg.value`.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,bytes,uint256)",
+        "selector": "0xac562dc4",
+        "selectorBytes": [
+          172,
+          86,
+          45,
+          196
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_4",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, bytes32 salt) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,bytes32)",
+        "selector": "0x6fec0a75",
+        "selectorBytes": [
+          111,
+          236,
+          10,
+          117
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_5",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.\nAdditionally accepts abi-encoded constructor arguments.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, bytes32 salt) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,bytes,bytes32)",
+        "selector": "0xc0d31071",
+        "selectorBytes": [
+          192,
+          211,
+          16,
+          113
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_6",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.\nAdditionally accepts `msg.value`.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, uint256 value, bytes32 salt) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,uint256,bytes32)",
+        "selector": "0x872fb409",
+        "selectorBytes": [
+          135,
+          47,
+          180,
+          9
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "deployStylusCode_7",
+        "description": "Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.\nTakes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.\nAdditionally accepts abi-encoded constructor arguments and `msg.value`.",
+        "declaration": "function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value, bytes32 salt) external returns (address deployedAddress);",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "deployStylusCode(string,bytes,uint256,bytes32)",
+        "selector": "0xebbbb144",
+        "selectorBytes": [
+          235,
+          187,
+          177,
+          68
         ]
       },
       "group": "filesystem",
@@ -6601,6 +6801,26 @@
         ]
       },
       "group": "evm",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "getStylusCode",
+        "description": "Returns the deployment bytecode for a Stylus contract suitable for use with the StylusDeployer contract.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nApplies the same compression and prefixing logic as `deployStylusCode`.",
+        "declaration": "function getStylusCode(string calldata artifactPath) external view returns (bytes memory);",
+        "visibility": "external",
+        "mutability": "view",
+        "signature": "getStylusCode(string)",
+        "selector": "0x01ba0731",
+        "selectorBytes": [
+          1,
+          186,
+          7,
+          49
+        ]
+      },
+      "group": "filesystem",
       "status": "stable",
       "safety": "safe"
     },

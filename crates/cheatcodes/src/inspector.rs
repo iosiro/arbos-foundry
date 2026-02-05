@@ -112,6 +112,28 @@ pub trait CheatcodesExecutor {
         })
     }
 
+    /// Obtains [FoundryEvm] instance and executes the given CALL frame.
+    fn exec_call(
+        &mut self,
+        inputs: CallInputs,
+        ccx: &mut CheatsCtxt,
+    ) -> Result<CallOutcome, EVMError<DatabaseError>> {
+        with_evm(self, ccx, |evm| {
+            evm.journaled_state.depth += 1;
+
+            let frame = FrameInput::Call(Box::new(inputs));
+
+            let outcome = match evm.run_execution(frame)? {
+                FrameResult::Create(_) => unreachable!(),
+                FrameResult::Call(call) => call,
+            };
+
+            evm.journaled_state.depth -= 1;
+
+            Ok(outcome)
+        })
+    }
+
     fn console_log(&mut self, ccx: &mut CheatsCtxt, msg: &str) {
         self.get_inspector(ccx.state).console_log(msg);
     }

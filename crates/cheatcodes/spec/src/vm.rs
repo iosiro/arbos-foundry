@@ -1988,6 +1988,72 @@ interface Vm {
     #[cheatcode(group = Filesystem)]
     function getDeployedCode(string calldata artifactPath) external view returns (bytes memory runtimeBytecode);
 
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    ///
+    /// Additionally accepts abi-encoded constructor arguments.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    ///
+    /// Additionally accepts `msg.value`.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, uint256 value) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    ///
+    /// Additionally accepts abi-encoded constructor arguments and `msg.value`.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.
+    ///
+    /// Additionally accepts abi-encoded constructor arguments.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.
+    ///
+    /// Additionally accepts `msg.value`.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, uint256 value, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys a Stylus contract from artifact file, automatically prefixes Stylus discriminant and compress level.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary, using the CREATE2 salt.
+    ///
+    /// Additionally accepts abi-encoded constructor arguments and `msg.value`.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value, bytes32 salt) external returns (address deployedAddress);
+
+    /// Returns the deployment bytecode for a Stylus contract suitable for use with the StylusDeployer contract.
+    /// Takes in the relative path to the WASM or Brotli compressed WASM binary.
+    /// Applies the same compression and prefixing logic as `deployStylusCode`.
+    #[cheatcode(group = Filesystem)]
+    function getStylusCode(string calldata artifactPath) external view returns (bytes memory);
+
+    /// Compresses the given data using Brotli compression (quality: 11, window: 22).
+    #[cheatcode(group = String)]
+    function brotliCompress(bytes calldata data) external pure returns (bytes memory compressed);
+
+    /// Decompresses Brotli-compressed data.
+    #[cheatcode(group = String)]
+    function brotliDecompress(bytes calldata compressed) external pure returns (bytes memory data);
+
     /// Returns the most recent broadcast for the given contract on `chainId` matching `txType`.
     ///
     /// For example:
