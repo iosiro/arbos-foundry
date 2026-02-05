@@ -29,13 +29,13 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.5.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.89"
 authors = ["Foundry Contributors"]
 license = "MIT OR Apache-2.0"
 homepage = "https://getfoundry.sh"
-repository = "https://github.com/foundry-rs/foundry"
+repository = "https://github.com/iosiro/arbos-foundry"
 exclude = ["benches/", "tests/", "test-data/", "testdata/"]
 
 [workspace.lints.clippy]

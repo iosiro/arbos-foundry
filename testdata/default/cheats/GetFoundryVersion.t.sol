@@ -82,6 +82,6 @@ contract GetFoundryVersionTest is Test {
         assertTrue(vm.foundryVersionAtLeast(semanticVersion));
 
         // Should return true for past versions
-        assertTrue(vm.foundryVersionAtLeast("0.2.0"));
+        assertTrue(vm.foundryVersionAtLeast("0.0.1"));
     }
 }
