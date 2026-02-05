@@ -17,7 +17,49 @@ This project was developed by [iosiro](https://www.iosiro.com/) as part of the [
 
 ## Installation
 
-Build from source:
+### Using arbos-foundryup (Recommended)
+
+Install arbos-foundryup:
+
+```bash
+curl -L https://raw.githubusercontent.com/iosiro/arbos-foundry/HEAD/foundryup/arbos-install | bash
+```
+
+Then install arbos-foundry:
+
+```bash
+arbos-foundryup
+```
+
+This will install the `arbos-*` binaries to `~/.foundry/bin/`:
+- `arbos-forge`
+- `arbos-cast`
+- `arbos-anvil`
+- `arbos-chisel`
+
+#### arbos-foundryup Options
+
+```bash
+# Install a specific version
+arbos-foundryup --install v0.1.0
+
+# Install from a specific branch
+arbos-foundryup --branch main
+
+# Install from a local repository
+arbos-foundryup --path /path/to/arbos-foundry
+
+# List installed versions
+arbos-foundryup --list
+
+# Use a specific installed version
+arbos-foundryup --use v0.1.0
+
+# Update arbos-foundryup itself
+arbos-foundryup --update
+```
+
+### Build from Source
 
 ```bash
 git clone https://github.com/iosiro/arbos-foundry
@@ -25,11 +67,11 @@ cd arbos-foundry
 cargo build --release
 ```
 
-The binaries are available with both `arbos-*` prefixes and standard Foundry names:
-- `arbos-forge` / `forge`
-- `arbos-cast` / `cast`
-- `arbos-anvil` / `anvil`
-- `arbos-chisel` / `chisel`
+The binaries will be available in `target/release/`:
+- `arbos-forge`
+- `arbos-cast`
+- `arbos-anvil`
+- `arbos-chisel`
 
 ## Quick Start
 

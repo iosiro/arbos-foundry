@@ -1,0 +1,534 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# NOTE: if you make modifications to this script, please increment the version number.
+# WARNING: the SemVer pattern: major.minor.patch must be followed as we use it to determine if the script is up to date.
+ARBOS_FOUNDRYUP_INSTALLER_VERSION="1.0.0"
+
+BASE_DIR=${XDG_CONFIG_HOME:-$HOME}
+FOUNDRY_DIR=${FOUNDRY_DIR:-"$BASE_DIR/.foundry"}
+FOUNDRY_VERSIONS_DIR="$FOUNDRY_DIR/versions"
+FOUNDRY_BIN_DIR="$FOUNDRY_DIR/bin"
+FOUNDRY_MAN_DIR="$FOUNDRY_DIR/share/man/man1"
+ARBOS_FOUNDRYUP_BIN_URL="https://raw.githubusercontent.com/iosiro/arbos-foundry/HEAD/foundryup/arbos-foundryup"
+ARBOS_FOUNDRYUP_BIN_PATH="$FOUNDRY_BIN_DIR/arbos-foundryup"
+ARBOS_FOUNDRYUP_JOBS=""
+ARBOS_FOUNDRYUP_IGNORE_VERIFICATION=false
+
+BINS=(arbos-forge arbos-cast arbos-anvil arbos-chisel)
+HASH_NAMES=()
+HASH_VALUES=()
+
+export RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}"
+
+main() {
+  need_cmd git
+  need_cmd curl
+
+  while [[ -n $1 ]]; do
+    case $1 in
+      --)               shift; break;;
+
+      -v|--version)     shift; version;;
+      -U|--update)      shift; update;;
+      -r|--repo)        shift; ARBOS_FOUNDRYUP_REPO=$1;;
+      -b|--branch)      shift; ARBOS_FOUNDRYUP_BRANCH=$1;;
+      -i|--install)     shift; ARBOS_FOUNDRYUP_VERSION=$1;;
+      -l|--list)        shift; list;;
+      -u|--use)         shift; ARBOS_FOUNDRYUP_VERSION=$1; use;;
+      -p|--path)        shift; ARBOS_FOUNDRYUP_LOCAL_REPO=$1;;
+      -P|--pr)          shift; ARBOS_FOUNDRYUP_PR=$1;;
+      -C|--commit)      shift; ARBOS_FOUNDRYUP_COMMIT=$1;;
+      -j|--jobs)        shift; ARBOS_FOUNDRYUP_JOBS=$1;;
+      -f|--force)       ARBOS_FOUNDRYUP_IGNORE_VERIFICATION=true;;
+      --arch)           shift; ARBOS_FOUNDRYUP_ARCH=$1;;
+      --platform)       shift; ARBOS_FOUNDRYUP_PLATFORM=$1;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        warn "unknown option: $1"
+        usage
+        exit 1
+    esac; shift
+  done
+
+  CARGO_BUILD_ARGS=(--release)
+
+  if [ -n "$ARBOS_FOUNDRYUP_JOBS" ]; then
+    CARGO_BUILD_ARGS+=(--jobs "$ARBOS_FOUNDRYUP_JOBS")
+  fi
+
+  # Print the banner after successfully parsing args
+  banner
+
+  # Check if the arbos-foundryup installer is up to date, warn the user if not
+  check_installer_up_to_date
+
+  if [ -n "$ARBOS_FOUNDRYUP_PR" ]; then
+    if [ -z "$ARBOS_FOUNDRYUP_BRANCH" ]; then
+      ARBOS_FOUNDRYUP_BRANCH="refs/pull/$ARBOS_FOUNDRYUP_PR/head"
+    else
+      err "can't use --pr and --branch at the same time"
+    fi
+  fi
+
+  check_bins_in_use
+
+  # Installs arbos-foundry from a local repository if --path parameter is provided
+  if [[ -n "$ARBOS_FOUNDRYUP_LOCAL_REPO" ]]; then
+    need_cmd cargo
+
+    # Ignore branches/versions as we do not want to modify local git state
+    if [ -n "$ARBOS_FOUNDRYUP_REPO" ] || [ -n "$ARBOS_FOUNDRYUP_BRANCH" ] || [ -n "$ARBOS_FOUNDRYUP_VERSION" ]; then
+      warn "--branch, --install, --use, and --repo arguments are ignored during local install"
+    fi
+
+    # Enter local repo and build
+    say "installing from $ARBOS_FOUNDRYUP_LOCAL_REPO"
+    cd "$ARBOS_FOUNDRYUP_LOCAL_REPO"
+    ensure cargo build --bins "${CARGO_BUILD_ARGS[@]}"
+
+    for bin in "${BINS[@]}"; do
+      # Remove prior installations if they exist
+      rm -f "$FOUNDRY_BIN_DIR/$bin"
+      # Symlink from local repo binaries to bin dir
+      ensure ln -s "$PWD/target/release/$bin" "$FOUNDRY_BIN_DIR/$bin"
+    done
+
+    say "done"
+    exit 0
+  fi
+
+  ARBOS_FOUNDRYUP_REPO=${ARBOS_FOUNDRYUP_REPO:-iosiro/arbos-foundry}
+
+  # Install by downloading binaries
+  if [[ "$ARBOS_FOUNDRYUP_REPO" == "iosiro/arbos-foundry" && -z "$ARBOS_FOUNDRYUP_BRANCH" && -z "$ARBOS_FOUNDRYUP_COMMIT" ]]; then
+    ARBOS_FOUNDRYUP_VERSION=${ARBOS_FOUNDRYUP_VERSION:-stable}
+    ARBOS_FOUNDRYUP_TAG=$ARBOS_FOUNDRYUP_VERSION
+
+    # Normalize versions (handle channels, versions without v prefix)
+    if [[ "$ARBOS_FOUNDRYUP_VERSION" =~ ^nightly ]]; then
+      ARBOS_FOUNDRYUP_VERSION="nightly"
+    elif [[ "$ARBOS_FOUNDRYUP_VERSION" == [[:digit:]]* ]]; then
+      # Add v prefix
+      ARBOS_FOUNDRYUP_VERSION="v${ARBOS_FOUNDRYUP_VERSION}"
+      ARBOS_FOUNDRYUP_TAG="${ARBOS_FOUNDRYUP_VERSION}"
+    fi
+
+    say "installing arbos-foundry (version ${ARBOS_FOUNDRYUP_VERSION}, tag ${ARBOS_FOUNDRYUP_TAG})"
+
+    uname_s=$(uname -s)
+    PLATFORM=$(tolower "${ARBOS_FOUNDRYUP_PLATFORM:-$uname_s}")
+    EXT="tar.gz"
+    case $PLATFORM in
+      linux|alpine) ;;
+      darwin|mac*)
+        PLATFORM="darwin"
+        ;;
+      mingw*|win*)
+        EXT="zip"
+        PLATFORM="win32"
+        ;;
+      *)
+        err "unsupported platform: $PLATFORM"
+        ;;
+    esac
+
+    uname_m=$(uname -m)
+    ARCHITECTURE=$(tolower "${ARBOS_FOUNDRYUP_ARCH:-$uname_m}")
+    if [ "${ARCHITECTURE}" = "x86_64" ]; then
+      # Redirect stderr to /dev/null to avoid printing errors if non Rosetta.
+      if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+        ARCHITECTURE="arm64" # Rosetta.
+      else
+        ARCHITECTURE="amd64" # Intel.
+      fi
+    elif [ "${ARCHITECTURE}" = "arm64" ] ||[ "${ARCHITECTURE}" = "aarch64" ] ; then
+      ARCHITECTURE="arm64" # Arm.
+    else
+      ARCHITECTURE="amd64" # Amd.
+    fi
+
+    # Compute the URL of the release tarball in the arbos-foundry repository.
+    RELEASE_URL="https://github.com/${ARBOS_FOUNDRYUP_REPO}/releases/download/${ARBOS_FOUNDRYUP_TAG}/"
+    BIN_ARCHIVE_URL="${RELEASE_URL}arbos-foundry_${ARBOS_FOUNDRYUP_VERSION}_${PLATFORM}_${ARCHITECTURE}.$EXT"
+
+    ensure mkdir -p "$FOUNDRY_VERSIONS_DIR"
+
+    # Download and extract the binaries archive
+    say "downloading arbos-forge, arbos-cast, arbos-anvil, and arbos-chisel for $ARBOS_FOUNDRYUP_TAG version"
+    if [ "$PLATFORM" = "win32" ]; then
+      tmp="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
+      tmp="$tmp/arbos-foundry.zip"
+      ensure download "$BIN_ARCHIVE_URL" "$tmp"
+      ensure unzip "$tmp" -d "$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_TAG"
+      rm -f "$tmp"
+    else
+      tmp="$(mktemp -d 2>/dev/null)" || err "failed to create temp dir"
+      tmp="$tmp/arbos-foundry.tar.gz"
+      ensure download "$BIN_ARCHIVE_URL" "$tmp"
+      # Make sure it's a valid tar archive.
+      ensure tar tf "$tmp" 1> /dev/null
+      ensure mkdir -p "$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_TAG"
+      ensure tar -C "$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_TAG" -xvf "$tmp"
+      rm -f "$tmp"
+    fi
+
+    # Use newly installed version.
+    ARBOS_FOUNDRYUP_VERSION=$ARBOS_FOUNDRYUP_TAG
+    use
+
+    say "done!"
+
+  # Install by cloning the repo with the provided branch/tag
+  else
+    need_cmd cargo
+    ARBOS_FOUNDRYUP_BRANCH=${ARBOS_FOUNDRYUP_BRANCH:-master}
+    REPO_PATH="$FOUNDRY_DIR/$ARBOS_FOUNDRYUP_REPO"
+    AUTHOR="$(echo "$ARBOS_FOUNDRYUP_REPO" | cut -d'/' -f1 -)"
+
+    # If repo path does not exist, grab the author from the repo, make a directory in .foundry, cd to it and clone.
+    if [ ! -d "$REPO_PATH" ]; then
+      ensure mkdir -p "$FOUNDRY_DIR/$AUTHOR"
+      cd "$FOUNDRY_DIR/$AUTHOR"
+      ensure git clone "https://github.com/$ARBOS_FOUNDRYUP_REPO"
+    fi
+
+    # Force checkout, discarding any local changes
+    cd "$REPO_PATH"
+    ensure git fetch origin "${ARBOS_FOUNDRYUP_BRANCH}:remotes/origin/${ARBOS_FOUNDRYUP_BRANCH}"
+    ensure git checkout "origin/${ARBOS_FOUNDRYUP_BRANCH}"
+
+    # Create custom version based on the install method, e.g.:
+    # - iosiro-commit-c22c4cc96b0535cd989ee94b79da1b19d236b8db
+    # - iosiro-pr-1
+    # - iosiro-branch-chore-bump-forge-std
+    if [ -n "$ARBOS_FOUNDRYUP_COMMIT" ]; then
+      # If set, checkout specific commit from branch
+      ensure git checkout "$ARBOS_FOUNDRYUP_COMMIT"
+      ARBOS_FOUNDRYUP_VERSION=$AUTHOR-commit-$ARBOS_FOUNDRYUP_COMMIT
+    elif [ -n "$ARBOS_FOUNDRYUP_PR" ]; then
+     ARBOS_FOUNDRYUP_VERSION=$AUTHOR-pr-$ARBOS_FOUNDRYUP_PR
+    else
+      if [ -n "$ARBOS_FOUNDRYUP_BRANCH" ]; then
+        NORMALIZED_BRANCH="$(echo "$ARBOS_FOUNDRYUP_BRANCH" | tr / -)"
+        ARBOS_FOUNDRYUP_VERSION=$AUTHOR-branch-$NORMALIZED_BRANCH
+      fi
+    fi
+    say "installing version $ARBOS_FOUNDRYUP_VERSION"
+
+    # Build the repo.
+    ensure cargo build --bins "${CARGO_BUILD_ARGS[@]}"
+    # Create arbos-foundry custom version directory.
+    ensure mkdir -p "$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_VERSION"
+    for bin in "${BINS[@]}"; do
+      for try_path in target/release/$bin target/release/$bin.exe; do
+        if [ -f "$try_path" ]; then
+          mv -f "$try_path" "$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_VERSION"
+        fi
+      done
+    done
+
+    # Use newly built version.
+    use
+
+    # If help2man is installed, use it to add arbos-foundry man pages.
+    if check_cmd help2man; then
+      for bin in "${BINS[@]}"; do
+        help2man -N "$FOUNDRY_BIN_DIR/$bin" > "$FOUNDRY_MAN_DIR/$bin.1"
+      done
+    fi
+
+    say "done"
+  fi
+}
+
+usage() {
+  cat 1>&2 <<EOF
+The installer for arbos-foundry.
+
+Update or revert to a specific arbos-foundry version with ease.
+
+By default, the latest stable version is installed from built binaries.
+
+USAGE:
+    arbos-foundryup <OPTIONS>
+
+OPTIONS:
+    -h, --help      Print help information
+    -v, --version   Print the version of arbos-foundryup
+    -U, --update    Update arbos-foundryup to the latest version
+    -i, --install   Install a specific version from built binaries
+    -l, --list      List versions installed from built binaries
+    -u, --use       Use a specific installed version from built binaries
+    -b, --branch    Build and install a specific branch
+    -P, --pr        Build and install a specific Pull Request
+    -C, --commit    Build and install a specific commit
+    -r, --repo      Build and install from a remote GitHub repo (uses default branch if no other options are set)
+    -p, --path      Build and install a local repository
+    -j, --jobs      Number of CPUs to use for building arbos-foundry (default: all CPUs)
+    -f, --force     Skip SHA verification for downloaded binaries (INSECURE - use with caution)
+    --arch          Install a specific architecture (supports amd64 and arm64)
+    --platform      Install a specific platform (supports win32, linux, darwin and alpine)
+EOF
+}
+
+version() {
+  say "$ARBOS_FOUNDRYUP_INSTALLER_VERSION"
+  exit 0
+}
+
+update() {
+  say "updating arbos-foundryup..."
+
+  current_version="$ARBOS_FOUNDRYUP_INSTALLER_VERSION"
+
+  # Download the new version.
+  tmp_file="$(mktemp)"
+  ensure download "$ARBOS_FOUNDRYUP_BIN_URL" "$tmp_file"
+
+  # Extract new version from downloaded file.
+  new_version=$(grep -Eo 'ARBOS_FOUNDRYUP_INSTALLER_VERSION="[0-9]+\.[0-9]+\.[0-9]+"' "$tmp_file" | cut -d'"' -f2)
+
+  # If the new version could not be determined, exit gracefully.
+  # This prevents from upgrading to an empty or invalid version.
+  if [ -z "$new_version" ]; then
+    warn "could not determine new arbos-foundryup version. Exiting."
+    rm -f "$tmp_file"
+    exit 0
+  fi
+
+  # If the new version is not greater than the current version, skip the update.
+  # This is to prevent downgrades or unnecessary updates.
+  if ! version_gt "$new_version" "$current_version"; then
+    say "arbos-foundryup is already up to date (installed: $current_version, remote: $new_version)."
+    rm -f "$tmp_file"
+    exit 0
+  fi
+
+  # Overwrite existing arbos-foundryup
+  ensure mv "$tmp_file" "$ARBOS_FOUNDRYUP_BIN_PATH"
+  ensure chmod +x "$ARBOS_FOUNDRYUP_BIN_PATH"
+
+  say "successfully updated arbos-foundryup: $current_version → $new_version"
+  exit 0
+}
+
+list() {
+  if [ -d "$FOUNDRY_VERSIONS_DIR" ]; then
+    for VERSION in $FOUNDRY_VERSIONS_DIR/*; do
+      say "${VERSION##*/}"
+      for bin in "${BINS[@]}"; do
+        bin_path="$VERSION/$bin"
+        if [ -x "$bin_path" ]; then
+          say "- $(ensure "$bin_path" -V)"
+        fi
+      done
+      printf "\n"
+    done
+  else
+    for bin in "${BINS[@]}"; do
+      bin_path="$FOUNDRY_BIN_DIR/$bin"
+      if [ -x "$bin_path" ]; then
+        say "- $(ensure "$bin_path" -V)"
+      fi
+    done
+  fi
+  exit 0
+}
+
+use() {
+  [ -z "$ARBOS_FOUNDRYUP_VERSION" ] && err "no version provided"
+  FOUNDRY_VERSION_DIR="$FOUNDRY_VERSIONS_DIR/$ARBOS_FOUNDRYUP_VERSION"
+  if [ -d "$FOUNDRY_VERSION_DIR" ]; then
+
+    check_bins_in_use
+
+    for bin in "${BINS[@]}"; do
+      bin_path="$FOUNDRY_BIN_DIR/$bin"
+      if [ -f "$FOUNDRY_VERSION_DIR/$bin" ]; then
+        cp "$FOUNDRY_VERSION_DIR/$bin" "$bin_path"
+        # Print usage msg
+        say "use - $(ensure "$bin_path" -V)"
+
+        # Check if the default path of the binary is not in FOUNDRY_BIN_DIR
+        which_path="$(command -v "$bin" || true)"
+        if [ -n "$which_path" ] && [ "$which_path" != "$bin_path" ]; then
+          warn ""
+          cat 1>&2 <<EOF
+There are multiple binaries with the name '$bin' present in your 'PATH'.
+This may be the result of installing '$bin' using another method,
+like Cargo or other package managers.
+You may need to run 'rm $which_path' or move '$FOUNDRY_BIN_DIR'
+in your 'PATH' to allow the newly installed version to take precedence!
+
+EOF
+        fi
+      fi
+    done
+    exit 0
+  else
+    err "version $ARBOS_FOUNDRYUP_VERSION not installed"
+  fi
+}
+
+say() {
+  printf "arbos-foundryup: %s\n" "$1"
+}
+
+warn() {
+  say "warning: ${1}" >&2
+}
+
+err() {
+  say "$1" >&2
+  exit 1
+}
+
+tolower() {
+  echo "$1" | awk '{print tolower($0)}'
+}
+
+compute_sha256() {
+  if check_cmd sha256sum; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+need_cmd() {
+  if ! check_cmd "$1"; then
+    err "need '$1' (command not found)"
+  fi
+}
+
+check_cmd() {
+  command -v "$1" &>/dev/null
+}
+
+check_installer_up_to_date() {
+  say "checking if arbos-foundryup is up to date..."
+
+  if check_cmd curl; then
+    remote_version=$(curl -fsSL "$ARBOS_FOUNDRYUP_BIN_URL" | grep -Eo 'ARBOS_FOUNDRYUP_INSTALLER_VERSION="[0-9]+\.[0-9]+\.[0-9]+"' | cut -d'"' -f2)
+  else
+    remote_version=$(wget -qO- "$ARBOS_FOUNDRYUP_BIN_URL" | grep -Eo 'ARBOS_FOUNDRYUP_INSTALLER_VERSION="[0-9]+\.[0-9]+\.[0-9]+"' | cut -d'"' -f2)
+  fi
+
+  if [ -z "$remote_version" ]; then
+    warn "Could not determine remote arbos-foundryup version. Skipping version check."
+    return 0
+  fi
+
+  if version_gt "$remote_version" "$ARBOS_FOUNDRYUP_INSTALLER_VERSION"; then
+    printf '
+Your installation of arbos-foundryup is out of date.
+
+Installed: %s → Latest: %s
+
+To update, run:
+
+  arbos-foundryup --update
+
+Updating is highly recommended as it gives you access to the latest features and bug fixes.
+
+' "$ARBOS_FOUNDRYUP_INSTALLER_VERSION" "$remote_version" >&2
+  else
+    say "arbos-foundryup is up to date."
+  fi
+}
+
+# Compares two version strings in the format "major.minor.patch".
+# Returns 0 if $1 is greater than $2, 1 if $1 is less than $2, and 1 if they are equal.
+#
+# Assumes that the version strings are well-formed and contain three numeric components separated by dots.
+#
+# Example: version_gt "1.2.3" "1.2.4"
+#          returns 1 (1.2.3 < 1.2.4)
+#          version_gt "1.2.3" "1.2.3"
+#          returns 1 (1.2.3 == 1.2.3)
+#          version_gt "1.2.4" "1.2.3"
+#          returns 0 (1.2.4 > 1.2.3)
+version_gt() {
+  [ "$1" = "$2" ] && return 1
+
+  IFS=. read -r major1 minor1 patch1 <<EOF
+$1
+EOF
+  IFS=. read -r major2 minor2 patch2 <<EOF
+$2
+EOF
+
+  [ "$major1" -gt "$major2" ] && return 0
+  [ "$major1" -lt "$major2" ] && return 1
+  [ "$minor1" -gt "$minor2" ] && return 0
+  [ "$minor1" -lt "$minor2" ] && return 1
+  [ "$patch1" -gt "$patch2" ] && return 0
+  [ "$patch1" -lt "$patch2" ] && return 1
+
+  return 1
+}
+
+check_bins_in_use() {
+  if check_cmd pgrep; then
+    for bin in "${BINS[@]}"; do
+      if pgrep -x "$bin" >/dev/null; then
+        err "Error: '$bin' is currently running. Please stop the process and try again."
+      fi
+    done
+  else
+    warn "Make sure no arbos-foundry process is running during the install process!"
+  fi
+}
+
+# Run a command that should never fail. If the command fails execution
+# will immediately terminate with an error showing the failing command.
+ensure() {
+  if ! "$@"; then err "command failed: $*"; fi
+}
+
+# Downloads $1 into $2 or stdout
+download() {
+  if [ -n "$2" ]; then
+    # output into $2
+    if check_cmd curl; then
+      curl -#o "$2" -L "$1"
+    else
+      wget --show-progress -qO "$2" "$1"
+    fi
+  else
+    # output to stdout
+    if check_cmd curl; then
+      curl -#L "$1"
+    else
+      wget --show-progress -qO- "$1"
+    fi
+  fi
+}
+
+# Banner prompt for arbos-foundry
+banner() {
+  printf '
+
+.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx
+
+   ╔═╗ ╦═╗ ╔╗  ╔═╗ ╔═╗         Arbitrum Stylus development toolkit
+   ╠═╣ ╠╦╝ ╠╩╗ ║ ║ ╚═╗                  for Foundry
+   ╩ ╩ ╩╚═ ╚═╝ ╚═╝ ╚═╝              written in Rust.
+
+.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx
+
+Repo       : https://github.com/iosiro/arbos-foundry
+Docs       : https://docs.arbitrum.io/stylus/stylus-gentle-introduction
+Foundry    : https://book.getfoundry.sh/
+
+.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx.xOx
+
+'
+}
+
+
+main "$@"
