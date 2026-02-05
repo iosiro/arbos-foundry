@@ -1,364 +1,366 @@
-<div align="center">
-  <img src=".github/assets/banner.png" alt="Foundry banner" />
+# arbos-foundry
 
-&nbsp;
+A fork of [Foundry](https://github.com/foundry-rs/foundry) with native support for testing [Arbitrum Stylus](https://docs.arbitrum.io/stylus/stylus-gentle-introduction) programs.
 
-[![Github Actions][gha-badge]][gha-url] [![Telegram Chat][tg-badge]][tg-url] [![Telegram Support][tg-support-badge]][tg-support-url]
-![Foundry](https://img.shields.io/badge/Foundry-grey?style=flat&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAUCAYAAACNiR0NAAAElElEQVR4nH1VUUhUaRg9984YdzBpkqR0Z210rIESIXSabEbcHgydrpNRRj00kWaztj0U1MOW0MOIbD300IvLMqBpMTGYxdoqyoRNDUESBDWwUuPugCSSsTM7u0Oj1/+efdiMcmnP2/fDd77D4f/OB6xCa2urQZbllVICYGtqanK1tLS4AdgAyAAgyzJaW1sNq/ulT4twOGw4fPiwAGDp7Ow8VV1d7bVarRWxWCw/k8mgsbExm0wmZ+Lx+M/Xr1//CcAsSVmSJH01McLhsAEAnE5nx+Tk5B/xeJxOp5N9fX2sqqqixWLhnTt36HA4GIvFGI1GU3V1df5Pe/9D1t7eHkgkEuzo6GBPT49WWloq7Ha7fujQITocDu7atUs3m83i6tWr2okTJ/jixQuePn265zPScDhskGUZe/fubXv8+DFv3rypbdiwQaxbt46RSIT79u3j0NAQb926RVVVOT4+TqvVyvz8fD0YDC5NTk6ysbHxlCRJ/5KSlAAURyKRTFNTkwAg7t69S5/Px76+Pq7GyMgI9+/fz9HRUQIQO3bsEKOjo38DsJCUJADw+/0BVVW7otHo8ps3b4yvXr3CxMQETCYTTCYTNE0DAOTl5SGXy0FRFOzZswdmsxkVFRXLNTU1xmg0+kNvb+/3AGAcGBiI7969Wwcg6urq+OTJE967d49btmzh9PT0R3WJRIKBQIDBYJBTU1NsaGggAGGz2fTe3t5fAeQZAWwuLi4uP3nypOT1emEwGFBeXo7a2losLCygoaEB/f39MJlMCIVCkCQJBw8ehNVqhcfjQXNzs1RSUiKtX7++DEAZqqqq3KFQiABYUFDAM2fOkCQXFxdJkvfv32dhYSG9Xi+vXbvG2dnZj4oDgQCLioqoKAqHhobodDq/Mc7NzUklJSUIBoOw2WzYtm0blpeXsWbNGkxMTODp06doa2vD4OAgNm7cCIvFApLQdR3nzp3Dzp078fLlSxQVFeHdu3cAgIpHjx69/zBUX5k+MDBAt9vNY8eOsbu7m6lUigcOHKDL5WImkyHJz9TGYrEcALsMIPn69esZTdMIgM+ePUNXVxdu376NsrIyuN1uXLp0CWazGcPDw3C5XFBVFWfPnkVNTQ18Pp+ezWY5MzPzO4DfAABHjhzpJslUKqVdvHiR4+PjbG9vZy6XI0kuLS0xmUxSCEGS9Pv9LC0tpdFoZGVlpSaEoM/nuwIAKx/7q5GRkb9CoZBQVVWcP3+ez58/J0mm02kODg7ywoULjMViTKfTtNvtXLt2LTdt2qTncrnlsbGxLICvSUqfrl5HJBLh1NTUkhBCJ8mFhQX29/dTVVUWFBTwwYMH1HWdly9fpqIoeiKRWJqfn2d1dXWnLMuf7zMAHD16tGd+fn7FZy2bzYrKykodAAFQVVV9cXFRkNTevn3Lubk5trS0XPnfxHE4HN8ODw+nV/yanp6mx+Ohx+P5aIMQgmNjY3/W1tZ+t5rsSwG7+fjx4/76+vrm7du32woLC00AkE6n38fj8ZmHDx/+cuPGjR8BJL8YsCtYdQIMALYqilKvKEo9APuHty+egH8A3GfFDJXmxmMAAAAASUVORK5CYII%3D&link=https%3A%2F%2Fbook.getfoundry.sh%2F)
+This project was developed by [iosiro](https://www.iosiro.com/) as part of the [Arbitrum Stylus Sprint](https://blog.arbitrum.io/stylus-sprint/).
 
-[gha-badge]: https://img.shields.io/github/actions/workflow/status/foundry-rs/foundry/test.yml?branch=master
-[gha-url]: https://github.com/foundry-rs/foundry/actions
-[tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Ffoundry_rs
-[tg-url]: https://t.me/foundry_rs
-[tg-support-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=support&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Ffoundry_support
-[tg-support-url]: https://t.me/foundry_support
-
-**[Install](https://getfoundry.sh/getting-started/installation)**
-| [Docs][foundry-docs]
-| [Developer Guidelines](./docs/dev/README.md)
-| [Contributing](./CONTRIBUTING.md)
-| [Crate Docs](https://foundry-rs.github.io/foundry)
-
-</div>
-
----
-
-### Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.
-
-Foundry consists of:
-
-- [**Forge**](#forge): Build, test, fuzz, debug and deploy [Solidity][solidity] contracts, like Hardhat, Brownie, Ape.
-- [**Cast**](#cast): A Swiss Army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- [**Anvil**](#anvil): Fast local Ethereum development node, akin to Hardhat Network, Tenderly.
-- [**Chisel**](#chisel): Fast, utilitarian, and verbose Solidity REPL.
-
-**Need help getting started with Foundry? Read the [📖 Foundry Docs][foundry-docs]!**
-
-![Demo](.github/assets/demo.gif)
+> **Note:** For standard Foundry documentation, see [FOUNDRY_README.md](./FOUNDRY_README.md) or the official [Foundry Book](https://book.getfoundry.sh/).
 
 ## Features
 
-- **High-Performance Compilation**
-
-  - **Fast and Flexible**: Automatically detects and installs the required Solidity compiler version.
-  - **Solidity and Vyper Support**: Fully supports both Solidity and Vyper out-of-the-box.
-  - **Incremental Compilation**: Re-compiles only changed files, saving time.
-  - **Parallelized Pipeline**: Leverages multi-core systems for ultra-fast builds.
-  - **Broad Compatibility**: Supports non-standard directory structures, including [Hardhat repos](https://twitter.com/gakonst/status/1461289225337421829).
-
-- **Advanced Testing**
-
-  - **No Context Switching**: Write tests directly in Solidity.
-  - **Fuzz Testing**: Quickly identify edge cases with input shrinking and counter-example generation.
-  - **Invariant Testing**: Ensure complex system properties hold across a wide range of inputs.
-  - **Debugging Made Easy**: Use [forge-std](https://github.com/foundry-rs/forge-std)'s `console.sol` for flexible debug logging.
-  - **Interactive Debugger**: Step through your Solidity code with Foundry's interactive debugger, making it easy to pinpoint issues.
-
-- **Powerful Runtime Features**
-
-  - **RPC Forking**: Fast and efficient remote RPC forking backed by [Alloy][alloy].
-  - **Lightweight & Portable**: No dependency on Nix or other package managers for installation.
-
-- **Streamlined CI/CD**
-
-  - **Optimized CI**: Accelerate builds, run tests and execute scripts using [Foundry's GitHub action][foundry-gha].
+- **Native Stylus Execution**: Execute Stylus WASM programs directly in Forge tests without requiring a network fork
+- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()` and `vm.getStylusCode()`
+- **Brotli Compression**: Built-in `vm.brotliCompress()` and `vm.brotliDecompress()` cheatcodes for Stylus bytecode handling
+- **ArbOS State**: Automatic initialization of ArbOS state with configurable parameters
+- **Arbitrum Precompiles**: Full support for 13 Arbitrum-specific precompiles (see [Supported Precompiles](#supported-precompiles))
+- **Configurable Stylus Parameters**: Tune ink price, stack depth, free pages, and more via CLI or config
 
 ## Installation
 
-Getting started is very easy:
+Build from source:
 
-Install `foundryup`:
-
-```
-curl -L https://foundry.paradigm.xyz | bash
-```
-
-Next, run `foundryup`.
-
-It will automatically install the latest version of the precompiled binaries: [`forge`](#forge), [`cast`](#cast), [`anvil`](#anvil), and [`chisel`](#chisel).
-
-```
-foundryup
+```bash
+git clone https://github.com/iosiro/arbos-foundry
+cd arbos-foundry
+cargo build --release
 ```
 
-**Done!**
+The binaries are available with both `arbos-*` prefixes and standard Foundry names:
+- `arbos-forge` / `forge`
+- `arbos-cast` / `cast`
+- `arbos-anvil` / `anvil`
+- `arbos-chisel` / `chisel`
 
-For additional details see the [installation guide](https://getfoundry.sh/getting-started/installation) in the [Foundry Docs][foundry-docs].
+## Quick Start
 
-If you're experiencing any issues while installing, check out [Getting Help](#getting-help) and the [FAQ](https://getfoundry.sh/faq).
+### Testing a Stylus Program
 
-## How Fast?
+1. Compile your Stylus program to WASM (e.g., using `cargo stylus`)
 
-Forge is quite fast at both compiling (leveraging `solc` with [foundry-compilers]) and testing.
-
-See the benchmarks below. Older benchmarks against [DappTools][dapptools] can be found in the [v0.2.0 announcement post][benchmark-post] and in the [Convex Shutdown Simulation][convex] repository.
-
-### Testing Benchmarks
-
-| Project                                       | Type                 | [Forge 1.0][foundry-1.0] | [Forge 0.2][foundry-0.2] | DappTools | Speedup        |
-| --------------------------------------------- | -------------------- | ------------------------ | ------------------------ | --------- | -------------- |
-| [vectorized/solady][solady]                   | Unit / Fuzz          | 0.9s                     | 2.3s                     | -         | 2.6x           |
-| [morpho-org/morpho-blue][morpho-blue]         | Invariant            | 0.7s                     | 1m43s                    | -         | 147.1x         |
-| [morpho-org/morpho-blue-oracles][morpho-blue] | Integration (Cold)   | 6.1s                     | 6.3s                     | -         | 1.04x          |
-| [morpho-org/morpho-blue-oracles][morpho-blue] | Integration (Cached) | 0.6s                     | 0.9s                     | -         | 1.50x          |
-| [transmissions11/solmate][solmate]            | Unit / Fuzz          | 2.7s                     | 2.8s                     | 6m34s     | 1.03x / 140.0x |
-| [reflexer-labs/geb][geb]                      | Unit / Fuzz          | 0.2s                     | 0.4s                     | 23s       | 2.0x / 57.5x   |
-
-_In the above benchmarks, compilation was always skipped_
-
-**Takeaway: Forge dramatically outperforms the competition, delivering blazing-fast execution speeds while continuously expanding its robust feature set.**
-
-### Compilation Benchmarks
-
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/build_benchmark_solady_dark.png" width="600px">
-    <img src=".github/assets/build_benchmark_solady_light.png" width="600px">
-  </picture>
-
-<picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/build_benchmark_openzeppelin_dark.png" width="600px">
-    <img src=".github/assets/build_benchmark_openzeppelin_light.png" width="600px">
-  </picture>
-
-&nbsp;
-
-</div>
-
-**Takeaway: Forge compilation is consistently faster than Hardhat by a factor of `2.1x` to `5.2x`, depending on the amount of caching involved.**
-
-## Forge
-
-Forge helps you build, test, fuzz, debug and deploy Solidity contracts.
-
-The best way to understand Forge is to simply try it (in less than 30 seconds!).
-
-First, let's initialize a new `counter` example repository:
-
-```sh
-forge init counter
-```
-
-Next `cd` into `counter` and build :
-
-```sh
-forge build
-```
-
-```console
-[⠊] Compiling...
-[⠔] Compiling 27 files with Solc 0.8.28
-[⠒] Solc 0.8.28 finished in 452.13ms
-Compiler run successful!
-```
-
-Let's [test](https://getfoundry.sh/forge/tests#tests) our contracts:
-
-```sh
-forge test
-```
-
-```console
-[⠊] Compiling...
-No files changed, compilation skipped
-
-Ran 2 tests for test/Counter.t.sol:CounterTest
-[PASS] testFuzz_SetNumber(uint256) (runs: 256, μ: 31121, ~: 31277)
-[PASS] test_Increment() (gas: 31293)
-Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 5.35ms (4.86ms CPU time)
-
-Ran 1 test suite in 5.91ms (5.35ms CPU time): 2 tests passed, 0 failed, 0 skipped (2 total tests)
-```
-
-Finally, let's run our deployment script:
-
-```sh
-forge script script/Counter.s.sol
-```
-
-```console
-[⠊] Compiling...
-No files changed, compilation skipped
-Script ran successfully.
-Gas used: 109037
-
-If you wish to simulate on-chain transactions pass a RPC URL.
-```
-
-Run `forge --help` to explore the full list of available subcommands and their usage.
-
-More documentation can be found in the [forge](https://getfoundry.sh/forge/overview) section of the Foundry Docs.
-
-## Cast
-
-Cast is a Swiss Army knife for interacting with Ethereum applications from the command line.
-
-Here are a few examples of what you can do:
-
-**Check the latest block on Ethereum Mainnet**:
-
-```sh
-cast block-number --rpc-url https://eth.merkle.io
-```
-
-**Check the Ether balance of `vitalik.eth`**
-
-```sh
-cast balance vitalik.eth --ether --rpc-url https://eth.merkle.io
-```
-
-**Replay and trace a transaction**
-
-```sh
-cast run 0x9c32042f5e997e27e67f82583839548eb19dc78c4769ad6218657c17f2a5ed31 --rpc-url https://eth.merkle.io
-```
-
-Optionally, pass `--etherscan-api-key <API_KEY>` to decode transaction traces using verified source maps, providing more detailed and human-readable information.
-
----
-
-Run `cast --help` to explore the full list of available subcommands and their usage.
-
-More documentation can be found in the [cast](https://getfoundry.sh/cast/overview) section of the Foundry Docs.
-
-## Anvil
-
-Anvil is a fast local Ethereum development node.
-
-Let's fork Ethereum mainnet at the latest block:
-
-```sh
-anvil --fork-url https://eth.merkle.io
-```
-
-You can use those same `cast` subcommands against your `anvil` instance:
-
-```sh
-cast block-number
-```
-
----
-
-Run `anvil --help` to explore the full list of available features and their usage.
-
-More documentation can be found in the [anvil](https://getfoundry.sh/anvil/overview) section of the Foundry Docs.
-
-## Chisel
-
-Chisel is a fast, utilitarian, and verbose Solidity REPL.
-
-To use Chisel, simply type `chisel`.
-
-```sh
-chisel
-```
-
-From here, start writing Solidity code! Chisel will offer verbose feedback on each input.
-
-Create a variable `a` and query it:
-
-```console
-➜ uint256 a = 123;
-➜ a
-Type: uint256
-├ Hex: 0x7b
-├ Hex (full word): 0x000000000000000000000000000000000000000000000000000000000000007b
-└ Decimal: 123
-```
-
-Finally, run `!source` to see `a` was applied:
+2. Write a Forge test:
 
 ```solidity
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.28;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
 
-import {Vm} from "forge-std/Vm.sol";
+import "forge-std/Test.sol";
 
-contract REPL {
-    Vm internal constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+contract StylusTest is Test {
+    function testStylusContract() public {
+        // Deploy the Stylus contract from a WASM file
+        address stylusContract = vm.deployStylusCode("path/to/your/program.wasm");
 
-    /// @notice REPL contract entry point
-    function run() public {
-        uint256 a = 123;
+        // Interact with it like any other contract
+        (bool success, bytes memory result) = stylusContract.call(
+            abi.encodeWithSignature("yourFunction()")
+        );
+        assertTrue(success);
     }
 }
 ```
 
----
+3. Run your tests:
 
-Run `chisel --help` to explore the full list of available features and their usage.
+```bash
+forge test
+```
 
-More documentation can be found in the [chisel](https://getfoundry.sh/chisel/overview) section of the Foundry Docs.
+### Using vm.etch for Manual Deployment
+
+You can also manually deploy Stylus bytecode using `vm.etch`:
+
+```solidity
+function testStylusWithEtch() public {
+    // Get compressed Stylus bytecode with magic prefix
+    bytes memory stylusCode = vm.getStylusCode("path/to/program.wasm");
+
+    // Etch to a specific address
+    address stylusContract = address(0x1234);
+    vm.etch(stylusContract, stylusCode);
+
+    // Call the contract
+    (bool success, bytes memory result) = stylusContract.call(abi.encodeWithSignature("echo(bytes)", hex"deadbeef"));
+    assertTrue(success);
+}
+```
+
+## Cheatcodes
+
+### Stylus Deployment
+
+```solidity
+// Deploy a Stylus contract from a WASM file
+address deployed = vm.deployStylusCode(string artifactPath);
+address deployed = vm.deployStylusCode(string artifactPath, bytes constructorArgs);
+address deployed = vm.deployStylusCode(string artifactPath, uint256 value);
+address deployed = vm.deployStylusCode(string artifactPath, bytes constructorArgs, uint256 value);
+address deployed = vm.deployStylusCode(string artifactPath, bytes32 salt);
+// ... and more variants with salt
+
+// Get Stylus bytecode (compressed with magic prefix)
+bytes memory code = vm.getStylusCode(string artifactPath);
+```
+
+### Brotli Compression
+
+```solidity
+// Compress data using Brotli (used by Stylus for WASM compression)
+bytes memory compressed = vm.brotliCompress(bytes data);
+
+// Decompress Brotli data
+bytes memory decompressed = vm.brotliDecompress(bytes compressed);
+```
+
+## WASM Processing
+
+When you use `vm.deployStylusCode()` or `vm.getStylusCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
+
+### 1. Metadata Stripping
+
+Custom and unknown WASM sections are removed to:
+- Remove sensitive user metadata (build paths, timestamps, etc.)
+- Reduce binary size for cheaper deployment
+- Match the exact behavior of the official Stylus tooling
+
+### 2. Reference Type Cleanup
+
+The WASM is converted to WAT (text format) and back to binary to remove dangling reference types that are not yet supported by Arbitrum chain backends.
+
+### 3. Brotli Compression
+
+The stripped WASM is compressed using Brotli (quality 11, window 22) and prefixed with the Stylus discriminant (`0xEFF00000`).
+
+### Supported Input Formats
+
+- `path/to/contract.wasm` - Uncompressed WASM (will be stripped and compressed)
+- `path/to/contract.wasm.br` - Pre-compressed WASM (used as-is if already prefixed)
+
+## Program Activation and Caching
+
+Stylus programs must be **activated** before execution. Activation compiles the WASM to native code and stores program metadata in ArbOS state.
+
+### Automatic Activation
+
+By default, arbos-foundry **automatically activates** programs when they are first called:
+
+```solidity
+// Program is automatically activated on first call
+address stylus = vm.deployStylusCode("counter.wasm");
+(bool success,) = stylus.call(abi.encodeWithSignature("increment()"));
+// ^ Activation happens here transparently
+```
+
+To disable automatic activation (requiring explicit `ArbWasm.activateProgram()`):
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+disable_auto_activate_stylus = true
+```
+
+### Program Caching
+
+Activated programs are cached in an LRU cache (up to 1024 entries) to avoid recompilation on subsequent calls. Additionally, ArbOS maintains a **block cache** for recently-used programs within a block.
+
+**Caching behavior:**
+- Programs marked as `cached` use lower initialization gas costs
+- The `block_cache_size` parameter controls how many programs are cached per block (default: 32)
+- Programs used multiple times in the same block automatically benefit from caching
+
+To disable automatic caching:
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+disable_auto_cache_stylus = true
+```
+
+### Gas Costs
+
+Program execution incurs several gas costs:
+
+| Cost Type | Description |
+|-----------|-------------|
+| **Init Cost** | One-time cost when program is not cached: `(min_init_gas * 128) + (init_cost * init_cost_scalar * 2%)` |
+| **Cached Cost** | Lower cost for cached programs: `(min_cached_init_gas * 32) + (cached_cost * cached_cost_scalar * 2%)` |
+| **Page Cost** | Memory allocation: linear cost per page + exponential growth factor |
+| **Ink Cost** | Execution metering (1 gas = `ink_price` ink, default 10000) |
+
+### Manual Activation via ArbWasm
+
+For explicit control, you can activate programs through the ArbWasm precompile:
+
+```solidity
+interface IArbWasm {
+    function activateProgram(address program) external payable returns (uint16 version, uint256 dataFee);
+}
+
+contract ManualActivationTest is Test {
+    IArbWasm constant ARBWASM = IArbWasm(address(0x71));
+
+    function testManualActivation() public {
+        address stylus = vm.deployStylusCode("counter.wasm");
+
+        // Manually activate (pays data fee for on-chain storage)
+        (uint16 version, uint256 dataFee) = ARBWASM.activateProgram{value: 1 ether}(stylus);
+
+        // Now call the program
+        (bool success,) = stylus.call(abi.encodeWithSignature("increment()"));
+        assertTrue(success);
+    }
+}
+```
+
+### Program Expiry
+
+Activated programs expire after `expiry_days` (default: 365 days). Expired programs must be reactivated. Use `ArbWasm.codehashKeepalive()` to extend program lifetime before expiry.
+
+## Supported Precompiles
+
+This fork includes full support for Arbitrum-specific precompiles via [arbos-revm](https://github.com/iosiro/arbos-revm):
+
+| Address | Contract | Description |
+|---------|----------|-------------|
+| `0x64` | **ArbSys** | System-level L2 functionality (block number, chain ID, L2-to-L1 messaging) |
+| `0x65` | **ArbInfo** | Chain information queries |
+| `0x66` | **ArbAddressTable** | Address compression utilities |
+| `0x6b` | **ArbOwnerPublic** | Public admin information |
+| `0x6c` | **ArbGasInfo** | Gas pricing, L1 fees, and cost estimation |
+| `0x6d` | **ArbAggregator** | Preferred aggregator configuration |
+| `0x6e` | **ArbRetryableTx** | Retryable transaction management |
+| `0x6f` | **ArbStatistics** | Block statistics |
+| `0x70` | **ArbOwner** | Admin functions (restricted) |
+| `0x71` | **ArbWasm** | Stylus program management (activation, versioning, parameters) |
+| `0x72` | **ArbWasmCache** | Program caching control |
+| `0x73` | **ArbNativeTokenManager** | Native token management |
+| `0xff` | **ArbDebug** | Debug utilities |
+
+### Example: Using ArbSys
+
+```solidity
+interface IArbSys {
+    function arbBlockNumber() external view returns (uint256);
+    function arbChainID() external view returns (uint256);
+    function arbOSVersion() external view returns (uint256);
+}
+
+contract ArbSysTest is Test {
+    IArbSys constant ARBSYS = IArbSys(address(0x64));
+
+    function testArbSys() public {
+        uint256 blockNum = ARBSYS.arbBlockNumber();
+        uint256 chainId = ARBSYS.arbChainID();
+        uint256 arbosVersion = ARBSYS.arbOSVersion();
+    }
+}
+```
+
+### Example: Using ArbGasInfo
+
+```solidity
+interface IArbGasInfo {
+    function getMinimumGasPrice() external view returns (uint256);
+    function getL1BaseFeeEstimate() external view returns (uint256);
+    function getPricesInWei() external view returns (uint256, uint256, uint256, uint256, uint256, uint256);
+}
+
+contract GasInfoTest is Test {
+    IArbGasInfo constant ARBGASINFO = IArbGasInfo(address(0x6c));
+
+    function testGasInfo() public {
+        uint256 minGasPrice = ARBGASINFO.getMinimumGasPrice();
+        uint256 l1BaseFee = ARBGASINFO.getL1BaseFeeEstimate();
+    }
+}
+```
 
 ## Configuration
 
-Foundry is highly configurable, allowing you to tailor it to your needs. Configuration is managed via a file called [`foundry.toml`](./crates/config) located in the root of your project or any parent directory. For a full list of configuration options, refer to the [config package documentation](./crates/config/README.md#all-options).
+### CLI Options
 
-**Profiles and Namespaces**
+```bash
+arbos-forge test \
+  --stylus-version 2 \
+  --stylus-ink-price 10000 \
+  --stylus-max-stack-depth 262144 \
+  --free-pages 2
+```
 
-- Configuration can be organized into **profiles**, which are arbitrarily namespaced for flexibility.
-- The default profile is named `default`. Learn more in the [Default Profile section](./crates/config/README.md#default-profile).
-- To select a different profile, set the `FOUNDRY_PROFILE` environment variable.
-- Override specific settings using environment variables prefixed with `FOUNDRY_` (e.g., `FOUNDRY_SRC`).
+### foundry.toml
 
----
+```toml
+[profile.default.stylus]
+stylus_version = 2
+ink_price = 10000
+max_stack_depth = 262144
+free_pages = 2
+page_gas = 1000
+expiry_days = 365
+```
 
-You can find additional [setup and configurations guides](https://getfoundry.sh/config/overview) in the [Foundry Docs][foundry-docs] and in the [config crate](./crates/config/README.md):
+### Inline Configuration
 
-- [Configuring with `foundry.toml`](https://getfoundry.sh/config/overview)
-- [Setting up VSCode][vscode-setup]
-- [Shell autocompletions][shell-setup]
+Configure Stylus parameters at the contract or function level:
 
-## Contributing
+```solidity
+/// forge-config: default.stylus.stylus_version = 5
+/// forge-config: default.stylus.ink_price = 20000
+contract MyStylusTest is Test {
+    // Tests in this contract use stylus_version=5 and ink_price=20000
+}
+```
 
-See our [contributing guidelines](./CONTRIBUTING.md).
+Function-level overrides:
 
-## Getting Help
+```solidity
+contract MyStylusTest is Test {
+    /// forge-config: default.stylus.ink_price = 15000
+    function testWithCustomInkPrice() public {
+        // This test uses ink_price=15000
+    }
+}
+```
 
-First, see if the answer to your question can be found in the [Foundry Docs][foundry-docs], or in the relevant crate.
+### All Stylus Configuration Options
 
-If the answer is not there:
+| Option | CLI Flag | Description | Default |
+|--------|----------|-------------|---------|
+| `arbos_version` | `--arbos-version` | ArbOS version | - |
+| `stylus_version` | `--stylus-version` | Stylus version | 2 |
+| `ink_price` | `--stylus-ink-price` | Price of ink in gas | 10000 |
+| `max_stack_depth` | `--stylus-max-stack-depth` | Maximum WASM stack depth | 262144 |
+| `free_pages` | `--free-pages` | Free WASM pages per program | 2 |
+| `page_gas` | `--stylus-page-gas` | Gas cost per page | - |
+| `page_ramp` | `--stylus-page-ramp` | Gas ramp for pages | - |
+| `page_limit` | `--stylus-page-limit` | Maximum pages | - |
+| `expiry_days` | `--stylus-expiry-days` | Days until program expiry | - |
+| `keepalive_days` | `--stylus-keepalive-days` | Days to keep program alive | - |
+| `block_cache_size` | `--stylus-block-cache-size` | Block cache size | - |
+| `max_wasm_size` | `--stylus-max-wasm-size` | Maximum WASM size | - |
+| `deployer_address` | `--stylus-deployer-address` | Stylus deployer contract address | - |
+| `disable_auto_cache_stylus` | `--stylus-disable-auto-cache` | Disable auto caching | false |
+| `disable_auto_activate_stylus` | `--stylus-disable-auto-activate` | Disable auto activation | false |
+| `debug_mode_stylus` | `--stylus-debug` | Enable debug mode | false |
 
-- Join the [support Telegram][tg-support-url] to get help, or
-- Open a [discussion](https://github.com/foundry-rs/foundry/discussions/new) with your question, or
-- Open an issue with [the bug](https://github.com/foundry-rs/foundry/issues/new)
+## Differences from Upstream Foundry
 
-If you want to contribute, or follow along with contributor discussion, you can use our [main telegram](https://t.me/foundry_rs) to chat with us about the development of Foundry!
+This fork is based on Foundry v1.5.1 with the following changes:
+
+- **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
+- **Added**: ArbOS state initialization with configurable parameters
+- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`)
+- **Added**: Brotli compression cheatcodes (`brotliCompress`, `brotliDecompress`)
+- **Added**: 13 Arbitrum precompiles (ArbSys, ArbWasm, ArbGasInfo, etc.)
+- **Added**: Stylus configuration options (CLI, foundry.toml, inline)
+- **Removed**: Optimism network support
+- **Removed**: Celo network support
 
 ## License
 
-Licensed under either of [Apache License](./LICENSE-APACHE), Version
-2.0 or [MIT License](./LICENSE-MIT) at your option.
-
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in these crates by you, as defined in the Apache-2.0 license,
-shall be dual licensed as above, without any additional terms or conditions.
+Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or [MIT License](./LICENSE-MIT) at your option.
 
 ## Acknowledgements
 
-- Foundry is a clean-room rewrite of the testing framework [DappTools][dapptools]. None of this would have been possible without the DappHub team's work over the years.
-- [Matthias Seitz](https://twitter.com/mattsse_): Created [ethers-solc] (now [foundry-compilers]) which is the backbone of our compilation pipeline, as well as countless contributions to ethers, in particular the `abigen` macros.
-- [Rohit Narurkar](https://twitter.com/rohitnarurkar): Created the Rust Solidity version manager [svm-rs](https://github.com/roynalnaruto/svm-rs) which we use to auto-detect and manage multiple Solidity versions.
-- [Brock Elmore](https://twitter.com/brockjelmore): For extending the VM's cheatcodes and implementing [structured call tracing](https://github.com/foundry-rs/foundry/pull/192), a critical feature for debugging smart contract calls.
-- Thank you to [Depot](https://depot.dev) for sponsoring us with their fast GitHub runners and sccache, which we use in CI to reduce build and test times significantly.
-- All the other [contributors](https://github.com/foundry-rs/foundry/graphs/contributors) to the [ethers-rs](https://github.com/gakonst/ethers-rs), [alloy][alloy] & [foundry](https://github.com/foundry-rs/foundry) repositories and chatrooms.
-
-[solidity]: https://soliditylang.org/
-[foundry-docs]: https://getfoundry.sh
-[foundry-gha]: https://github.com/foundry-rs/foundry-toolchain
-[foundry-compilers]: https://github.com/foundry-rs/compilers
-[ethers-solc]: https://github.com/gakonst/ethers-rs/tree/master/ethers-solc/
-[solady]: https://github.com/Vectorized/solady
-[openzeppelin]: https://github.com/OpenZeppelin/openzeppelin-contracts/tree/release-v5.1
-[morpho-blue]: https://github.com/morpho-org/morpho-blue
-[foundry-compilers]: https://github.com/foundry-rs/compilers
-[solmate]: https://github.com/transmissions11/solmate/
-[geb]: https://github.com/reflexer-labs/geb
-[benchmark-post]: https://www.paradigm.xyz/2022/03/foundry-02#blazing-fast-compilation--testing
-[convex]: https://github.com/mds1/convex-shutdown-simulation
-[vscode-setup]: https://getfoundry.sh/config/vscode.html
-[shell-setup]: https://getfoundry.sh/config/shell-autocompletion.html
-[foundry-0.2]: https://github.com/foundry-rs/foundry/releases/tag/nightly-5b7e4cb3c882b28f3c32ba580de27ce7381f415a
-[foundry-1.0]: https://github.com/foundry-rs/foundry/releases/tag/nightly-59f354c179f4e7f6d7292acb3d068815c79286d1
-[dapptools]: https://github.com/dapphub/dapptools
-[alloy]: https://github.com/alloy-rs/alloy
+- [Foundry](https://github.com/foundry-rs/foundry) - The blazing fast Ethereum development toolkit this fork is based on
+- [Arbitrum](https://arbitrum.io/) - For creating Stylus and the Stylus Sprint program
+- [iosiro](https://www.iosiro.com/) - Development of this fork
