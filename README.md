@@ -9,7 +9,7 @@ This project was developed by [iosiro](https://www.iosiro.com/) as part of the [
 ## Features
 
 - **Native Stylus Execution**: Execute Stylus WASM programs directly in Forge tests without requiring a network fork
-- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()` and `vm.getStylusCode()`
+- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()`, `vm.getStylusCode()`, and `vm.getStylusInitCode()`
 - **Brotli Compression**: Built-in `vm.brotliCompress()` and `vm.brotliDecompress()` cheatcodes for Stylus bytecode handling
 - **ArbOS State**: Automatic initialization of ArbOS state with configurable parameters
 - **Arbitrum Precompiles**: Full support for 13 Arbitrum-specific precompiles (see [Supported Precompiles](#supported-precompiles))
@@ -141,6 +141,9 @@ address deployed = vm.deployStylusCode(string artifactPath, bytes32 salt);
 
 // Get Stylus bytecode (compressed with magic prefix)
 bytes memory code = vm.getStylusCode(string artifactPath);
+
+// Get init code for CREATE/CREATE2 deployment
+bytes memory initCode = vm.getStylusInitCode(string artifactPath);
 ```
 
 ### Brotli Compression
@@ -155,7 +158,7 @@ bytes memory decompressed = vm.brotliDecompress(bytes compressed);
 
 ## WASM Processing
 
-When you use `vm.deployStylusCode()` or `vm.getStylusCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
+When you use `vm.deployStylusCode()`, `vm.getStylusCode()`, or `vm.getStylusInitCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
 
 ### 1. Metadata Stripping
 
@@ -390,7 +393,7 @@ This fork is based on Foundry v1.5.1 with the following changes:
 
 - **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
 - **Added**: ArbOS state initialization with configurable parameters
-- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`)
+- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`, `getStylusInitCode`)
 - **Added**: Brotli compression cheatcodes (`brotliCompress`, `brotliDecompress`)
 - **Added**: 13 Arbitrum precompiles (ArbSys, ArbWasm, ArbGasInfo, etc.)
 - **Added**: Stylus configuration options (CLI, foundry.toml, inline)
