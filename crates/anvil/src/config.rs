@@ -1068,6 +1068,7 @@ impl NodeConfig {
         // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the
         // caller is a contract. So we disable the check by default.
         cfg.inner.disable_eip3607 = true;
+        cfg.inner.disable_eip3541 = !self.stylus_config.disable_stylus_deployment;
         cfg.inner.disable_block_gas_limit = self.disable_block_gas_limit;
 
         if !self.enable_tx_gas_limit {
