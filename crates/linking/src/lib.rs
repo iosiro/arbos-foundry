@@ -705,7 +705,7 @@ mod tests {
                     "default/linking/nested/Nested.t.sol:NestedLib",
                     &[(
                         "default/linking/nested/Nested.t.sol:Lib",
-                        address!("0xd5d0c56ae71393246e46950ee40f14dcb0898849"),
+                        address!("0x19fa389ba0eb91a67036dd918e951b47d850c4b0"),
                     )],
                 )
                 .assert_dependencies(
@@ -715,12 +715,12 @@ mod tests {
                         // have the same address and nonce.
                         (
                             "default/linking/nested/Nested.t.sol:Lib",
-                            Address::from_str("0xd5d0c56ae71393246e46950ee40f14dcb0898849")
+                            Address::from_str("0x19fa389ba0eb91a67036dd918e951b47d850c4b0")
                                 .unwrap(),
                         ),
                         (
                             "default/linking/nested/Nested.t.sol:NestedLib",
-                            Address::from_str("0x4182c6ba261accf5dc1202ba47496cfbf0650428")
+                            Address::from_str("0x1c7edef214838be7723eca84ccbe91ee7cbc98cf")
                                 .unwrap(),
                         ),
                     ],
@@ -730,12 +730,12 @@ mod tests {
                     &[
                         (
                             "default/linking/nested/Nested.t.sol:Lib",
-                            Address::from_str("0xd5d0c56ae71393246e46950ee40f14dcb0898849")
+                            Address::from_str("0x19fa389ba0eb91a67036dd918e951b47d850c4b0")
                                 .unwrap(),
                         ),
                         (
                             "default/linking/nested/Nested.t.sol:NestedLib",
-                            Address::from_str("0x4182c6ba261accf5dc1202ba47496cfbf0650428")
+                            Address::from_str("0x1c7edef214838be7723eca84ccbe91ee7cbc98cf")
                                 .unwrap(),
                         ),
                     ],

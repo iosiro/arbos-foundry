@@ -334,6 +334,7 @@ interface Vm {
     function getStorageAccesses() external view returns (StorageAccess[] memory storageAccesses);
     function getStorageSlots(address target, string calldata variableName) external view returns (uint256[] memory slots);
     function getStylusCode(string calldata artifactPath) external view returns (bytes memory);
+    function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory);
     function getWallets() external view returns (address[] memory wallets);
     function indexOf(string calldata input, string calldata key) external pure returns (uint256);
     function interceptInitcode() external;

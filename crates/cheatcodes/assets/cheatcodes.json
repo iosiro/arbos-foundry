@@ -6807,7 +6807,7 @@
     {
       "func": {
         "id": "getStylusCode",
-        "description": "Returns the deployment bytecode for a Stylus contract suitable for use with the StylusDeployer contract.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nApplies the same compression and prefixing logic as `deployStylusCode`.",
+        "description": "Returns the compressed and prefixed Stylus bytecode (runtime code) for a contract.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nApplies the same compression and prefixing logic as `deployStylusCode`.\nThis returns raw runtime bytecode without an init code wrapper, suitable for use with `vm.etch`.",
         "declaration": "function getStylusCode(string calldata artifactPath) external view returns (bytes memory);",
         "visibility": "external",
         "mutability": "view",
@@ -6818,6 +6818,26 @@
           186,
           7,
           49
+        ]
+      },
+      "group": "filesystem",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
+        "id": "getStylusInitCode",
+        "description": "Returns init code for a Stylus contract suitable for CREATE/CREATE2 or the StylusDeployer contract.\nTakes in the relative path to the WASM or Brotli compressed WASM binary.\nThe returned bytecode wraps the compressed Stylus code in EVM init code that\ndeploys it as contract code when executed via CREATE or CREATE2.",
+        "declaration": "function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory);",
+        "visibility": "external",
+        "mutability": "view",
+        "signature": "getStylusInitCode(string)",
+        "selector": "0x7fb2f6d1",
+        "selectorBytes": [
+          127,
+          178,
+          246,
+          209
         ]
       },
       "group": "filesystem",
