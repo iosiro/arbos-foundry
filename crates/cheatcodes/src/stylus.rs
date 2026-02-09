@@ -83,6 +83,13 @@ impl Cheatcode for getStylusCodeCall {
     }
 }
 
+impl Cheatcode for getStylusInitCodeCall {
+    fn apply(&self, state: &mut Cheatcodes) -> Result {
+        let Self { artifactPath: path } = self;
+        get_stylus_init_code(state, path)
+    }
+}
+
 impl Cheatcode for brotliCompressCall {
     fn apply(&self, _state: &mut Cheatcodes) -> Result {
         let Self { data } = self;
@@ -275,12 +282,20 @@ fn get_init_code_of_empty_constructor(bytecode: Vec<u8>) -> Vec<u8> {
     init
 }
 
-/// Returns the deployment bytecode for a Stylus contract suitable for use with the StylusDeployer
-/// contract. This applies the same compression and prefixing logic as deployStylusCode, but returns
-/// the raw bytecode without the init code wrapper, since StylusDeployer handles deployment itself.
+/// Returns the compressed and prefixed Stylus bytecode (runtime code) for a contract.
+/// This applies the same compression and prefixing logic as deployStylusCode, but returns
+/// the raw bytecode without the init code wrapper. Suitable for use with `vm.etch`.
 fn get_stylus_code(state: &Cheatcodes, path: &str) -> Result {
     let bytecode = get_stylus_bytecode(state, path)?;
     Ok(bytecode.abi_encode())
+}
+
+/// Returns init code for a Stylus contract suitable for CREATE/CREATE2 or the StylusDeployer.
+/// Wraps the compressed bytecode in EVM init code using `get_init_code_of_empty_constructor`.
+fn get_stylus_init_code(state: &Cheatcodes, path: &str) -> Result {
+    let bytecode = get_stylus_bytecode(state, path)?;
+    let init_code = get_init_code_of_empty_constructor(bytecode.to_vec());
+    Ok(Bytes::from(init_code).abi_encode())
 }
 
 /// Compresses the given data using Brotli compression.

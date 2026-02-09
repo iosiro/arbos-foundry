@@ -9,7 +9,7 @@ This project was developed by [iosiro](https://www.iosiro.com/) as part of the [
 ## Features
 
 - **Native Stylus Execution**: Execute Stylus WASM programs directly in Forge tests without requiring a network fork
-- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()` and `vm.getStylusCode()`
+- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()`, `vm.getStylusCode()`, and `vm.getStylusInitCode()`
 - **Brotli Compression**: Built-in `vm.brotliCompress()` and `vm.brotliDecompress()` cheatcodes for Stylus bytecode handling
 - **ArbOS State**: Automatic initialization of ArbOS state with configurable parameters
 - **Arbitrum Precompiles**: Full support for 13 Arbitrum-specific precompiles (see [Supported Precompiles](#supported-precompiles))
@@ -141,7 +141,44 @@ address deployed = vm.deployStylusCode(string artifactPath, bytes32 salt);
 
 // Get Stylus bytecode (compressed with magic prefix)
 bytes memory code = vm.getStylusCode(string artifactPath);
+
+// Get init code for CREATE/CREATE2 deployment
+bytes memory initCode = vm.getStylusInitCode(string artifactPath);
 ```
+
+#### How `deployStylusCode` Works
+
+`deployStylusCode` delegates to the **StylusDeployer** contract (at `0xcEcba2F1DC234f70Dd89F2041029807F8D03A990` on Arbitrum), which atomically:
+
+1. Deploys the compressed bytecode via CREATE (or CREATE2 when a `salt` is provided)
+2. Activates the program via the ARB_WASM precompile (paying the activation data fee)
+3. Calls the Stylus constructor if `constructorArgs` are provided
+
+This produces a **single CALL transaction** when broadcasting, ensuring on-chain replay deploys a fully activated contract.
+
+In local tests (no broadcast), the StylusDeployer is deployed on-demand. When broadcasting, the StylusDeployer must already exist on-chain (it is pre-deployed on Arbitrum networks). A custom deployer address can be configured via:
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+deployer_address = "0x..."
+```
+
+#### Broadcasting Stylus Deployments
+
+`deployStylusCode` is fully compatible with `forge script --broadcast`:
+
+```solidity
+contract DeployStylus is Script {
+    function run() external {
+        vm.startBroadcast();
+        address deployed = vm.deployStylusCode("path/to/program.wasm");
+        vm.stopBroadcast();
+    }
+}
+```
+
+The broadcast captures a single transaction: a CALL to the StylusDeployer with the activation data fee automatically estimated (actual fee + 20% buffer). The StylusDeployer refunds any excess ETH to the sender.
 
 ### Brotli Compression
 
@@ -155,7 +192,7 @@ bytes memory decompressed = vm.brotliDecompress(bytes compressed);
 
 ## WASM Processing
 
-When you use `vm.deployStylusCode()` or `vm.getStylusCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
+When you use `vm.deployStylusCode()`, `vm.getStylusCode()`, or `vm.getStylusInitCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
 
 ### 1. Metadata Stripping
 
@@ -390,7 +427,7 @@ This fork is based on Foundry v1.5.1 with the following changes:
 
 - **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
 - **Added**: ArbOS state initialization with configurable parameters
-- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`)
+- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`, `getStylusInitCode`)
 - **Added**: Brotli compression cheatcodes (`brotliCompress`, `brotliDecompress`)
 - **Added**: 13 Arbitrum precompiles (ArbSys, ArbWasm, ArbGasInfo, etc.)
 - **Added**: Stylus configuration options (CLI, foundry.toml, inline)
