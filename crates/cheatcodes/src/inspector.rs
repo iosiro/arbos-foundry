@@ -890,7 +890,7 @@ impl Cheatcodes {
         self.apply_accesslist(ecx);
 
         // Apply our broadcast
-        if let Some(broadcast) = &self.broadcast {
+        if let Some(broadcast) = &mut self.broadcast {
             // Additional check as transfers in forge scripts seem to be estimated at 2300
             // by revm leading to "Intrinsic gas too low" failure when simulated on chain.
             let is_fixed_gas_limit = call.gas_limit >= 21_000 && !self.dynamic_gas_limit;
@@ -899,8 +899,16 @@ impl Cheatcodes {
             // We only apply a broadcast *to a specific depth*.
             //
             // We do this because any subsequent contract calls *must* exist on chain and
-            // we only want to grab *this* call, not internal ones
-            if curr_depth == broadcast.depth && call.caller == broadcast.original_caller {
+            // we only want to grab *this* call, not internal ones.
+            // Additionally, `call_from_code` allows cheatcode-internal exec_call to be
+            // captured as a broadcastable CALL (e.g., deployStylusCode via StylusDeployer).
+            let is_call_from_code = broadcast.call_from_code;
+            if is_call_from_code {
+                broadcast.call_from_code = false;
+            }
+            if (curr_depth == broadcast.depth && call.caller == broadcast.original_caller)
+                || is_call_from_code
+            {
                 // At the target depth we set `msg.sender` & tx.origin.
                 // We are simulating the caller as being an EOA, so *both* must be set to the
                 // broadcast.origin.

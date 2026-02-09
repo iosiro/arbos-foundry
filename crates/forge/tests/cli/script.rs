@@ -3422,3 +3422,75 @@ forgetest_async!(can_execute_script_with_createx_and_via_ir, |prj, cmd| {
         ])
         .assert_success();
 });
+
+// Test broadcasting a deployStylusCode call against a local anvil with StylusDeployer deployed.
+forgetest_async!(can_broadcast_deploy_stylus_code, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+
+    // Spawn anvil and set the StylusDeployer runtime code at the well-known address.
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    api.anvil_set_code(
+        foundry_evm::constants::DEFAULT_STYLUS_DEPLOYER,
+        Bytes::from_static(foundry_evm::constants::DEFAULT_STYLUS_DEPLOYER_RUNTIME_CODE),
+    )
+    .await
+    .unwrap();
+
+    // Copy the Stylus WASM fixture into the test project.
+    let fixtures_dir = prj.root().join("fixtures/Stylus");
+    fs::create_dir_all(&fixtures_dir).unwrap();
+    fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/fixtures/Stylus/foundry_stylus_program.wasm"),
+        fixtures_dir.join("foundry_stylus_program.wasm"),
+    )
+    .unwrap();
+
+    // Configure fs_permissions so the cheatcode can read the fixture.
+    prj.update_config(|config| {
+        config.fs_permissions = foundry_config::FsPermissions::new(vec![
+            foundry_config::fs_permissions::PathPermission::read("fixtures"),
+        ]);
+    });
+
+    // Write a script that broadcasts a deployStylusCode call.
+    let script = prj.add_source(
+        "DeployStylusScript",
+        r#"
+import "forge-std/Script.sol";
+
+interface VmExt {
+    function deployStylusCode(string calldata artifactPath) external returns (address);
+}
+
+contract DeployStylusScript is Script {
+    function run() external {
+        VmExt vmExt = VmExt(address(vm));
+        vm.startBroadcast();
+        address deployed = vmExt.deployStylusCode("fixtures/Stylus/foundry_stylus_program.wasm");
+        vm.stopBroadcast();
+        require(deployed != address(0), "deployed address is zero");
+    }
+}
+"#,
+    );
+
+    let deploy_contract = script.display().to_string() + ":DeployStylusScript";
+    let private_key = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+    cmd.set_current_dir(prj.root());
+    cmd.args([
+        "script",
+        &deploy_contract,
+        "--root",
+        prj.root().to_str().unwrap(),
+        "--fork-url",
+        &handle.http_endpoint(),
+        "-vvvvv",
+        "--broadcast",
+        "--slow",
+        "--private-key",
+        private_key,
+    ])
+    .assert_success();
+});

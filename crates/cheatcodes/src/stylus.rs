@@ -1,24 +1,33 @@
 use std::{fs, path::PathBuf};
 
-use alloy_primitives::{Address, Bytes, U256, address, hex};
-use alloy_sol_types::SolValue;
+use alloy_primitives::{Address, Bytes, FixedBytes, U256, hex};
+use alloy_sol_types::{SolCall, SolValue, sol};
 use arbos_revm::{
     state::program::activate_program,
     stylus_executor::stylus_code,
     utils::{Dictionary, brotli_compress, brotli_decompress, strip_wasm_for_stylus},
 };
 use foundry_config::fs_permissions::FsAccessKind;
+use foundry_evm_core::constants::{DEFAULT_STYLUS_DEPLOYER, DEFAULT_STYLUS_DEPLOYER_RUNTIME_CODE};
 use revm::{
-    context::{ContextTr, CreateScheme, JournalTr},
-    interpreter::{CallInputs, CallScheme, CreateInputs},
+    bytecode::Bytecode,
+    context::{ContextTr, JournalTr},
+    interpreter::{CallInputs, CallScheme},
+    primitives::KECCAK_EMPTY,
 };
 use spec::Vm::*;
 
 use crate::{Cheatcode, Cheatcodes, CheatcodesExecutor, CheatsCtxt, Result};
 
-/// Default address of the StylusDeployer contract.
-const DEFAULT_STYLUS_DEPLOYER_ADDRESS: Address =
-    address!("0xcEcba2F1DC234f70Dd89F2041029807F8D03A990");
+/// Generous activation fee budget (1 ETH). StylusDeployer sends `msg.value - initValue` to
+/// ARB_WASM for activation and refunds excess to `msg.sender`.
+const ACTIVATION_FEE_BUDGET: U256 = U256::from_limbs([1_000_000_000_000_000_000u64, 0, 0, 0]);
+
+sol! {
+    /// StylusDeployer.deploy function ABI
+    function deploy(bytes initCode, bytes constructorArgs, uint256 value, bytes32 salt)
+        external payable returns (address);
+}
 
 impl Cheatcode for deployStylusCode_0Call {
     fn apply_full(&self, ccx: &mut CheatsCtxt, executor: &mut dyn CheatcodesExecutor) -> Result {
@@ -104,9 +113,15 @@ impl Cheatcode for brotliDecompressCall {
     }
 }
 
-/// Helper function to deploy stylus contract from artifact code.
-/// Matches StylusDeployer.sol behavior: deploys, activates via ARB_WASM precompile, then
-/// initializes. Uses CREATE2 scheme if salt specified.
+/// Deploys a Stylus contract via the StylusDeployer contract.
+///
+/// Delegates to the StylusDeployer contract which atomically handles:
+/// 1. Deploy compressed bytecode via CREATE/CREATE2
+/// 2. Activate via ARB_WASM precompile
+/// 3. Call constructor if args provided
+///
+/// This produces a single CALL transaction when broadcasting, ensuring on-chain
+/// replay deploys a fully activated contract.
 fn deploy_stylus_code(
     ccx: &mut CheatsCtxt,
     executor: &mut dyn CheatcodesExecutor,
@@ -118,72 +133,132 @@ fn deploy_stylus_code(
     let compressed_bytecode = get_stylus_bytecode(ccx.state, path)?;
     let init_code = get_init_code_of_empty_constructor(compressed_bytecode.to_vec());
 
-    let scheme =
-        if let Some(salt) = salt { CreateScheme::Create2 { salt } } else { CreateScheme::Create };
+    // Build constructor calldata: stylus_constructor() selector + args, or empty
+    let constructor_calldata = if let Some(args) = constructor_args {
+        // cast sig 'stylus_constructor()' => 0x5585258d
+        let mut calldata = vec![0x55, 0x85, 0x25, 0x8d];
+        calldata.extend_from_slice(args);
+        Bytes::from(calldata)
+    } else {
+        Bytes::new()
+    };
 
-    // StylusDeployer.sol always deploys with 0 value; value is used for initialization only
-    let create_value =
-        if constructor_args.is_some() { U256::ZERO } else { value.unwrap_or(U256::ZERO) };
+    let init_value = value.unwrap_or(U256::ZERO);
 
-    // Use the configured deployer address as the CREATE caller (matching StylusDeployer.sol)
-    let deployer_address = ccx
-        .state
-        .config
-        .evm_opts
-        .stylus_config
-        .deployer_address
-        .unwrap_or(DEFAULT_STYLUS_DEPLOYER_ADDRESS);
+    // salt: None → bytes32(0) → StylusDeployer uses CREATE
+    // salt: Some(val) → bytes32(val) → StylusDeployer uses CREATE2
+    let salt_bytes: FixedBytes<32> =
+        if let Some(s) = salt { FixedBytes::from(s.to_be_bytes::<32>()) } else { FixedBytes::ZERO };
 
-    let outcome = executor.exec_create(
-        CreateInputs {
-            caller: deployer_address,
-            scheme,
-            value: create_value,
-            init_code: init_code.into(),
+    // ABI-encode the deploy(bytes,bytes,uint256,bytes32) call
+    let deploy_calldata =
+        deployCall::new((init_code.into(), constructor_calldata, init_value, salt_bytes))
+            .abi_encode();
+
+    // Use the configured deployer address or the well-known default
+    let deployer_address =
+        ccx.state.config.evm_opts.stylus_config.deployer_address.unwrap_or(DEFAULT_STYLUS_DEPLOYER);
+
+    // If broadcast is active, set call_from_code so this exec_call is captured
+    let is_broadcasting = ccx.state.broadcast.is_some();
+    if let Some(broadcast) = &mut ccx.state.broadcast {
+        broadcast.call_from_code = true;
+    }
+
+    // Temporarily clear caller's code so StylusDeployer can refund excess ETH.
+    // The refund uses a low-level call that requires the recipient to accept ETH;
+    // contracts without receive()/fallback() payable would reject it.
+    let caller = ccx.caller;
+    let caller_code = ccx.ecx.journal_mut().code(caller).ok().unwrap_or_default().data;
+    if !caller_code.is_empty() {
+        ccx.ecx.journaled_state.set_code_with_hash(caller, Bytecode::default(), KECCAK_EMPTY);
+    }
+
+    // Record balance before to compute actual activation fee afterwards.
+    // When broadcasting, the inspector reroutes the transfer to broadcast.new_origin (the
+    // signer EOA), so we must track *that* account's balance — not ccx.caller (the script).
+    let balance_account =
+        if let Some(broadcast) = &ccx.state.broadcast { broadcast.new_origin } else { caller };
+    let balance_before = ccx.ecx.journaled_state.load_account(balance_account)?.data.info.balance;
+
+    // Ensure StylusDeployer is available. When broadcasting, the deployer must exist
+    // on-chain — etching it locally would produce a simulation that can't replay on-chain.
+    // For local tests/scripts (no broadcast), deploy on-demand to avoid polluting initial
+    // EVM state which would shift deterministic fuzz sequences for unrelated invariant tests.
+    let deployer_account = ccx.ecx.journaled_state.load_account(deployer_address)?;
+    if deployer_account.data.info.code.as_ref().is_none_or(|code| code.is_empty()) {
+        if is_broadcasting {
+            return Err(fmt_err!(
+                "StylusDeployer not found at {deployer_address}. \
+                 Deploy it on-chain or set a custom address via `stylus.deployer_address` in foundry.toml"
+            ));
+        }
+        ccx.ecx.journaled_state.set_code_with_hash(
+            deployer_address,
+            Bytecode::new_raw(Bytes::from_static(DEFAULT_STYLUS_DEPLOYER_RUNTIME_CODE)),
+            KECCAK_EMPTY,
+        );
+    }
+
+    // Call StylusDeployer with a generous activation fee budget (1 ETH).
+    // The deployer sends `msg.value - initValue` to ARB_WASM for activation
+    // and refunds any excess back to msg.sender.
+    let total_value = init_value + ACTIVATION_FEE_BUDGET;
+    let outcome = executor.exec_call(
+        CallInputs {
+            input: revm::interpreter::CallInput::Bytes(deploy_calldata.into()),
+            return_memory_offset: 0..0,
             gas_limit: ccx.gas_limit,
+            bytecode_address: deployer_address,
+            target_address: deployer_address,
+            caller,
+            value: revm::interpreter::CallValue::Transfer(total_value),
+            scheme: CallScheme::Call,
+            is_static: false,
+            known_bytecode: None,
         },
         ccx,
-    )?;
+    );
 
+    // Restore caller's code before handling the result
+    if !caller_code.is_empty() {
+        ccx.ecx.journaled_state.set_code(caller, Bytecode::new_raw(caller_code));
+    }
+
+    let outcome = outcome?;
     if !outcome.result.result.is_ok() {
         return Err(crate::Error::from(outcome.result.output));
     }
 
-    let address = outcome.address.ok_or_else(|| fmt_err!("contract creation failed"))?;
+    // Compute actual activation data fee from balance change of the paying account.
+    // Net cost = init_value + data_fee (budget minus refund).
+    let balance_after = ccx.ecx.journaled_state.load_account(balance_account)?.data.info.balance;
+    let total_spent = balance_before.saturating_sub(balance_after);
+    let data_fee = total_spent.saturating_sub(init_value);
 
-    // Activate the program
-    activate_stylus_program(ccx, address)?;
-
-    if let Some(constructor_args) = constructor_args {
-        // cast sig 'stylus_constructor()' => 0x5585258d
-        let mut calldata = vec![0x55, 0x85, 0x25, 0x8d];
-        calldata.extend_from_slice(constructor_args);
-
-        let outcome = executor.exec_call(
-            CallInputs {
-                input: revm::interpreter::CallInput::Bytes(calldata.into()),
-                return_memory_offset: 0..0,
-                gas_limit: outcome.gas().remaining(),
-                bytecode_address: address,
-                target_address: address,
-                caller: ccx.caller,
-                value: revm::interpreter::CallValue::Transfer(value.unwrap_or(U256::ZERO)),
-                scheme: CallScheme::Call,
-                is_static: false,
-                known_bytecode: None,
-            },
-            ccx,
-        )?;
-
-        if !outcome.result.result.is_ok() {
-            return Err(crate::Error::from(outcome.result.output));
-        }
+    // For broadcast, set the tx value to init_value + estimated fee with 20% buffer
+    // instead of the full 1 ETH budget used during simulation.
+    if is_broadcasting
+        && let Some(last_tx) = ccx.state.broadcastable_transactions.back_mut()
+        && let Some(tx) = last_tx.transaction.as_unsigned_mut()
+    {
+        let buffered_fee = data_fee * U256::from(120) / U256::from(100);
+        tx.value = Some(init_value + buffered_fee);
     }
+
+    // StylusDeployer returns the deployed address as ABI-encoded address
+    let output = &outcome.result.output;
+    if output.len() < 32 {
+        return Err(fmt_err!("StylusDeployer returned invalid output"));
+    }
+    let address = Address::from_slice(&output[12..32]);
 
     Ok(address.abi_encode())
 }
 
 /// Activates a Stylus program by compiling and storing it directly.
+/// Kept for potential future use (e.g., `vm.etch` scenarios).
+#[allow(dead_code)]
 fn activate_stylus_program(ccx: &mut CheatsCtxt, program_address: Address) -> Result<()> {
     let code_hash = ccx
         .ecx

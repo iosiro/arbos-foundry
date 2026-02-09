@@ -287,6 +287,9 @@ pub struct Broadcast {
     pub single_call: bool,
     /// Whether `vm.deployCode` cheatcode is used to deploy from code.
     pub deploy_from_code: bool,
+    /// Whether a cheatcode's internal `exec_call` should be captured as a broadcastable CALL.
+    /// Analogous to `deploy_from_code` but for CALLs instead of CREATEs.
+    pub call_from_code: bool,
 }
 
 /// Contains context for wallet management.
@@ -386,6 +389,7 @@ fn broadcast(ccx: &mut CheatsCtxt, new_origin: Option<&Address>, single_call: bo
         depth,
         single_call,
         deploy_from_code: false,
+        call_from_code: false,
     };
     debug!(target: "cheatcodes", ?broadcast, "started");
     ccx.state.broadcast = Some(broadcast);
