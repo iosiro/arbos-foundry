@@ -146,6 +146,40 @@ bytes memory code = vm.getStylusCode(string artifactPath);
 bytes memory initCode = vm.getStylusInitCode(string artifactPath);
 ```
 
+#### How `deployStylusCode` Works
+
+`deployStylusCode` delegates to the **StylusDeployer** contract (at `0xcEcba2F1DC234f70Dd89F2041029807F8D03A990` on Arbitrum), which atomically:
+
+1. Deploys the compressed bytecode via CREATE (or CREATE2 when a `salt` is provided)
+2. Activates the program via the ARB_WASM precompile (paying the activation data fee)
+3. Calls the Stylus constructor if `constructorArgs` are provided
+
+This produces a **single CALL transaction** when broadcasting, ensuring on-chain replay deploys a fully activated contract.
+
+In local tests (no broadcast), the StylusDeployer is deployed on-demand. When broadcasting, the StylusDeployer must already exist on-chain (it is pre-deployed on Arbitrum networks). A custom deployer address can be configured via:
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+deployer_address = "0x..."
+```
+
+#### Broadcasting Stylus Deployments
+
+`deployStylusCode` is fully compatible with `forge script --broadcast`:
+
+```solidity
+contract DeployStylus is Script {
+    function run() external {
+        vm.startBroadcast();
+        address deployed = vm.deployStylusCode("path/to/program.wasm");
+        vm.stopBroadcast();
+    }
+}
+```
+
+The broadcast captures a single transaction: a CALL to the StylusDeployer with the activation data fee automatically estimated (actual fee + 20% buffer). The StylusDeployer refunds any excess ETH to the sender.
+
 ### Brotli Compression
 
 ```solidity
