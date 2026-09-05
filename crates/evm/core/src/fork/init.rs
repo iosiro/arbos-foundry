@@ -134,7 +134,7 @@ pub fn configure_env(
 
     // Apply Stylus configuration options
     if let Some(arbos_version) = stylus.arbos_version {
-        cfg.arbos_version = arbos_version;
+        cfg.arbos_version = u64::from(arbos_version);
     }
     cfg.debug_mode = stylus.debug_mode_stylus;
     cfg.disable_auto_cache = stylus.disable_auto_cache_stylus;
