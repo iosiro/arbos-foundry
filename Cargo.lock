@@ -1420,7 +1420,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-revm?rev=cb88169bee615d2369012fff002dccff42ff6d4b#cb88169bee615d2369012fff002dccff42ff6d4b"
+source = "git+https://github.com/iosiro/arbos-revm?rev=86483adfeb2dfeb9edc99533b043cc8fc3954d57#86483adfeb2dfeb9edc99533b043cc8fc3954d57"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
