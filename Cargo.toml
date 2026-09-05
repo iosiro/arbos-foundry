@@ -328,6 +328,9 @@ foundry-macros = { path = "crates/macros" }
 foundry-test-utils = { path = "crates/test-utils", default-features = false }
 foundry-wallets = { version = "0.1.0", default-features = false }
 foundry-linking = { path = "crates/linking" }
+
+# Arbitrum execution
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "cb88169bee615d2369012fff002dccff42ff6d4b", default-features = false, features = ["alloy"] }
 foundry-primitives = { path = "crates/primitives", default-features = false }
 foundry-tui = { path = "crates/tui", default-features = false }
 
@@ -432,6 +435,7 @@ tikv-jemallocator = "0.7"
 auto_impl = "1"
 bytes = "1.11"
 walkdir = "2"
+wat = "1.0.56"
 which = "8"
 wait-timeout = "0.2"
 prettyplease = "0.2"

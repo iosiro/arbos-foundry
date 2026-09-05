@@ -1,4 +1,5 @@
 use foundry_compilers::artifacts::EvmVersion;
+use foundry_config::fs_permissions::PathPermission;
 use foundry_evm::hardforks::{FoundryHardfork, TempoHardfork};
 use foundry_test_utils::{rpc, util::OTHER_SOLC_VERSION};
 
@@ -2137,6 +2138,184 @@ contract TempoDefaultEvmVersionTest is Test {{
     );
 
     cmd.args(["test", "--network", "tempo", "--mc", "TempoDefaultEvmVersionTest"]).assert_success();
+});
+
+forgetest_init!(test_network_arbitrum_initializes_arbos_state, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+
+    prj.add_test(
+        "ArbosState.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface ArbWasm {
+    function stylusVersion() external view returns (uint16);
+    function inkPrice() external view returns (uint32);
+    function freePages() external view returns (uint16);
+    function maxStackDepth() external view returns (uint32);
+}
+
+contract ArbosStateTest is Test {
+    ArbWasm constant ARB_WASM = ArbWasm(address(0x71));
+
+    function test_arbos_state_is_initialized_for_local_execution() public view {
+        assertEq(ARB_WASM.stylusVersion(), 3);
+        assertEq(ARB_WASM.inkPrice(), 10_000);
+        assertEq(ARB_WASM.freePages(), 2);
+        assertEq(ARB_WASM.maxStackDepth(), 22_000);
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbosStateTest"]).assert_success();
+});
+
+forgetest_init!(test_network_arbitrum_applies_stylus_cli_config, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+
+    prj.add_test(
+        "ConfiguredArbosState.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface ArbWasm {
+    function stylusVersion() external view returns (uint16);
+    function inkPrice() external view returns (uint32);
+    function freePages() external view returns (uint16);
+    function maxStackDepth() external view returns (uint32);
+}
+
+contract ConfiguredArbosStateTest is Test {
+    ArbWasm constant ARB_WASM = ArbWasm(address(0x71));
+
+    function test_stylus_cli_config_initializes_local_arbos_state() public view {
+        assertEq(ARB_WASM.stylusVersion(), 2);
+        assertEq(ARB_WASM.inkPrice(), 12_345);
+        assertEq(ARB_WASM.freePages(), 7);
+        assertEq(ARB_WASM.maxStackDepth(), 23_456);
+    }
+}
+"#,
+    );
+
+    cmd.args([
+        "test",
+        "--network",
+        "arbitrum",
+        "--mc",
+        "ConfiguredArbosStateTest",
+        "--arbos-version",
+        "40",
+        "--stylus-version",
+        "2",
+        "--stylus-ink-price",
+        "12345",
+        "--stylus-free-pages",
+        "7",
+        "--stylus-max-stack-depth",
+        "23456",
+    ])
+    .assert_success();
+});
+
+forgetest_init!(test_stylus_utility_cheatcodes, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    prj.create_file("dummy.wasm.br", "synthetic-precompressed-stylus-program");
+    prj.add_test(
+        "StylusUtilities.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface StylusVm {
+    function brotliCompress(bytes calldata) external pure returns (bytes memory);
+    function brotliDecompress(bytes calldata) external pure returns (bytes memory);
+    function getStylusCode(string calldata) external view returns (bytes memory);
+    function getStylusInitCode(string calldata) external view returns (bytes memory);
+}
+
+contract StylusUtilitiesTest is Test {
+    StylusVm constant STYLUS_VM = StylusVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+    function test_stylus_utility_cheatcodes() public {
+        bytes memory input = new bytes(4096);
+        for (uint256 i; i < input.length; ++i) input[i] = bytes1(uint8(65 + i % 7));
+        bytes memory compressed = STYLUS_VM.brotliCompress(input);
+        assertLt(compressed.length, input.length);
+        assertEq(STYLUS_VM.brotliDecompress(compressed), input);
+
+        bytes memory runtimeCode = STYLUS_VM.getStylusCode("dummy.wasm.br");
+        assertEq(bytes4(runtimeCode), hex"eff00000");
+        bytes memory initCode = STYLUS_VM.getStylusInitCode("dummy.wasm.br");
+        address deployed;
+        assembly { deployed := create(0, add(initCode, 0x20), mload(initCode)) }
+        assertTrue(deployed != address(0));
+        assertEq(deployed.code, runtimeCode);
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "StylusUtilitiesTest"]).assert_success();
+});
+
+forgetest_init!(test_deploy_stylus_code_executes_program, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/fixtures/Stylus/foundry_stylus_program.wasm");
+    std::fs::copy(fixture, prj.root().join("echo.wasm")).unwrap();
+    prj.add_test(
+        "DeployStylus.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface StylusVm {
+    function deployStylusCode(string calldata) external returns (address);
+    function deployStylusCode(string calldata, bytes32) external returns (address);
+}
+
+contract DeployStylusTest is Test {
+    StylusVm constant STYLUS_VM = StylusVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+    function test_deploy_and_execute_stylus_echo() public {
+        address program = STYLUS_VM.deployStylusCode("echo.wasm");
+        bytes memory input = hex"deadbeef01234567";
+        (bool ok, bytes memory output) = program.call(input);
+        assertTrue(ok);
+        assertEq(output, input);
+    }
+
+    function test_create2_deployment_is_deterministic() public {
+        bytes32 salt = keccak256("stylus-salt");
+        address first = STYLUS_VM.deployStylusCode("echo.wasm", salt);
+        assertTrue(first != address(0));
+        (bool ok, bytes memory output) = first.call(hex"c0ffee");
+        assertTrue(ok);
+        assertEq(output, hex"c0ffee");
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "DeployStylusTest"]).assert_success();
 });
 
 // Validates T5 implicit-approval wiring: the cheatcodes, the AddressRegistry selector,

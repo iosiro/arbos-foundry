@@ -39,6 +39,7 @@ impl DAEstimateArgs {
         match network {
             NetworkVariant::Optimism => da_estimate::<Optimism>(&config, block).await,
             NetworkVariant::Ethereum => da_estimate::<Ethereum>(&config, block).await,
+            NetworkVariant::Arbitrum => unsupported_da_estimation("Arbitrum"),
             #[cfg(feature = "monad")]
             NetworkVariant::Monad => unsupported_da_estimation("Monad"),
             NetworkVariant::Tempo => unsupported_da_estimation("Tempo"),

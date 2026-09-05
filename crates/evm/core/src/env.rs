@@ -416,6 +416,9 @@ impl FoundryTransaction for TempoTxEnv {
 ///
 /// Every family that doesn't need chain metadata uses `()`.
 pub trait FoundryChain<Tx>: Clone + Debug + Default + Send + Sync {
+    /// Applies local Stylus runtime controls to this transaction context.
+    fn configure_stylus(&mut self, _config: &foundry_config::stylus::StylusConfig) {}
+
     /// Builds chain context for a standalone synthetic transaction.
     fn for_transaction(_tx: &Tx) -> Self {
         Self::default()
@@ -532,6 +535,11 @@ pub trait FoundryContextExt:
 
     /// Reference to the journal inner.
     fn journal_inner(&self) -> &JournaledState;
+
+    /// Activates deployed Stylus bytecode when supported by the active execution family.
+    fn activate_stylus_program(&mut self, _address: Address) -> eyre::Result<()> {
+        eyre::bail!("Stylus activation requires the Arbitrum execution network")
+    }
 
     /// Sets the spec and refreshes gas params for the concrete EVM family.
     fn set_spec_and_gas_params(&mut self, spec: Self::Spec) {

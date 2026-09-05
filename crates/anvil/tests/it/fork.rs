@@ -740,7 +740,7 @@ async fn test_fork_reset_refreshes_derived_gas_settings() {
     let first_next_base_fee =
         calc_next_block_base_fee(0, first_gas_limit, first_base_fee, BaseFeeParams::ethereum());
     assert_eq!(first_info.environment.gas_limit, first_gas_limit);
-    assert_eq!(first_info.environment.base_fee, first_next_base_fee.into());
+    assert_eq!(first_info.environment.base_fee, u128::from(first_next_base_fee));
     assert_eq!(api.backend.fees().raw_gas_price(), first_api.gas_price());
 
     api.anvil_reset(Some(Forking {
@@ -754,7 +754,7 @@ async fn test_fork_reset_refreshes_derived_gas_settings() {
     let second_next_base_fee =
         calc_next_block_base_fee(0, second_gas_limit, second_base_fee, BaseFeeParams::ethereum());
     assert_eq!(second_info.environment.gas_limit, second_gas_limit);
-    assert_eq!(second_info.environment.base_fee, second_next_base_fee.into());
+    assert_eq!(second_info.environment.base_fee, u128::from(second_next_base_fee));
     assert_eq!(api.backend.fees().raw_gas_price(), second_api.gas_price());
 }
 
@@ -796,7 +796,7 @@ async fn test_fork_reset_preserves_explicit_gas_settings_and_restores_memory() {
             .unwrap();
         let info = api.anvil_node_info().await.unwrap();
         assert_eq!(info.environment.gas_limit, explicit_gas_limit);
-        assert_eq!(info.environment.base_fee, explicit_base_fee.into());
+        assert_eq!(info.environment.base_fee, u128::from(explicit_base_fee));
         assert_eq!(api.backend.fees().raw_gas_price(), explicit_gas_price);
     }
 
@@ -804,7 +804,7 @@ async fn test_fork_reset_preserves_explicit_gas_settings_and_restores_memory() {
     let local_info = api.anvil_node_info().await.unwrap();
     assert!(local_info.fork_config.fork_url.is_none());
     assert_eq!(local_info.environment.gas_limit, explicit_gas_limit);
-    assert_eq!(local_info.environment.base_fee, explicit_base_fee.into());
+    assert_eq!(local_info.environment.base_fee, u128::from(explicit_base_fee));
     assert_eq!(api.backend.fees().raw_gas_price(), explicit_gas_price);
 }
 
@@ -824,7 +824,7 @@ async fn test_fork_reset_restores_implicit_memory_base_fee() {
 
     let local_info = api.anvil_node_info().await.unwrap();
     assert!(local_info.fork_config.fork_url.is_none());
-    assert_eq!(local_info.environment.base_fee, INITIAL_BASE_FEE.into());
+    assert_eq!(local_info.environment.base_fee, u128::from(INITIAL_BASE_FEE));
     let genesis = handle.http_provider().get_block(BlockId::number(0)).await.unwrap().unwrap();
     assert_eq!(genesis.header.base_fee_per_gas, Some(INITIAL_BASE_FEE));
     api.mine_one().await.unwrap();

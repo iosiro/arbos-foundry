@@ -12,7 +12,7 @@ use foundry_evm::core::evm::MonadEvmNetwork;
 #[cfg(feature = "optimism")]
 use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
-    core::evm::{EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork},
+    core::evm::{ArbitrumEvmNetwork, EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork},
     executors::ExecutorBuilder,
     opts::EvmOpts,
 };
@@ -61,6 +61,18 @@ pub async fn run_command(args: Chisel) -> Result<()> {
     config.networks = evm_opts.networks;
     let local_networks = evm_opts.networks;
     let local_chain_id = evm_opts.env.chain_id.or(config.chain.map(|chain| chain.id()));
+
+    if evm_opts.networks.is_arbitrum() {
+        return Box::pin(run_command_with_network::<ArbitrumEvmNetwork>(
+            args,
+            config,
+            evm_opts,
+            ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+            local_networks,
+            local_chain_id,
+        ))
+        .await;
+    }
 
     if evm_opts.networks.is_tempo() {
         return Box::pin(run_command_with_network::<TempoEvmNetwork>(

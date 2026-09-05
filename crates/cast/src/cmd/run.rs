@@ -53,7 +53,10 @@ use foundry_evm::{
     core::{
         FoundryBlock as _,
         env::FromAnyRpcTransaction as _,
-        evm::{EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, TempoEvmNetwork, TxEnvFor},
+        evm::{
+            ArbitrumEvmNetwork, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, TempoEvmNetwork,
+            TxEnvFor,
+        },
     },
     executors::{Executor, ExecutorBuilder, TracingExecutor},
     hardforks::FoundryHardfork,
@@ -211,6 +214,12 @@ impl RunArgs {
 
         // Auto-detect network from fork chain ID when not explicitly configured.
         evm_opts.infer_network_from_fork().await?;
+
+        if evm_opts.networks.is_arbitrum() {
+            return self
+                .run_with_evm(config, evm_opts, ExecutorBuilder::<ArbitrumEvmNetwork>::new())
+                .await;
+        }
 
         if evm_opts.networks.is_tempo() {
             return self

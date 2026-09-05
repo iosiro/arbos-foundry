@@ -19,6 +19,7 @@ path = "bin/main.rs"
 required-features = ["cli"]
 
 [dependencies]
+arbos-revm.workspace = true
 # foundry internal
 anvil-core = { path = "core", default-features = false }
 anvil-rpc = { path = "rpc" }

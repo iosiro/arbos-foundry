@@ -21,3 +21,6 @@ _
 .vite
 .wrangler
 *.zip
+
+# Generated from the checked-in WAT fixture by foundry-evm-core/build.rs.
+testdata/fixtures/Stylus/foundry_stylus_program.wasm

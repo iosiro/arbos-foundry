@@ -638,6 +638,7 @@ impl<FEN: FoundryEvmNetwork> TestRunnerConfig<FEN> {
             .spec_id(self.spec_id)
             .gas_limit(self.evm_opts.gas_limit())
             .legacy_assertions(self.config.legacy_assertions)
+            .stylus_config(self.evm_opts.stylus_config.clone())
             .build(self.evm_env.clone(), self.tx_env.clone(), db, self.evm_opts.networks)
     }
 

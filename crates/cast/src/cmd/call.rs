@@ -53,7 +53,10 @@ use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
     core::{
         FoundryBlock, FoundryTransaction,
-        evm::{EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork, context_for_child_transaction},
+        evm::{
+            ArbitrumEvmNetwork, EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork,
+            context_for_child_transaction,
+        },
     },
     executors::{ExecutorBuilder, TracingExecutor},
     opts::EvmOpts,
@@ -271,6 +274,17 @@ impl CallArgs {
             let chain = Chain::from_id(chain_id);
             self.chain = Some(chain);
             config.chain = Some(chain);
+        }
+
+        if evm_opts.networks.is_arbitrum() {
+            return self
+                .run_with_network_and_opts::<ArbitrumEvmNetwork>(
+                    config,
+                    evm_opts,
+                    auth_preflight,
+                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                )
+                .await;
         }
 
         if evm_opts.networks.is_tempo() {

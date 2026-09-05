@@ -2,6 +2,7 @@ mod abi;
 mod anvil;
 mod anvil_api;
 mod api;
+mod arbitrum;
 mod beacon_api;
 mod block_index;
 mod eip2935;

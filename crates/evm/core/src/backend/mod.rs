@@ -5,7 +5,7 @@ use crate::{
     constants::{CALLER, CHEATCODE_ADDRESS, DEFAULT_CREATE2_DEPLOYER, TEST_CONTRACT_ADDRESS},
     evm::{
         BlockContext, BlockEnvFor, ChainFor, EthEvmNetwork, EvmEnvFor, FoundryContextFor,
-        FoundryEvmFactory, FoundryEvmNetwork, HaltReasonFor, SpecFor, TxEnvFor,
+        FoundryEvmFactory, FoundryEvmNetwork, FoundryPrecompiles, HaltReasonFor, SpecFor, TxEnvFor,
     },
     fork::{CreateFork, ForkId, ForkResult, MultiFork},
     state_snapshot::StateSnapshots,
@@ -16,7 +16,7 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::BlockNumHash;
-use alloy_evm::{Evm, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
+use alloy_evm::{Evm, EvmEnv, EvmFactory};
 use alloy_genesis::GenesisAccount;
 use alloy_network::{
     AnyNetwork, AnyRpcBlock, AnyRpcTransaction, BlockResponse, Network, TransactionResponse,
@@ -25,7 +25,7 @@ use alloy_primitives::{Address, B256, ChainId, TxKind, U256, keccak256, map::Add
 use alloy_rpc_types::{BlockNumberOrTag, BlockTransactions};
 use eyre::Context;
 use foundry_common::{SYSTEM_TRANSACTION_TYPE, is_known_system_sender};
-use foundry_evm_networks::{NetworkConfigs, apply_bsc_p256_precompile};
+use foundry_evm_networks::NetworkConfigs;
 pub use foundry_fork_db::{
     BlockchainDb, ForkBlock, ForkBlockEnv, SharedBackend, cache::BlockchainDbMeta,
 };
@@ -1747,7 +1747,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                     let chain_context = context.transaction(*index);
                     let mut evm =
                         factory.create_evm_with_context(replay_db, evm_env.clone(), chain_context);
-                    inject_replay_precompiles(networks, evm.precompiles_mut(), chain_id, timestamp);
+                    evm.precompiles_mut().configure_for_replay(networks, chain_id, timestamp);
                     trace!(tx=?tx.tx_hash(), "committing transaction");
                     let result = if *is_system {
                         #[cfg(feature = "monad")]
@@ -1771,7 +1771,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                 }
             } else {
                 let mut evm = factory.create_evm(replay_db, evm_env);
-                inject_replay_precompiles(networks, evm.precompiles_mut(), chain_id, timestamp);
+                evm.precompiles_mut().configure_for_replay(networks, chain_id, timestamp);
                 for (_, tx, tx_env, is_system) in &txs_to_replay {
                     trace!(tx=?tx.tx_hash(), "committing transaction");
                     let result = if *is_system {
@@ -3023,7 +3023,7 @@ impl<FEN: FoundryEvmNetwork> BackendInner<FEN> {
             EmptyDB::default(),
             EvmEnv::new(CfgEnv::new_with_spec(self.spec_id), Default::default()),
         );
-        evm.precompiles().addresses().copied().collect()
+        evm.precompiles().addresses()
     }
 
     /// Returns a new, empty, `JournaledState` with set precompiles
@@ -3251,16 +3251,6 @@ fn apply_state_changeset<N: Network, B: ForkBlockEnv>(
     *journaled_state = staged_journaled_state;
     fork.journaled_state = staged_fork_journaled_state;
     Ok(())
-}
-
-fn inject_replay_precompiles(
-    networks: NetworkConfigs,
-    precompiles: &mut PrecompilesMap,
-    chain_id: ChainId,
-    timestamp: u64,
-) {
-    networks.inject_precompiles(precompiles);
-    apply_bsc_p256_precompile(precompiles, chain_id, timestamp);
 }
 
 #[cfg(test)]

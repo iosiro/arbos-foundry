@@ -117,6 +117,13 @@ use anvil_core::eth::{
     transaction::{MaybeImpersonatedTransaction, PendingTransaction, TransactionInfo},
 };
 use anvil_rpc::error::{ErrorCode, RpcError};
+use arbos_revm::{
+    ArbitrumChain, ArbitrumContext,
+    config::ArbitrumConfig,
+    local_context::ArbitrumLocalContext,
+    state::{ArbState, ArbStateGetter, ArbosStateParams, types::StorageBackedTr},
+    transaction::ArbitrumTransaction,
+};
 use chrono::Datelike;
 use eyre::{Context, Result};
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
@@ -126,7 +133,7 @@ use foundry_evm::{
     backend::{BlockchainDb, DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::{DEFAULT_CREATE2_DEPLOYER, DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE},
     core::{
-        evm::{EvmEnvFor, TempoEvmNetwork},
+        evm::{ArbitrumEvmFactory, ArbitrumPrecompiles, EvmEnvFor, TempoEvmNetwork},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -157,7 +164,9 @@ use op_revm::{OpTransaction, transaction::deposit::DepositTransactionParts};
 use parking_lot::{Mutex, RwLock, RwLockUpgradableReadGuard};
 use revm::{
     Database as RevmDatabase, DatabaseCommit, Inspector,
-    context::{Block as RevmBlock, BlockEnv, Cfg, CfgEnv, ContextSetters, ContextTr, TxEnv},
+    context::{
+        Block as RevmBlock, BlockEnv, Cfg, CfgEnv, ContextSetters, ContextTr, Journal, TxEnv,
+    },
     context_interface::{
         JournalTr,
         block::BlobExcessGasAndPrice,
@@ -211,6 +220,47 @@ use tempo_revm::{
     evm::TempoContext, gas_params::tempo_gas_params,
 };
 use tokio::{sync::RwLock as AsyncRwLock, task::JoinSet};
+
+trait AnvilPrecompileSet<N: Network> {
+    fn inject_configured(&mut self, backend: &Backend<N>, evm_env: &EvmEnv);
+
+    fn inject_replay(
+        &mut self,
+        backend: &Backend<N>,
+        evm_env: &EvmEnv,
+        arbitrum_rpc_block_number: Option<u64>,
+    );
+}
+
+impl<N: Network> AnvilPrecompileSet<N> for PrecompilesMap {
+    fn inject_configured(&mut self, backend: &Backend<N>, evm_env: &EvmEnv) {
+        backend.inject_precompiles(self, evm_env);
+    }
+
+    fn inject_replay(
+        &mut self,
+        backend: &Backend<N>,
+        evm_env: &EvmEnv,
+        arbitrum_rpc_block_number: Option<u64>,
+    ) {
+        backend.inject_precompiles(self, evm_env);
+        if let Some(block_number) = arbitrum_rpc_block_number {
+            backend.inject_arbitrum_precompile_at_block(self, block_number);
+        }
+    }
+}
+
+impl<N: Network> AnvilPrecompileSet<N> for ArbitrumPrecompiles {
+    fn inject_configured(&mut self, _backend: &Backend<N>, _evm_env: &EvmEnv) {}
+
+    fn inject_replay(
+        &mut self,
+        _backend: &Backend<N>,
+        _evm_env: &EvmEnv,
+        _arbitrum_rpc_block_number: Option<u64>,
+    ) {
+    }
+}
 
 /// Side-channel container for OP-specific deposit info produced by
 /// [`Backend::build_call_env_with_base`] and consumed by the OP transact path.
@@ -697,6 +747,7 @@ impl GasEstimateCallOptions {
 #[cfg(all(feature = "optimism", feature = "monad"))]
 pub trait BackendInspector<DB: Database>:
     Inspector<EthEvmContext<DB>>
+    + Inspector<ArbitrumContext<DB>>
     + Inspector<OpEvmContext<DB>>
     + Inspector<TempoContext<DB>>
     + Inspector<alloy_monad_evm::MonadContext<DB>>
@@ -705,6 +756,7 @@ pub trait BackendInspector<DB: Database>:
 #[cfg(all(feature = "optimism", feature = "monad"))]
 impl<DB: Database, T> BackendInspector<DB> for T where
     T: Inspector<EthEvmContext<DB>>
+        + Inspector<ArbitrumContext<DB>>
         + Inspector<OpEvmContext<DB>>
         + Inspector<TempoContext<DB>>
         + Inspector<alloy_monad_evm::MonadContext<DB>>
@@ -712,17 +764,24 @@ impl<DB: Database, T> BackendInspector<DB> for T where
 }
 #[cfg(all(feature = "optimism", not(feature = "monad")))]
 pub trait BackendInspector<DB: Database>:
-    Inspector<EthEvmContext<DB>> + Inspector<OpEvmContext<DB>> + Inspector<TempoContext<DB>>
+    Inspector<EthEvmContext<DB>>
+    + Inspector<ArbitrumContext<DB>>
+    + Inspector<OpEvmContext<DB>>
+    + Inspector<TempoContext<DB>>
 {
 }
 #[cfg(all(feature = "optimism", not(feature = "monad")))]
 impl<DB: Database, T> BackendInspector<DB> for T where
-    T: Inspector<EthEvmContext<DB>> + Inspector<OpEvmContext<DB>> + Inspector<TempoContext<DB>>
+    T: Inspector<EthEvmContext<DB>>
+        + Inspector<ArbitrumContext<DB>>
+        + Inspector<OpEvmContext<DB>>
+        + Inspector<TempoContext<DB>>
 {
 }
 #[cfg(all(not(feature = "optimism"), feature = "monad"))]
 pub trait BackendInspector<DB: Database>:
     Inspector<EthEvmContext<DB>>
+    + Inspector<ArbitrumContext<DB>>
     + Inspector<TempoContext<DB>>
     + Inspector<alloy_monad_evm::MonadContext<DB>>
 {
@@ -730,18 +789,19 @@ pub trait BackendInspector<DB: Database>:
 #[cfg(all(not(feature = "optimism"), feature = "monad"))]
 impl<DB: Database, T> BackendInspector<DB> for T where
     T: Inspector<EthEvmContext<DB>>
+        + Inspector<ArbitrumContext<DB>>
         + Inspector<TempoContext<DB>>
         + Inspector<alloy_monad_evm::MonadContext<DB>>
 {
 }
 #[cfg(all(not(feature = "optimism"), not(feature = "monad")))]
 pub trait BackendInspector<DB: Database>:
-    Inspector<EthEvmContext<DB>> + Inspector<TempoContext<DB>>
+    Inspector<EthEvmContext<DB>> + Inspector<ArbitrumContext<DB>> + Inspector<TempoContext<DB>>
 {
 }
 #[cfg(all(not(feature = "optimism"), not(feature = "monad")))]
 impl<DB: Database, T> BackendInspector<DB> for T where
-    T: Inspector<EthEvmContext<DB>> + Inspector<TempoContext<DB>>
+    T: Inspector<EthEvmContext<DB>> + Inspector<ArbitrumContext<DB>> + Inspector<TempoContext<DB>>
 {
 }
 pub mod cache;
@@ -1013,6 +1073,51 @@ impl<N: Network> fmt::Debug for Backend<N> {
 
 // Methods that are generic over any Network.
 impl<N: Network> Backend<N> {
+    /// Initializes ArbOS system state for a local Arbitrum node while preserving populated fork
+    /// state.
+    pub async fn initialize_arbos_state(&self) -> Result<()> {
+        let mut db = self.db.write().await;
+        let env = self.evm_env.read().clone();
+        let mut context = ArbitrumContext {
+            journaled_state: Journal::new(&mut **db),
+            block: env.block_env,
+            cfg: ArbitrumConfig::from(env.cfg_env),
+            tx: ArbitrumTransaction::default(),
+            chain: ArbitrumChain::default(),
+            local: ArbitrumLocalContext::default(),
+            error: Ok(()),
+        };
+
+        let initialized = context
+            .arb_state(None, false)
+            .arbos_version()
+            .get()
+            .map_err(|err| eyre::eyre!(err.to_string()))?
+            != 0;
+        if initialized {
+            return Ok(());
+        }
+
+        let params = ArbosStateParams {
+            chain_id: U256::from(context.cfg.inner.chain_id),
+            genesis_block_num: context.block.number.saturating_to(),
+            upgrade_timestamp: context.block.timestamp.saturating_to(),
+            ..Default::default()
+        };
+        context
+            .arb_state(None, false)
+            .initialize(&params)
+            .map_err(|err| eyre::eyre!(err.to_string()))?;
+        let changes = context
+            .journaled_state
+            .finalize()
+            .into_iter()
+            .map(|(address, account)| (address, account.with_touched_mark()))
+            .collect();
+        context.journaled_state.database.commit(changes);
+        Ok(())
+    }
+
     /// Sets the account to impersonate
     ///
     /// Returns `true` if the account is already impersonated
@@ -1232,6 +1337,11 @@ impl<N: Network> Backend<N> {
     /// Always `false` when built without the `optimism` feature.
     pub const fn is_optimism(&self) -> bool {
         self.networks.is_optimism()
+    }
+
+    /// Returns true if Arbitrum network mode is active.
+    pub const fn is_arbitrum(&self) -> bool {
+        self.networks.is_arbitrum()
     }
 
     /// Returns true if Tempo network mode is active
@@ -2423,6 +2533,26 @@ impl<N: Network> Backend<N> {
         Ok(evm.transact(tx_env)?)
     }
 
+    fn transact_arbitrum_with_inspector_ref<'db, I, DB>(
+        &self,
+        db: &'db DB,
+        evm_env: &EvmEnv,
+        inspector: &mut I,
+        tx: ArbitrumTransaction,
+    ) -> Result<ResultAndState<HaltReason>, BlockchainError>
+    where
+        DB: DatabaseRef + ?Sized,
+        I: Inspector<ArbitrumContext<WrapDatabaseRef<&'db DB>>>,
+        WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
+    {
+        let mut evm = ArbitrumEvmFactory.create_evm_with_inspector(
+            WrapDatabaseRef(db),
+            evm_env.clone(),
+            inspector,
+        );
+        evm.transact(tx).map_err(|err| BlockchainError::Internal(err.to_string()))
+    }
+
     fn transact_eth_simulation_with_inspector_ref<'db, I, DB>(
         &self,
         db: &'db DB,
@@ -2537,6 +2667,14 @@ impl<N: Network> Backend<N> {
                 FromTxWithEncoded::from_encoded_tx(tx, sender, tx.encoded_2718().into());
             let base = op_tx.base.clone();
             let result = self.transact_op_with_inspector_ref(db, evm_env, inspector, op_tx)?;
+            return Ok((result, base));
+        }
+        if self.is_arbitrum() {
+            let tx_env: ArbitrumTransaction =
+                FromTxWithEncoded::from_encoded_tx(tx, sender, tx.encoded_2718().into());
+            let base = tx_env.base.clone();
+            let result =
+                self.transact_arbitrum_with_inspector_ref(db, evm_env, inspector, tx_env)?;
             return Ok((result, base));
         }
         let tx_env: TxEnv = build_tx_env_for_pending(pending, self.cheats());
@@ -2659,7 +2797,7 @@ impl<N: Network> Backend<N> {
                 $execute_transaction:expr,
                 $on_execution_error:expr
             ) => {{
-                self.inject_precompiles($evm.precompiles_mut(), evm_env);
+                $evm.precompiles_mut().inject_configured(self, evm_env);
                 let mut executor =
                     AnvilBlockExecutor::new($evm, parent_hash, spec_id, ethereum_transitions)
                         .with_max_blob_gas_per_block(gas_config.max_blob_gas_per_block);
@@ -2711,6 +2849,16 @@ impl<N: Network> Backend<N> {
             let tempo_env = self.build_tempo_evm_env(evm_env);
             let mut evm =
                 TempoEvmFactory::default().create_evm_with_inspector(db, tempo_env, inspector);
+            return run!(
+                evm,
+                noop_before_transaction,
+                execute_pool_transaction,
+                noop_on_execution_error
+            );
+        }
+        if self.is_arbitrum() {
+            let mut evm =
+                ArbitrumEvmFactory.create_evm_with_inspector(db, evm_env.clone(), inspector);
             return run!(
                 evm,
                 noop_before_transaction,
@@ -3164,7 +3312,16 @@ impl<N: Network> Backend<N> {
     {
         match tx_env {
             CallTxEnv::Eth(tx_env) => {
-                self.transact_eth_with_inspector_ref(db, evm_env, inspector, tx_env)
+                if self.is_arbitrum() {
+                    self.transact_arbitrum_with_inspector_ref(
+                        db,
+                        evm_env,
+                        inspector,
+                        ArbitrumTransaction::new(tx_env),
+                    )
+                } else {
+                    self.transact_eth_with_inspector_ref(db, evm_env, inspector, tx_env)
+                }
             }
             #[cfg(feature = "monad")]
             CallTxEnv::Monad(tx_env) => {
@@ -5262,10 +5419,7 @@ where
                 ))
             }};
             ($evm:expr, $execute:expr) => {{
-                self.inject_precompiles($evm.precompiles_mut(), evm_env);
-                if let Some(block_number) = arbitrum_rpc_block_number {
-                    self.inject_arbitrum_precompile_at_block($evm.precompiles_mut(), block_number);
-                }
+                $evm.precompiles_mut().inject_replay(self, evm_env, arbitrum_rpc_block_number);
                 // Replay re-executes an already-valid historical prefix, so it does not apply the
                 // local EIP-4844 budget. Jovian still uses the source block's gas limit as its DA
                 // budget through `set_optimism_hardfork` below.
@@ -5312,6 +5466,12 @@ where
             let tempo_env = self.build_tempo_evm_env(evm_env);
             let mut evm =
                 TempoEvmFactory::default().create_evm_with_inspector(db, tempo_env, inspector);
+            return run!(evm);
+        }
+
+        if self.is_arbitrum() {
+            let mut evm =
+                ArbitrumEvmFactory.create_evm_with_inspector(db, evm_env.clone(), inspector);
             return run!(evm);
         }
 

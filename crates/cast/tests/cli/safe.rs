@@ -309,7 +309,8 @@ async fn strict_service_handler(
     };
 
     let mut state = state.lock().unwrap();
-    if authorization.as_deref() != Some(&format!("Bearer {}", state.api_key)) {
+    let expected_authorization = format!("Bearer {}", state.api_key);
+    if authorization.as_deref() != Some(expected_authorization.as_str()) {
         return service_error_with_status(StatusCode::UNAUTHORIZED, "invalid API authorization");
     }
     match strict_service_request(&mut state, method, &uri, body) {

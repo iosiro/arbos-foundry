@@ -1471,6 +1471,10 @@ impl NodeConfig {
         )
         .await?;
 
+        if self.networks.is_arbitrum() {
+            backend.initialize_arbos_state().await?;
+        }
+
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.
         if !self.disable_default_create2_deployer && self.fork_urls.is_empty() {

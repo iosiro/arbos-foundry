@@ -1984,7 +1984,7 @@ fn handle_arbitrum_system_call<FEN: FoundryEvmNetwork>(
     }
 
     let input = call.input.bytes(ecx);
-    if input.get(..4) != Some(&arbitrum::ARB_BLOCK_NUMBER_SELECTOR) {
+    if input.get(..4) != Some(arbitrum::ARB_BLOCK_NUMBER_SELECTOR.as_slice()) {
         return None;
     }
 

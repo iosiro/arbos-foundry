@@ -65,7 +65,8 @@ use foundry_evm::core::evm::MonadEvmNetwork;
 use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
     core::evm::{
-        BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
+        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor,
+        TempoEvmNetwork, TxEnvFor,
     },
     executors::{ExecutorBuilder, ShowmapDomain},
     fork::ResolvedFork,
@@ -273,6 +274,7 @@ fn count_fuzz_minimize_targets<FEN: FoundryEvmNetwork>(
 
 #[derive(Clone, Copy)]
 enum NetworkDispatchKind {
+    Arbitrum,
     Tempo,
     #[cfg(feature = "monad")]
     Monad,
@@ -282,6 +284,10 @@ enum NetworkDispatchKind {
 }
 
 const fn network_dispatch_kind(evm_opts: &EvmOpts) -> NetworkDispatchKind {
+    if evm_opts.networks.is_arbitrum() {
+        return NetworkDispatchKind::Arbitrum;
+    }
+
     if evm_opts.networks.is_tempo() {
         return NetworkDispatchKind::Tempo;
     }
@@ -2710,6 +2716,18 @@ impl TestArgs {
         resolved_fork: Option<&ResolvedFork>,
     ) -> eyre::Result<(Libraries, TestOutcome)> {
         match network_dispatch_kind(dispatch_opts) {
+            NetworkDispatchKind::Arbitrum => {
+                self.build_and_run_tests::<ArbitrumEvmNetwork>(
+                    config,
+                    evm_opts,
+                    output,
+                    filter,
+                    execution,
+                    resolved_fork,
+                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                )
+                .await
+            }
             NetworkDispatchKind::Tempo => {
                 self.build_and_run_tests::<TempoEvmNetwork>(
                     config,
@@ -2773,6 +2791,16 @@ impl TestArgs {
         filter: &ProjectPathsAwareFilter,
     ) -> eyre::Result<FuzzMinimizeReplayPass> {
         match network_dispatch_kind(dispatch_opts) {
+            NetworkDispatchKind::Arbitrum => self
+                .build_fuzz_minimize_runner::<ArbitrumEvmNetwork>(
+                    config,
+                    evm_opts,
+                    output,
+                    options,
+                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                )
+                .await
+                .map(|runner| fuzz_minimize_replay(runner, filter)),
             NetworkDispatchKind::Tempo => self
                 .build_fuzz_minimize_runner::<TempoEvmNetwork>(
                     config,

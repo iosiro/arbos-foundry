@@ -54,7 +54,10 @@ use foundry_evm::{
     backend::Backend,
     core::{
         Breakpoints, FoundryTransaction,
-        evm::{EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor},
+        evm::{
+            ArbitrumEvmNetwork, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor,
+            TempoEvmNetwork, TxEnvFor,
+        },
         fork::ResolvedFork,
     },
     executors::ExecutorBuilder,
@@ -390,6 +393,15 @@ impl ScriptArgs {
 
         if self.unlocked && self.has_tempo_session()? {
             eyre::bail!("--tempo.session/TEMPO_SESSION_ID cannot be combined with --unlocked");
+        }
+
+        if evm_opts.networks.is_arbitrum() {
+            return Box::pin(self.run_generic_script::<ArbitrumEvmNetwork>(
+                config,
+                evm_opts,
+                ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+            ))
+            .await;
         }
 
         // Box each branch's future to keep its large async state off `run_script`'s future;
@@ -1129,7 +1141,12 @@ impl<FEN: FoundryEvmNetwork> ScriptConfig<FEN> {
         tx_env.set_fee_token(self.tempo.fee_token);
 
         let mut runner = ScriptRunner::new(
-            builder.build(evm_env, tx_env, db, self.evm_opts.networks),
+            builder.stylus_config(self.evm_opts.stylus_config.clone()).build(
+                evm_env,
+                tx_env,
+                db,
+                self.evm_opts.networks,
+            ),
             self.evm_opts.clone(),
         )
         .with_debug_bytecodes(debug);

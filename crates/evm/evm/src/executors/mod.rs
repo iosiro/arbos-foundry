@@ -18,6 +18,7 @@ use alloy_sol_types::{SolCall, sol};
 use eyre::WrapErr;
 #[cfg(feature = "monad")]
 use foundry_common::{SYSTEM_TRANSACTION_TYPE, is_known_system_sender};
+use foundry_config::stylus::StylusConfig;
 #[cfg(feature = "monad")]
 use foundry_evm_core::evm::{MonadEvmNetwork, try_transact_monad_system_replay};
 #[cfg(feature = "monad")]
@@ -143,6 +144,8 @@ pub struct Executor<FEN: FoundryEvmNetwork> {
     legacy_assertions: bool,
     /// Opt-in cursor for transactions simulated sequentially against one fork.
     block_context: Option<BlockContext<FEN>>,
+    /// ArbOS and Stylus settings used for transaction-local runtime controls.
+    stylus_config: StylusConfig,
 }
 
 #[cfg(feature = "monad")]
@@ -264,6 +267,7 @@ impl Executor<MonadEvmNetwork> {
 impl<FEN: FoundryEvmNetwork> Executor<FEN> {
     /// Creates a new `Executor` with the given arguments.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mut backend: Backend<FEN>,
         evm_env: EvmEnvFor<FEN>,
@@ -272,9 +276,13 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         networks: NetworkConfigs,
         gas_limit: u64,
         legacy_assertions: bool,
+        stylus_config: StylusConfig,
     ) -> Self {
         inspector.networks(networks);
         backend.set_networks(networks);
+        FEN::EvmFactory::default()
+            .initialize_backend(&mut backend, &evm_env, &stylus_config)
+            .expect("failed to initialize network backend state");
         let extra_cheatcode_addresses = inspector.extra_cheatcode_addresses();
         backend.extend_persistent_accounts(extra_cheatcode_addresses.iter().copied());
 
@@ -329,6 +337,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
             gas_limit,
             legacy_assertions,
             block_context: None,
+            stylus_config,
         }
     }
 
@@ -342,6 +351,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
             gas_limit: self.gas_limit,
             legacy_assertions: self.legacy_assertions,
             block_context: self.block_context.clone(),
+            stylus_config: self.stylus_config.clone(),
         }
     }
 
@@ -808,8 +818,9 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         to: Address,
         calldata: Bytes,
         value: U256,
-        chain_context: ChainFor<FEN>,
+        mut chain_context: ChainFor<FEN>,
     ) -> eyre::Result<RawCallResult<FEN>> {
+        chain_context.configure_stylus(&self.stylus_config);
         let (evm_env, tx_env) = self.build_test_env(from, TxKind::Call(to), calldata, value);
         self.transact_with_env_and_context(evm_env, tx_env, chain_context)
     }
@@ -879,8 +890,9 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         &self,
         mut evm_env: EvmEnvFor<FEN>,
         mut tx_env: TxEnvFor<FEN>,
-        chain_context: ChainFor<FEN>,
+        mut chain_context: ChainFor<FEN>,
     ) -> eyre::Result<RawCallResult<FEN>> {
+        chain_context.configure_stylus(&self.stylus_config);
         let mut stack = self.inspector().clone();
         let sancov_edges = stack.inner.sancov_edges;
         let sancov_trace_cmp = stack.inner.sancov_trace_cmp;
@@ -974,6 +986,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         let sancov_edges = stack.inner.sancov_edges;
         let sancov_trace_cmp = stack.inner.sancov_trace_cmp;
         let sancov_active = sancov_edges || sancov_trace_cmp;
+        let stylus_config = self.stylus_config.clone();
         let backend = self.backend_mut();
 
         let (result, evm_env, tx_env) = {
@@ -986,7 +999,8 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
                 TxKind::Create => caller.create(target_tx_env.nonce()),
             };
             backend.set_test_contract(target_contract);
-            let target_chain_context = ChainFor::<FEN>::for_transaction(&target_tx_env);
+            let mut target_chain_context = ChainFor::<FEN>::for_transaction(&target_tx_env);
+            target_chain_context.configure_stylus(&stylus_config);
             if !replay.is_empty() {
                 evm_env.cfg_env.disable_balance_check = true;
             }

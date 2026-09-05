@@ -41,8 +41,8 @@ use foundry_evm::{
         FoundryChain, FoundryTransaction as _,
         env::FromAnyRpcTransaction as _,
         evm::{
-            BlockContext, ChainFor, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, TempoEvmNetwork,
-            TxEnvFor,
+            ArbitrumEvmNetwork, BlockContext, ChainFor, EthEvmNetwork, EvmEnvFor,
+            FoundryEvmNetwork, TempoEvmNetwork, TxEnvFor,
         },
     },
     executors::{EvmError, ExecutorBuilder, TracingExecutor},
@@ -250,6 +250,16 @@ impl VerifyBytecodeArgs {
         let network = Self::materialize_execution_network(&mut config, endpoint_identity.as_ref());
 
         match network {
+            NetworkVariant::Arbitrum => {
+                self.run_with_network_and_config::<ArbitrumEvmNetwork>(
+                    config,
+                    endpoint_identity,
+                    network_was_inferred,
+                    replay_block_transactions::<ArbitrumEvmNetwork>,
+                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                )
+                .await
+            }
             NetworkVariant::Ethereum => {
                 self.run_with_network_and_config::<EthEvmNetwork>(
                     config,
