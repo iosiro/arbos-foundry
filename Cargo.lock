@@ -1200,7 +1200,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-revm?rev=e25b40f422a04de2e4f73aa39eca55b193853b8b#e25b40f422a04de2e4f73aa39eca55b193853b8b"
+source = "git+https://github.com/iosiro/arbos-revm?rev=9d10797061df1ee92b1490308e1d001c77cac9d3#9d10797061df1ee92b1490308e1d001c77cac9d3"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
