@@ -41,14 +41,13 @@ forgetest!(testdata, |_prj, cmd| {
     setup_testdata_cmd(&mut cmd);
 
     let mut args = vec!["test"];
-    let nmc;
-    if cfg!(feature = "isolate-by-default") {
-        nmc = format!(
+    let nmc = if cfg!(feature = "isolate-by-default") {
+        format!(
             "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS})",
-        );
+        )
     } else {
-        nmc = format!("--nmc=({FLAKY_TESTDATA_CONTRACTS})");
-    }
+        format!("--nmc=({FLAKY_TESTDATA_CONTRACTS})")
+    };
     args.push(&nmc);
 
     let orig_assert = cmd.args(args).assert();
