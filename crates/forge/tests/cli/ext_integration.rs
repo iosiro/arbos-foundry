@@ -6,7 +6,7 @@ use foundry_test_utils::util::ExtTester;
 // <https://github.com/foundry-rs/forge-std>
 #[test]
 fn forge_std() {
-    ExtTester::new("foundry-rs", "forge-std", "b69e66b0ff79924d487d49bf7fb47c9ec326acba")
+    ExtTester::new("foundry-rs", "forge-std", "4f227ab1b9a9a62f587580145951c7ace5e42569")
         // Skip fork tests.
         .args(["--nmc", "Fork"])
         .verbosity(2)
