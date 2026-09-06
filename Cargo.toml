@@ -220,7 +220,7 @@ foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
 
 # arbos-revm
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "b7ba809d810cb4f376a28fbdebdd570253eabbe6", version = "0.1.0", default-features = false }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "f9234e69ac268bace1bee6466b505219126371ee", version = "0.1.0", default-features = false }
 
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }
