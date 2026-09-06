@@ -7,7 +7,7 @@ import "utils/Test.sol";
 contract Issue4640Test is Test {
     function testArbitrumBlockNumber() public {
         // <https://arbiscan.io/block/394276729>
-        vm.createSelectFork("arbitrum", 394276729);
+        vm.createSelectFork("arbitrumArchive", 394276729);
         // L1 block number
         assertEq(block.number, 23675778);
     }
