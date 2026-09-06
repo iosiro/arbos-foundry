@@ -20,8 +20,9 @@ mod spec;
 mod table;
 mod trace;
 
-// Run `forge test` on `/testdata`.
-forgetest!(testdata, |_prj, cmd| {
+const FLAKY_TESTDATA_CONTRACTS: &str = "Issue4232Test|Issue4640Test";
+
+fn setup_testdata_cmd(cmd: &mut TestCommand) {
     let testdata =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../testdata").canonicalize().unwrap();
     cmd.current_dir(&testdata);
@@ -30,18 +31,25 @@ forgetest!(testdata, |_prj, cmd| {
     for (name, endpoint) in rpc_endpoints().iter() {
         if let Some(url) = endpoint.endpoint.as_url() {
             let key = format!("RPC_{}", name.to_uppercase());
-            // cmd.env(&key, url);
             writeln!(dotenv, "{key}={url}").unwrap();
         }
     }
-    drop(dotenv);
+}
+
+// Run `forge test` on `/testdata`.
+forgetest!(testdata, |_prj, cmd| {
+    setup_testdata_cmd(&mut cmd);
 
     let mut args = vec!["test"];
+    let nmc;
     if cfg!(feature = "isolate-by-default") {
-        args.push(
-            "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount)",
+        nmc = format!(
+            "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS})",
         );
+    } else {
+        nmc = format!("--nmc=({FLAKY_TESTDATA_CONTRACTS})");
     }
+    args.push(&nmc);
 
     let orig_assert = cmd.args(args).assert();
     if orig_assert.get_output().status.success() {
@@ -64,6 +72,12 @@ forgetest!(testdata, |_prj, cmd| {
     }
 
     orig_assert.success();
+});
+
+forgetest!(flaky_testdata, |_prj, cmd| {
+    setup_testdata_cmd(&mut cmd);
+    let mc = format!("--mc=({FLAKY_TESTDATA_CONTRACTS})");
+    cmd.args(["test", &mc]).assert_success();
 });
 
 // tests that test filters are handled correctly

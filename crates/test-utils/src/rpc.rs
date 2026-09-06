@@ -71,6 +71,16 @@ shuffled_list!(
     ],
 );
 
+// Public Arbitrum endpoints that retain archive state.
+shuffled_list!(
+    ARBITRUM_URLS,
+    vec![
+        //
+        "https://arb-pokt.nodies.app",
+        "https://arbitrum.gateway.tenderly.co",
+    ],
+);
+
 // List of etherscan keys.
 shuffled_list!(
     ETHERSCAN_KEYS,
@@ -93,10 +103,8 @@ pub fn rpc_endpoints() -> RpcEndpoints {
         ("mainnet", RpcEndpointUrl::Url(next_http_archive_rpc_url())),
         ("mainnet2", RpcEndpointUrl::Url(next_http_archive_rpc_url())),
         ("sepolia", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Sepolia))),
-        ("sepoliaArchive", RpcEndpointUrl::Url(sepolia_archive_rpc_url())),
         ("optimism", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Optimism))),
         ("arbitrum", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Arbitrum))),
-        ("arbitrumArchive", RpcEndpointUrl::Url(arbitrum_archive_rpc_url())),
         ("polygon", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Polygon))),
         ("bsc", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::BinanceSmartChain))),
         ("avaxTestnet", RpcEndpointUrl::Url("https://api.avax-test.network/ext/bc/C/rpc".into())),
@@ -139,18 +147,12 @@ pub fn next_ws_archive_rpc_url() -> String {
     next_archive_url(true)
 }
 
-/// Returns a Sepolia URL that has access to archive state.
-pub fn sepolia_archive_rpc_url() -> String {
-    env::var("SEPOLIA_ARCHIVE_RPC").unwrap_or_else(|_| {
-        "https://eth-sepolia.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string()
-    })
-}
-
 /// Returns an Arbitrum URL that has access to archive state.
 pub fn arbitrum_archive_rpc_url() -> String {
-    env::var("ARBITRUM_ARCHIVE_RPC").unwrap_or_else(|_| {
-        "https://arb-mainnet.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string()
-    })
+    ["ARBITRUM_ARCHIVE_RPC", "ARBITRUM_RPC"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|url| !url.is_empty()))
+        .unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string())
 }
 
 /// Returns a URL that has access to archive state.
@@ -195,11 +197,7 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
     }
 
     if matches!(chain, Arbitrum) {
-        let rpc_url = env::var("ARBITRUM_RPC").unwrap_or_default();
-        if !rpc_url.is_empty() {
-            return rpc_url;
-        }
-        return "https://arb1.arbitrum.io/rpc".to_string();
+        return arbitrum_archive_rpc_url();
     }
 
     let publicnode_domain = match chain {
