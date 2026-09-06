@@ -144,7 +144,7 @@ fn test_verify_bytecode_with_ignore(
         );
     }
 }
-forgetest_async!(can_verify_bytecode_no_metadata, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_no_metadata, |prj, cmd| {
     test_verify_bytecode(
         prj,
         cmd,
@@ -165,7 +165,7 @@ forgetest_async!(can_verify_bytecode_no_metadata, |prj, cmd| {
     );
 });
 
-forgetest_async!(can_verify_bytecode_with_metadata, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_with_metadata, |prj, cmd| {
     test_verify_bytecode(
         prj,
         cmd,
@@ -185,7 +185,7 @@ forgetest_async!(can_verify_bytecode_with_metadata, |prj, cmd| {
 });
 
 // Test non-CREATE2 deployed contract with blockscout
-forgetest_async!(can_verify_bytecode_with_blockscout, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_with_blockscout, |prj, cmd| {
     test_verify_bytecode(
         prj,
         cmd,
@@ -205,7 +205,7 @@ forgetest_async!(can_verify_bytecode_with_blockscout, |prj, cmd| {
 });
 
 // Test CREATE2 deployed contract with blockscout
-forgetest_async!(can_vb_create2_with_blockscout, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_create2_with_blockscout, |prj, cmd| {
     test_verify_bytecode(
         prj,
         cmd,
@@ -227,7 +227,7 @@ forgetest_async!(can_vb_create2_with_blockscout, |prj, cmd| {
 });
 
 // Test `--constructor-args`
-forgetest_async!(can_verify_bytecode_with_constructor_args, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_with_constructor_args, |prj, cmd| {
     let constructor_args = vec![
         "0x39053D51B77DC0d36036Fc1fCc8Cb819df8Ef37A",
         "0x91E677b07F7AF907ec9a428aafA9fc14a0d3A338",
@@ -252,7 +252,7 @@ forgetest_async!(can_verify_bytecode_with_constructor_args, |prj, cmd| {
 });
 
 // `--ignore` tests
-forgetest_async!(can_ignore_creation, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_can_ignore_creation, |prj, cmd| {
     test_verify_bytecode_with_ignore(
         prj,
         cmd,
@@ -274,7 +274,7 @@ forgetest_async!(can_ignore_creation, |prj, cmd| {
     );
 });
 
-forgetest_async!(can_ignore_runtime, |prj, cmd| {
+forgetest_async!(flaky_verify_bytecode_can_ignore_runtime, |prj, cmd| {
     test_verify_bytecode_with_ignore(
         prj,
         cmd,
