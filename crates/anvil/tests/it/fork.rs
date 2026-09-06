@@ -1201,7 +1201,7 @@ async fn test_arbitrum_fork_dev_balance() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_arb_fork_mining() {
     let fork_block_number = 394274860u64;
-    let fork_rpc = next_rpc_endpoint(NamedChain::Arbitrum);
+    let fork_rpc = foundry_test_utils::rpc::arbitrum_archive_rpc_url();
     let (api, _handle) = spawn(
         fork_config()
             .with_fork_block_number(Some(fork_block_number))

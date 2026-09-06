@@ -9,7 +9,7 @@ contract Issue3221Test is Test {
     uint256 fork2;
 
     function setUp() public {
-        fork1 = vm.createFork("sepolia", 5565573);
+        fork1 = vm.createFork("sepoliaArchive", 5565573);
         fork2 = vm.createFork("avaxTestnet", 12880747);
     }
 

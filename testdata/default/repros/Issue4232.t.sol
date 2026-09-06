@@ -7,7 +7,7 @@ import "utils/Test.sol";
 contract Issue4232Test is Test {
     function testFork() public {
         // Smoke test, worked previously as well
-        vm.createSelectFork("sepolia", 7215400);
+        vm.createSelectFork("sepoliaArchive", 7215400);
         vm.assertFalse(block.prevrandao == 0);
 
         // Would previously fail with:

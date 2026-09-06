@@ -93,6 +93,7 @@ pub fn rpc_endpoints() -> RpcEndpoints {
         ("mainnet", RpcEndpointUrl::Url(next_http_archive_rpc_url())),
         ("mainnet2", RpcEndpointUrl::Url(next_http_archive_rpc_url())),
         ("sepolia", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Sepolia))),
+        ("sepoliaArchive", RpcEndpointUrl::Url(sepolia_archive_rpc_url())),
         ("optimism", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Optimism))),
         ("arbitrum", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Arbitrum))),
         ("polygon", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Polygon))),
@@ -135,6 +136,20 @@ pub fn next_http_archive_rpc_url() -> String {
 /// Returns an HTTP URL that has access to archive state
 pub fn next_ws_archive_rpc_url() -> String {
     next_archive_url(true)
+}
+
+/// Returns a Sepolia URL that has access to archive state.
+pub fn sepolia_archive_rpc_url() -> String {
+    env::var("SEPOLIA_ARCHIVE_RPC").unwrap_or_else(|_| {
+        "https://eth-sepolia.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string()
+    })
+}
+
+/// Returns an Arbitrum URL that has access to archive state.
+pub fn arbitrum_archive_rpc_url() -> String {
+    env::var("ARBITRUM_ARCHIVE_RPC").unwrap_or_else(|_| {
+        "https://arb-mainnet.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string()
+    })
 }
 
 /// Returns a URL that has access to archive state.
@@ -183,7 +198,7 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
         if !rpc_url.is_empty() {
             return rpc_url;
         }
-        return "https://arb-mainnet.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string();
+        return "https://arb1.arbitrum.io/rpc".to_string();
     }
 
     let publicnode_domain = match chain {
