@@ -71,15 +71,6 @@ shuffled_list!(
     ],
 );
 
-// List of general purpose DRPC keys to rotate through
-shuffled_list!(
-    DRPC_KEYS,
-    vec![
-        "Agc9NK9-6UzYh-vQDDM80Tv0A5UnBkUR8I3qssvAG40d",
-        "AjUPUPonSEInt2CZ_7A-ai3hMyxxBlsR8I4EssvAG40d",
-    ],
-);
-
 // List of etherscan keys.
 shuffled_list!(
     ETHERSCAN_KEYS,
@@ -192,22 +183,24 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
         if !rpc_url.is_empty() {
             return rpc_url;
         }
+        return "https://arb-mainnet.g.alchemy.com/v2/YRFEYwmPJQXMP8D4J-HB-ZV2pFGJk33p".to_string();
+    }
+
+    let publicnode_domain = match chain {
+        Sepolia => Some("ethereum-sepolia-rpc.publicnode.com"),
+        Polygon => Some("polygon-bor-rpc.publicnode.com"),
+        NamedChain::BinanceSmartChain => Some("bsc-rpc.publicnode.com"),
+        _ => None,
+    };
+    if let Some(domain) = publicnode_domain {
+        return if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     }
 
     let reth_works = true;
     let domain = if reth_works && matches!(chain, Mainnet) {
         *(if is_ws { &WS_DOMAINS } else { &HTTP_DOMAINS }).next()
     } else {
-        // DRPC for other networks used in tests.
-        let key = DRPC_KEYS.next();
-        let network = match chain {
-            Mainnet => "ethereum",
-            Polygon => "polygon",
-            Arbitrum => "arbitrum",
-            Sepolia => "sepolia",
-            _ => "",
-        };
-        &format!("lb.drpc.org/ogrpc?network={network}&dkey={key}")
+        panic!("no test RPC endpoint configured for {chain:?}")
     };
 
     if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") }
