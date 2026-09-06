@@ -123,7 +123,10 @@ pub fn configure_env(
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
     cfg.inner.disable_eip3607 = true;
-    cfg.inner.disable_eip3541 = !stylus.disable_stylus_deployment;
+    // Keep EIP-3541 enabled; arbos-revm exempts only the Stylus prefixes valid
+    // for the active ArbOS version.
+    cfg.inner.disable_eip3541 = false;
+    cfg.disable_stylus_deployment = stylus.disable_stylus_deployment;
     cfg.inner.disable_block_gas_limit = disable_block_gas_limit;
     cfg.inner.disable_nonce_check = true;
     // By default do not enforce transaction gas limits imposed by Osaka (EIP-7825).
