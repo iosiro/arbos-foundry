@@ -157,6 +157,11 @@ pub fn arbitrum_archive_rpc_url() -> String {
 
 /// Returns a URL that has access to archive state.
 fn next_archive_url(is_ws: bool) -> String {
+    let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+    if let Some(url) = env_rpc_url(env_var) {
+        test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
+        return url;
+    }
     let domain = if is_ws { &WS_ARCHIVE_DOMAINS } else { &HTTP_ARCHIVE_DOMAINS }.next();
     let url = if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
@@ -200,6 +205,13 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
         return arbitrum_archive_rpc_url();
     }
 
+    if matches!(chain, Mainnet) {
+        let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+        if let Some(url) = env_rpc_url(env_var) {
+            return url;
+        }
+    }
+
     let publicnode_domain = match chain {
         Sepolia => Some("ethereum-sepolia-rpc.publicnode.com"),
         Polygon => Some("polygon-bor-rpc.publicnode.com"),
@@ -218,6 +230,12 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
     };
 
     if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") }
+}
+
+fn env_rpc_url(var: &str) -> Option<String> {
+    env::var(var).ok().and_then(|urls| {
+        urls.split(',').find(|url| !url.trim().is_empty()).map(str::trim).map(str::to_owned)
+    })
 }
 
 /// Basic redaction for debugging RPC URLs.

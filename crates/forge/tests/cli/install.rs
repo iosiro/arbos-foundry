@@ -4,7 +4,9 @@ use forge::{DepIdentifier, FOUNDRY_LOCK, Lockfile};
 use foundry_cli::utils::{Git, Submodules};
 use foundry_compilers::artifacts::Remapping;
 use foundry_config::Config;
-use foundry_test_utils::util::{ExtTester, TestCommand, pretty_err, read_string};
+use foundry_test_utils::util::{
+    ExtTester, FORGE_STD_REVISION, TestCommand, pretty_err, read_string,
+};
 use semver::Version;
 use std::{
     fs,
@@ -41,7 +43,7 @@ Compiler run successful!
 
     // assert lockfile
     let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
-    assert!(matches!(forge_std, DepIdentifier::Rev { .. }));
+    assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
 
     // Expect compilation to be skipped as no files have changed
     cmd.forge_fuse().arg("build").assert_success().stdout_eq(str![[r#"
@@ -78,7 +80,7 @@ Ran 1 test suite [ELAPSED]: 2 tests passed, 0 failed, 0 skipped (2 total tests)
 
     // assert lockfile
     let forge_std = lockfile_get(prj.root(), &PathBuf::from("lib/forge-std")).unwrap();
-    assert!(matches!(forge_std, DepIdentifier::Rev { .. }));
+    assert_eq!(forge_std.rev(), FORGE_STD_REVISION);
 });
 
 // test to check that install/remove works properly

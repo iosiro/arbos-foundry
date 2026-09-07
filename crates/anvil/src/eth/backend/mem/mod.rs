@@ -466,9 +466,9 @@ impl Backend {
         let mut test_params = default_params.clone();
         f(&mut test_params);
 
-        // If no changes would be made and we're not in fork mode, skip journal operations
-        // In fork mode, we need to read actual state to compare
-        if test_params == default_params && !is_fork {
+        // Avoid loading or modifying ArbOS state unless an override was requested. In
+        // particular, ordinary Ethereum forks do not have ArbOS state to initialize.
+        if test_params == default_params {
             return;
         }
 
