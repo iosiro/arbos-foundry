@@ -1072,6 +1072,12 @@ impl NodeConfig {
         // prefixes. Disabling EIP-3541 here bypasses that consensus check.
         cfg.inner.disable_eip3541 = false;
         cfg.disable_stylus_deployment = self.stylus_config.disable_stylus_deployment;
+        if let Some(arbos_version) = self.stylus_config.arbos_version {
+            cfg.arbos_version = u64::from(arbos_version);
+        }
+        cfg.debug_mode = self.stylus_config.debug_mode_stylus;
+        cfg.disable_auto_cache = self.stylus_config.disable_auto_cache_stylus;
+        cfg.disable_auto_activate = self.stylus_config.disable_auto_activate_stylus;
         cfg.inner.disable_block_gas_limit = self.disable_block_gas_limit;
 
         if !self.enable_tx_gas_limit {
@@ -1690,5 +1696,27 @@ mod tests {
         assert!(!config.is_state_history_supported());
         let config = PruneStateHistoryConfig::from_args(Some(Some(10)));
         assert!(config.is_state_history_supported());
+    }
+
+    #[tokio::test]
+    async fn stylus_execution_options_are_applied_to_the_evm_config() {
+        let stylus = StylusConfig {
+            arbos_version: Some(59),
+            disable_auto_cache_stylus: true,
+            disable_auto_activate_stylus: true,
+            debug_mode_stylus: true,
+            disable_stylus_deployment: true,
+            ..Default::default()
+        };
+        let mut config = NodeConfig::test().with_stylus_config(stylus);
+        let backend = config.setup().await.unwrap();
+        let env = backend.env().read();
+        let cfg = &env.evm_env.cfg_env;
+
+        assert_eq!(cfg.arbos_version, 59);
+        assert!(cfg.debug_mode);
+        assert!(cfg.disable_auto_cache);
+        assert!(cfg.disable_auto_activate);
+        assert!(cfg.disable_stylus_deployment);
     }
 }

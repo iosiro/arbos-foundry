@@ -31,7 +31,7 @@ resolver = "2"
 [workspace.package]
 version = "0.1.1"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.93"
 authors = ["Foundry Contributors"]
 license = "MIT OR Apache-2.0"
 homepage = "https://getfoundry.sh"
@@ -220,7 +220,7 @@ foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
 
 # arbos-revm
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "7d3fe19dc84816cd3fabf9a0fd02f263fb04defe", version = "0.1.0", default-features = false }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "6f22c1ffe99b9dcce61a5f85e304981d608ff12c", version = "0.1.0", default-features = false }
 
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }

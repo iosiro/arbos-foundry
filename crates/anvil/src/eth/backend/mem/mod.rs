@@ -88,7 +88,7 @@ use anvil_rpc::error::RpcError;
 use arbos_revm::{
     ArbitrumContext,
     local_context::ArbitrumLocalContext,
-    state::{ArbState, ArbosStateParams},
+    state::{ArbState, ArbStateGetter, ArbosStateParams},
 };
 use chrono::Datelike;
 use eyre::{Context, Result};
@@ -456,12 +456,9 @@ impl Backend {
     /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
     /// populated from context if state is empty), applies the closure to modify them,
     /// and only initializes/commits if the params were actually changed.
-    pub async fn apply_arbitrum_state_overrides(&self, f: impl FnOnce(&mut ArbosStateParams)) {
-        let is_fork = self.fork.read().is_some();
-
+    pub async fn apply_arbitrum_state_overrides(&self, mut f: impl FnMut(&mut ArbosStateParams)) {
         // First, check if the closure would make any changes using default params.
         // This avoids touching the database/journal if nothing would change.
-        // For non-fork mode, we can safely skip if defaults are unchanged.
         let default_params = ArbosStateParams::default();
         let mut test_params = default_params.clone();
         f(&mut test_params);
@@ -488,18 +485,18 @@ impl Backend {
 
             let mut state = context.arb_state(None, false);
 
-            // Get current state (with defaults populated from context if empty)
             let original_params = state.get().unwrap();
+            let mut updated_params = original_params.clone();
+            f(&mut updated_params);
 
-            // In non-fork mode, use the pre-computed test_params
-            // In fork mode, we already checked that test_params != default_params,
-            // so we should initialize
-            if is_fork {
-                // For fork mode, always initialize with the modified params
-                state.initialize(&test_params).unwrap();
+            if original_params.arbos_version == 0 {
+                state.initialize(&updated_params).unwrap();
                 context.journaled_state.finalize()
-            } else if test_params != original_params {
-                state.initialize(&test_params).unwrap();
+            } else if updated_params.stylus_params != original_params.stylus_params {
+                let mut non_stylus_params = updated_params.clone();
+                non_stylus_params.stylus_params = original_params.stylus_params.clone();
+                debug_assert_eq!(non_stylus_params, original_params);
+                state.programs().stylus_params().set(&updated_params.stylus_params).unwrap();
                 context.journaled_state.finalize()
             } else {
                 Default::default()
@@ -3893,6 +3890,10 @@ pub fn is_arbitrum(chain_id: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
+    use alloy_primitives::U256;
+
     use crate::{NodeConfig, spawn};
 
     #[tokio::test]
@@ -3947,5 +3948,24 @@ mod tests {
             block_a_1.header.hash, block_a_2.header.hash,
             "Different blocks should have different hashes"
         );
+    }
+
+    #[tokio::test]
+    async fn arbitrum_overrides_preserve_existing_state() {
+        let mut config = NodeConfig::test();
+        let backend = config.setup().await.unwrap();
+        let chain_id = U256::from(421_614_u64);
+        backend.apply_arbitrum_state_overrides(|params| params.chain_id = chain_id).await;
+
+        let calls = Cell::new(0);
+        backend
+            .apply_arbitrum_state_overrides(|params| {
+                if calls.replace(calls.get() + 1) == 1 {
+                    assert_eq!(params.chain_id, chain_id);
+                }
+                params.stylus_params.ink_price += 1;
+            })
+            .await;
+        assert_eq!(calls.get(), 2);
     }
 }
