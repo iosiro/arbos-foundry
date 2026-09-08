@@ -583,11 +583,15 @@ impl FromAnyRpcTransaction for ArbitrumTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arbos_revm::constants::{ARBOS_ADDRESS, STYLUS_DISCRIMINANT};
+    use alloy_primitives::{B256, keccak256};
+    use arbos_revm::{
+        constants::{ARBOS_ADDRESS, STYLUS_DISCRIMINANT},
+        transaction::ArbitrumRetryTx,
+    };
     use foundry_config::stylus::StylusConfig;
     use revm::{
         Database as _, DatabaseCommit,
-        context::TxEnv,
+        context::{TxEnv, result::ExecutionResult},
         database::InMemoryDB,
         state::{AccountInfo, Bytecode},
     };
@@ -684,6 +688,110 @@ mod tests {
                 )
                 .unwrap();
             assert_eq!(result.result.is_success(), !disabled, "{result:?}");
+        }
+    }
+
+    #[test]
+    fn retryable_execution_persists_across_factory_database_handoff() {
+        for inspected in [false, true] {
+            for reverts in [false, true] {
+                let caller = Address::repeat_byte(0x31);
+                let target = Address::repeat_byte(0x32);
+                let refund_to = Address::repeat_byte(0x33);
+                let network_fee_account = Address::repeat_byte(0x34);
+                let ticket_id = B256::repeat_byte(0x44);
+                let value = U256::from(7);
+                let mut escrow_input = b"retryable escrow".to_vec();
+                escrow_input.extend_from_slice(ticket_id.as_slice());
+                let escrow = Address::from_slice(&keccak256(escrow_input)[12..]);
+
+                let mut db = InMemoryDB::default();
+                let mut env: EvmEnv = EvmEnv::default();
+                env.cfg_env.chain_id = 421_614;
+                env.block_env.basefee = 1;
+                initialize_arbitrum_backend(&mut db, &env, &StylusConfig::default()).unwrap();
+                db.insert_account_info(escrow, AccountInfo::from_balance(value));
+                // Retry gas is prepaid to the fee account by the scheduling transaction.
+                db.insert_account_info(
+                    network_fee_account,
+                    AccountInfo::from_balance(U256::from(100_000)),
+                );
+                // Store 42, then either stop or revert the storage and value transfer.
+                let mut code = vec![0x60, 0x2a, 0x60, 0, 0x55];
+                code.extend_from_slice(if reverts { &[0x60, 0, 0x60, 0, 0xfd] } else { &[0] });
+                db.insert_account_info(
+                    target,
+                    AccountInfo::default().with_code(Bytecode::new_raw(code.into())),
+                );
+
+                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                evm.arb_state(None, false)
+                    .network_fee_account()
+                    .set(network_fee_account)
+                    .unwrap();
+                evm.arb_state(None, false)
+                    .retryable_state()
+                    .create_retryable(
+                        ticket_id,
+                        1_000_000,
+                        caller,
+                        Some(target),
+                        value,
+                        refund_to,
+                        &Bytes::new(),
+                    )
+                    .unwrap();
+                let changes = evm.journaled_state.finalize();
+                evm.journaled_state.database.commit(changes);
+                let (db, env) = evm.finish();
+
+                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                evm.set_inspector_enabled(inspected);
+                let result = evm
+                    .transact_raw(
+                        ArbitrumRetryTx {
+                            chain_id: U256::from(421_614),
+                            from: caller,
+                            gas_limit: 100_000,
+                            gas_fee_cap: U256::from(1),
+                            to: Some(target),
+                            value,
+                            ticket_id,
+                            refund_to,
+                            max_refund: U256::from(100_000),
+                            ..Default::default()
+                        }
+                        .into_transaction(),
+                    )
+                    .unwrap();
+                assert_eq!(result.result.is_success(), !reverts, "{result:?}");
+                assert_eq!(
+                    matches!(result.result, ExecutionResult::Revert { .. }),
+                    reverts,
+                    "{result:?}"
+                );
+                let expected_refund = U256::from(100_000 - result.result.tx_gas_used());
+                evm.journaled_state.database.commit(result.state);
+                let (mut db, env) = evm.finish();
+
+                assert_eq!(
+                    db.storage(target, U256::ZERO).unwrap(),
+                    U256::from(if reverts { 0 } else { 42 })
+                );
+                assert_eq!(
+                    db.basic(target).unwrap().unwrap().balance,
+                    if reverts { U256::ZERO } else { value }
+                );
+                assert_eq!(
+                    db.basic(escrow).unwrap().unwrap_or_default().balance,
+                    if reverts { value } else { U256::ZERO }
+                );
+                assert_eq!(db.basic(refund_to).unwrap().unwrap().balance, expected_refund);
+                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                let timeout =
+                    evm.arb_state(None, true).retryable(ticket_id).timeout().get().unwrap();
+                assert_eq!(timeout, if reverts { 1_000_000 } else { 0 });
+            }
         }
     }
 }
