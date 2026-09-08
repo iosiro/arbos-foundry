@@ -1,12 +1,10 @@
-# Daily CI job for tests excluded from the regular suite because they depend on external services.
+# Manually triggered CI job for tests excluded from the regular suite because they depend on external services.
 
 name: test-flaky
 
 permissions: {}
 
 on:
-  schedule:
-    - cron: "0 1 * * *"
   workflow_dispatch:
 
 concurrency:
