@@ -725,10 +725,7 @@ mod tests {
                 );
 
                 let mut evm = ArbitrumEvmFactory.create_evm(db, env);
-                evm.arb_state(None, false)
-                    .network_fee_account()
-                    .set(network_fee_account)
-                    .unwrap();
+                evm.arb_state(None, false).network_fee_account().set(network_fee_account).unwrap();
                 evm.arb_state(None, false)
                     .retryable_state()
                     .create_retryable(
