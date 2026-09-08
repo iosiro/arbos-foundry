@@ -7,7 +7,7 @@ contract RpcUrlTest is Test {
     // returns the correct url
     function testCanGetRpcUrl() public {
         string memory url = vm.rpcUrl("mainnet");
-        assertTrue(bytes(url).length > 0);
+        assertTrue(bytes(url).length != 0);
     }
 
     // returns an error if env alias does not exist

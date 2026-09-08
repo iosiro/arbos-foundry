@@ -13,11 +13,8 @@ snapshots/
 .claude
 .zed
 
-# NPM
 .env
 node_modules
-dist
-bin
 _
 *.tgz
 .vercel
@@ -26,6 +23,7 @@ _
 *.zip
 
 # Generated wasm
+testdata/fixtures/Stylus/foundry_stylus_debug.wasm
 testdata/fixtures/Stylus/foundry_stylus_program.wasm
 testdata/fixtures/Stylus/foundry_stylus_program.wasm.br
 

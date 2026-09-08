@@ -20,12 +20,6 @@ use data::{collect_preprocessor_data, create_deploy_helpers};
 mod deps;
 use deps::{PreprocessorDependencies, remove_bytecode_dependencies};
 
-/// Returns the range of the given span in the source map.
-#[track_caller]
-fn span_to_range(source_map: &SourceMap, span: Span) -> Range<usize> {
-    source_map.span_to_range(span).unwrap()
-}
-
 /// Preprocessor that replaces static bytecode linking in tests and scripts (`new Contract`) with
 /// dynamic linkage through (`Vm.create*`).
 ///
@@ -46,7 +40,7 @@ impl Preprocessor<SolcCompiler> for DynamicTestLinkingPreprocessor {
     ) -> Result<()> {
         // Skip if we are not preprocessing any tests or scripts. Avoids unnecessary AST parsing.
         if !input.input.sources.iter().any(|(path, _)| paths.is_test_or_script(path)) {
-            trace!("no tests or sources to preprocess");
+            trace!("no tests or scripts to preprocess");
             return Ok(());
         }
 
@@ -60,6 +54,7 @@ impl Preprocessor<SolcCompiler> for DynamicTestLinkingPreprocessor {
             // Include all sources in the source map so as to not re-load them from disk, but only
             // parse and preprocess tests and scripts.
             let mut preprocessed_paths = vec![];
+            let mut script_paths = HashSet::new();
             let sources = &mut input.input.sources;
             for (path, source) in sources.iter() {
                 if let Ok(src_file) = compiler
@@ -69,6 +64,9 @@ impl Preprocessor<SolcCompiler> for DynamicTestLinkingPreprocessor {
                     && paths.is_test_or_script(path)
                 {
                     pcx.add_file(src_file);
+                    if paths.is_script(path) {
+                        script_paths.insert(path.clone());
+                    }
                     preprocessed_paths.push(path.clone());
                 }
             }
@@ -78,9 +76,13 @@ impl Preprocessor<SolcCompiler> for DynamicTestLinkingPreprocessor {
             let ControlFlow::Continue(()) = compiler.lower_asts()? else { return Ok(()) };
             let gcx = compiler.gcx();
             // Collect tests and scripts dependencies and identify mock contracts.
+            // Script paths are passed separately so salted new-expressions are left untouched
+            // (Foundry's broadcast redirects native CREATE2 through the deterministic factory,
+            // but vm.deployCode runs at a deeper depth and bypasses that redirect).
             let deps = PreprocessorDependencies::new(
                 gcx,
                 &preprocessed_paths,
+                &script_paths,
                 &paths.paths_relative().sources,
                 &paths.root,
                 mocks,
@@ -122,4 +124,10 @@ impl Preprocessor<MultiCompiler> for DynamicTestLinkingPreprocessor {
         let paths = paths.clone().with_language::<SolcLanguage>();
         self.preprocess(solc, input, &paths, mocks)
     }
+}
+
+/// Returns the range of the given span in the source map.
+#[track_caller]
+fn span_to_range(source_map: &SourceMap, span: Span) -> Range<usize> {
+    source_map.span_to_range(span).unwrap()
 }

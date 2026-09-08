@@ -1,21 +1,30 @@
 //! general eth api tests
 
 use crate::{
-    abi::{Multicall, SimpleStorage},
+    abi::{Multicall, SimpleStorage, VendingMachine},
     utils::{connect_pubsub_with_wallet, http_provider, http_provider_with_signer},
 };
-use alloy_consensus::{SignableTransaction, Transaction, TxEip1559};
-use alloy_network::{EthereumWallet, TransactionBuilder, TxSignerSync};
+use alloy_consensus::{
+    BlobTransactionSidecar, SidecarBuilder, SignableTransaction, SimpleCoder, Transaction,
+    TxEip1559,
+};
+use alloy_network::{
+    AnyRpcHeader, EthereumWallet, ReceiptResponse, TransactionBuilder, TransactionBuilder4844,
+    TxSignerSync,
+};
 use alloy_primitives::{
-    Address, B256, ChainId, U256, b256, bytes,
+    Address, B256, ChainId, Keccak256, U256, b256, bytes, keccak256,
     map::{AddressHashMap, B256HashMap, HashMap},
 };
-use alloy_provider::Provider;
+use alloy_provider::{PendingTransactionConfig, Provider};
 use alloy_rpc_types::{
-    BlockId, BlockNumberOrTag, BlockTransactions, request::TransactionRequest,
-    state::AccountOverride,
+    BlockId, BlockNumberOrTag, BlockOverrides, BlockTransactions, debug::ExecutionWitness,
+    erc4337::TransactionConditional, request::TransactionRequest, state::AccountOverride,
 };
+use alloy_rpc_types_eth::{Bundle, EthCallResponse};
+use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse};
 use alloy_serde::WithOtherFields;
+use alloy_sol_types::SolCall;
 use anvil::{CHAIN_ID, EthereumHardfork, NodeConfig, eth::api::CLIENT_VERSION, spawn};
 use foundry_test_utils::rpc;
 use futures::join;
@@ -35,6 +44,20 @@ async fn can_get_block_number() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn unknown_block_transaction_count_is_none() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+
+    let count: Option<U256> = provider
+        .client()
+        .request("eth_getBlockTransactionCountByNumber", (BlockNumberOrTag::Number(1),))
+        .await
+        .unwrap();
+
+    assert!(count.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn can_dev_get_balance() {
     let (_api, handle) = spawn(NodeConfig::test()).await;
     let provider = handle.http_provider();
@@ -48,10 +71,45 @@ async fn can_dev_get_balance() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_get_price() {
-    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let (api, handle) = spawn(NodeConfig::test()).await;
     let provider = handle.http_provider();
 
-    let _ = provider.get_gas_price().await.unwrap();
+    let gas_price = provider.get_gas_price().await.unwrap();
+    assert!(gas_price > 0);
+    assert_eq!(gas_price, api.gas_price());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_get_base_fee() {
+    let (api, handle) =
+        spawn(NodeConfig::test().with_hardfork(Some(EthereumHardfork::London.into()))).await;
+    let provider = handle.http_provider();
+
+    let base_fee: Option<U256> = provider.client().request("eth_baseFee", ()).await.unwrap();
+    assert_eq!(base_fee, api.base_fee().unwrap());
+
+    let expected = U256::from(1234);
+    api.anvil_set_next_block_base_fee_per_gas(expected).await.unwrap();
+
+    let base_fee: Option<U256> = provider.client().request("eth_baseFee", ()).await.unwrap();
+    assert_eq!(base_fee, Some(expected));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_get_null_base_fee_before_london() {
+    let (api, handle) =
+        spawn(NodeConfig::test().with_hardfork(Some(EthereumHardfork::Berlin.into()))).await;
+    let provider = handle.http_provider();
+
+    let base_fee: Option<U256> = provider.client().request("eth_baseFee", ()).await.unwrap();
+    assert_eq!(base_fee, None);
+
+    api.anvil_reset(None).await.unwrap();
+
+    let base_fee: Option<U256> = provider.client().request("eth_baseFee", ()).await.unwrap();
+    assert_eq!(base_fee, None);
+    let genesis = provider.get_block(BlockId::number(0)).await.unwrap().unwrap();
+    assert_eq!(genesis.header.base_fee_per_gas, None);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -59,7 +117,12 @@ async fn can_get_accounts() {
     let (_api, handle) = spawn(NodeConfig::test()).await;
     let provider = handle.http_provider();
 
-    let _ = provider.get_accounts().await.unwrap();
+    let accounts = provider.get_accounts().await.unwrap();
+    let dev_accounts: Vec<_> = handle.dev_accounts().collect();
+    assert_eq!(accounts.len(), dev_accounts.len());
+    for account in dev_accounts {
+        assert!(accounts.contains(&account), "Missing dev account {account}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -95,10 +158,14 @@ async fn can_modify_chain_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn can_get_network_id() {
-    let (api, _handle) = spawn(NodeConfig::test()).await;
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
 
-    let chain_id = api.network_id().unwrap().unwrap();
-    assert_eq!(chain_id, CHAIN_ID.to_string());
+    let network_id = api.network_id().unwrap().unwrap();
+    assert_eq!(network_id, CHAIN_ID.to_string());
+
+    let provider_network_id = provider.get_net_version().await.unwrap();
+    assert_eq!(provider_network_id, CHAIN_ID);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -125,6 +192,103 @@ async fn can_get_block_by_number() {
 
     let block = provider.get_block(BlockId::hash(block.header.hash)).full().await.unwrap().unwrap();
     assert_eq!(block.transactions.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_get_header_by_number() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+    let to = accounts[1].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    let tx = TransactionRequest::default().with_from(from).with_to(to).with_value(U256::from(1));
+    provider.send_transaction(WithOtherFields::new(tx)).await.unwrap().get_receipt().await.unwrap();
+
+    let block = provider.get_block(BlockId::number(1)).await.unwrap().unwrap();
+    let header: Option<AnyRpcHeader> =
+        provider.client().request("eth_getHeaderByNumber", ("0x1",)).await.unwrap();
+    let header = header.unwrap();
+    assert_eq!(header.hash, block.header.hash);
+    assert_eq!(header.number, block.header.number);
+    assert_eq!(header.transactions_root, block.header.transactions_root);
+
+    let missing: Option<AnyRpcHeader> =
+        provider.client().request("eth_getHeaderByNumber", ("0x2",)).await.unwrap();
+    assert_eq!(missing, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_get_header_by_hash() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+    let to = accounts[1].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    let tx = TransactionRequest::default().with_from(from).with_to(to).with_value(U256::from(1));
+    provider.send_transaction(WithOtherFields::new(tx)).await.unwrap().get_receipt().await.unwrap();
+
+    let block = provider.get_block(BlockId::number(1)).await.unwrap().unwrap();
+    let header: Option<AnyRpcHeader> =
+        provider.client().request("eth_getHeaderByHash", (block.header.hash,)).await.unwrap();
+    let header = header.unwrap();
+    assert_eq!(header.hash, block.header.hash);
+    assert_eq!(header.number, block.header.number);
+    assert_eq!(header.transactions_root, block.header.transactions_root);
+
+    let missing: Option<AnyRpcHeader> =
+        provider.client().request("eth_getHeaderByHash", (B256::ZERO,)).await.unwrap();
+    assert_eq!(missing, None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_resolve_safe_and_finalized_block_tags_with_configured_epoch_slots() {
+    let slots_in_an_epoch = 3;
+    let (api, handle) = spawn(NodeConfig::test().with_slots_in_an_epoch(slots_in_an_epoch)).await;
+    let provider = handle.http_provider();
+
+    api.anvil_mine(Some(U256::from(8)), None).await.unwrap();
+    let latest = provider.get_block_number().await.unwrap();
+    assert_eq!(latest, 8);
+
+    let safe = provider.get_block(BlockId::Number(BlockNumberOrTag::Safe)).await.unwrap().unwrap();
+    assert_eq!(safe.header.number, latest - slots_in_an_epoch);
+
+    let finalized =
+        provider.get_block(BlockId::Number(BlockNumberOrTag::Finalized)).await.unwrap().unwrap();
+    assert_eq!(finalized.header.number, latest - slots_in_an_epoch * 2);
+
+    let fee_history = api.fee_history(U256::from(1), BlockNumberOrTag::Safe, vec![]).await.unwrap();
+    assert_eq!(fee_history.oldest_block, latest - slots_in_an_epoch);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_resolve_safe_and_finalized_block_tags_to_genesis_before_configured_epoch() {
+    let (api, handle) = spawn(NodeConfig::test().with_slots_in_an_epoch(3)).await;
+    let provider = handle.http_provider();
+
+    api.anvil_mine(Some(U256::from(2)), None).await.unwrap();
+    let genesis = provider.get_block(BlockId::number(0)).await.unwrap().unwrap();
+
+    let safe = provider.get_block(BlockId::Number(BlockNumberOrTag::Safe)).await.unwrap().unwrap();
+    assert_eq!(safe.header.number, genesis.header.number);
+    assert_eq!(safe.header.hash, genesis.header.hash);
+
+    let finalized =
+        provider.get_block(BlockId::Number(BlockNumberOrTag::Finalized)).await.unwrap().unwrap();
+    assert_eq!(finalized.header.number, genesis.header.number);
+    assert_eq!(finalized.header.hash, genesis.header.hash);
+
+    let fee_history =
+        api.fee_history(U256::from(1), BlockNumberOrTag::Finalized, vec![]).await.unwrap();
+    assert_eq!(fee_history.oldest_block, genesis.header.number);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -161,6 +325,12 @@ async fn can_get_pending_block() {
     let block = provider.get_block(BlockId::pending()).full().await.unwrap().unwrap();
     assert_eq!(block.header.number, 1);
     assert_eq!(block.transactions.len(), 1);
+
+    let receipts = provider.get_block_receipts(BlockId::pending()).await.unwrap().unwrap();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].transaction_hash(), *pending.tx_hash());
+    assert_eq!(receipts[0].block_number(), Some(block.header.number));
+    assert_eq!(receipts[0].block_hash(), Some(block.header.hash));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -378,6 +548,192 @@ async fn can_call_with_state_override() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn can_call_many() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let signer: EthereumWallet = wallet.clone().into();
+    let from = wallet.address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    let simple_storage_contract =
+        SimpleStorage::deploy(&provider, "initial".to_string()).await.unwrap();
+
+    let set_value = simple_storage_contract.setValue("updated".to_string());
+    let get_value = simple_storage_contract.getValue();
+    let transactions = vec![
+        WithOtherFields::new(
+            TransactionRequest::default()
+                .with_from(from)
+                .with_to(*simple_storage_contract.address())
+                .with_input(set_value.calldata().clone()),
+        ),
+        WithOtherFields::new(
+            TransactionRequest::default()
+                .with_from(from)
+                .with_to(*simple_storage_contract.address())
+                .with_input(get_value.calldata().clone()),
+        ),
+    ];
+
+    let response: Vec<Vec<EthCallResponse>> = provider
+        .client()
+        .request(
+            "eth_callMany",
+            (vec![
+                Bundle { transactions, block_override: None },
+                Bundle { transactions: Vec::new(), block_override: None },
+            ],),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.len(), 2);
+    assert_eq!(response[0].len(), 2);
+    assert!(response[1].is_empty());
+    assert_eq!(response[0][0].error, None);
+    let output = response[0][1].clone().ensure_ok().unwrap();
+    let value = SimpleStorage::getValueCall::abi_decode_returns(&output).unwrap();
+    assert_eq!(value, "updated");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn call_many_progresses_block_context() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+    let probe = Address::repeat_byte(0x42);
+    // Return NUMBER followed by TIMESTAMP.
+    api.anvil_set_code(probe, bytes!("435f524260205260405ff3")).await.unwrap();
+
+    let request = || {
+        WithOtherFields::new(TransactionRequest::default().with_to(probe).with_gas_limit(100_000))
+    };
+    let bundles = vec![
+        Bundle {
+            transactions: vec![request()],
+            block_override: Some(BlockOverrides {
+                number: Some(U256::from(99)),
+                time: Some(1_234),
+                ..Default::default()
+            }),
+        },
+        Bundle { transactions: Vec::new(), block_override: None },
+        Bundle { transactions: vec![request()], block_override: None },
+    ];
+
+    let response: Vec<Vec<EthCallResponse>> =
+        provider.client().request("eth_callMany", (bundles,)).await.unwrap();
+    let first = response[0][0].clone().ensure_ok().unwrap();
+    let third = response[2][0].clone().ensure_ok().unwrap();
+
+    assert_eq!(U256::from_be_slice(&first[..32]), U256::from(99));
+    assert_eq!(U256::from_be_slice(&first[32..]), U256::from(1_234));
+    assert_eq!(U256::from_be_slice(&third[..32]), U256::from(101));
+    assert_eq!(U256::from_be_slice(&third[32..]), U256::from(1_236));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_call_bundle() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+    let wallets = handle.dev_wallets().collect::<Vec<_>>();
+    let sender = wallets[1].address();
+    let coinbase = wallets[2].address();
+    let initial_coinbase_balance = provider.get_balance(coinbase).await.unwrap();
+    let fees = provider.estimate_eip1559_fees().await.unwrap();
+    let base_fee = api.base_fee().unwrap().unwrap().to::<u64>();
+
+    let mut raw_transactions = Vec::new();
+    let mut transaction_hashes = Vec::new();
+    let mut expected_gas_fees = U256::ZERO;
+    for (nonce, value) in [(0, 1), (1, 2)] {
+        let mut tx = TxEip1559 {
+            chain_id: CHAIN_ID,
+            nonce,
+            gas_limit: 21_000,
+            max_fee_per_gas: fees.max_fee_per_gas,
+            max_priority_fee_per_gas: fees.max_priority_fee_per_gas,
+            to: coinbase.into(),
+            value: U256::from(value),
+            ..Default::default()
+        };
+        let signature = wallets[1].sign_transaction_sync(&mut tx).unwrap();
+        let tx = tx.into_signed(signature);
+        let gas_price = tx.effective_tip_per_gas(base_fee).unwrap();
+        expected_gas_fees += U256::from(gas_price) * U256::from(21_000);
+        transaction_hashes.push(*tx.hash());
+
+        let mut encoded = Vec::new();
+        tx.eip2718_encode(&mut encoded);
+        raw_transactions.push(encoded.into());
+    }
+
+    let response: EthCallBundleResponse = provider
+        .client()
+        .request(
+            "eth_callBundle",
+            (EthCallBundle {
+                txs: raw_transactions.clone(),
+                block_number: 1,
+                state_block_number: BlockNumberOrTag::Latest,
+                coinbase: Some(coinbase),
+                ..Default::default()
+            },),
+        )
+        .await
+        .unwrap();
+
+    let mut expected_bundle_hash = Keccak256::new();
+    for hash in transaction_hashes {
+        expected_bundle_hash.update(hash);
+    }
+    assert_eq!(response.bundle_hash, expected_bundle_hash.finalize());
+    assert_eq!(response.state_block_number, 0);
+    assert_eq!(response.total_gas_used, 42_000);
+    assert_eq!(response.gas_fees, expected_gas_fees);
+    assert_eq!(response.eth_sent_to_coinbase, U256::from(3));
+    assert_eq!(response.coinbase_diff, expected_gas_fees + U256::from(3));
+    assert_eq!(
+        response.bundle_gas_price,
+        response.coinbase_diff / U256::from(response.total_gas_used)
+    );
+    assert_eq!(response.results.len(), 2);
+    assert_eq!(response.results[0].from_address, sender);
+    assert_eq!(response.results[0].to_address, Some(coinbase));
+    assert_eq!(response.results[0].eth_sent_to_coinbase, U256::from(1));
+    assert_eq!(response.results[1].eth_sent_to_coinbase, U256::from(2));
+    assert!(response.results.iter().all(|result| result.revert.is_none()));
+
+    assert_eq!(provider.get_balance(coinbase).await.unwrap(), initial_coinbase_balance);
+
+    let empty_bundle: Result<EthCallBundleResponse, _> = provider
+        .client()
+        .request(
+            "eth_callBundle",
+            (EthCallBundle {
+                block_number: 1,
+                state_block_number: BlockNumberOrTag::Latest,
+                ..Default::default()
+            },),
+        )
+        .await;
+    assert!(empty_bundle.unwrap_err().to_string().contains("bundle missing txs"));
+
+    let zero_block: Result<EthCallBundleResponse, _> = provider
+        .client()
+        .request(
+            "eth_callBundle",
+            (EthCallBundle {
+                txs: vec![raw_transactions[0].clone()],
+                state_block_number: BlockNumberOrTag::Latest,
+                ..Default::default()
+            },),
+        )
+        .await;
+    assert!(zero_block.unwrap_err().to_string().contains("bundle missing blockNumber"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn can_mine_while_mining() {
     let (api, _) = spawn(NodeConfig::test()).await;
 
@@ -431,9 +787,135 @@ async fn can_send_raw_tx_sync() {
     let mut encoded = Vec::new();
     tx.eip2718_encode(&mut encoded);
 
-    let receipt = api.send_raw_transaction_sync(encoded.into()).await.unwrap();
-    assert_eq!(receipt.from, wallets[1].address());
-    assert_eq!(receipt.to, tx.to());
+    let receipt = api.send_raw_transaction_sync(encoded.into(), None).await.unwrap();
+    assert_eq!(receipt.from(), wallets[1].address());
+    assert_eq!(receipt.to(), tx.to());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_parse_raw_tx_sync_timeout() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+
+    let one_arg: Result<serde_json::Value, _> = provider
+        .client()
+        .request("eth_sendRawTransactionSync", (alloy_primitives::Bytes::default(),))
+        .await;
+    assert!(one_arg.unwrap_err().to_string().contains("Empty transaction data"));
+
+    let null_timeout: Result<serde_json::Value, _> = provider
+        .client()
+        .request(
+            "eth_sendRawTransactionSync",
+            (alloy_primitives::Bytes::default(), Option::<u64>::None),
+        )
+        .await;
+    assert!(null_timeout.unwrap_err().to_string().contains("Empty transaction data"));
+
+    let timeout: Result<serde_json::Value, _> = provider
+        .client()
+        .request("eth_sendRawTransactionSync", (alloy_primitives::Bytes::default(), 1u64))
+        .await;
+    assert!(timeout.unwrap_err().to_string().contains("Empty transaction data"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn raw_tx_sync_timeout_returns_transaction_hash() {
+    let (_api, handle) = spawn(NodeConfig::test().with_no_mining(true)).await;
+    let provider = http_provider(&handle.http_endpoint());
+
+    let wallets = handle.dev_wallets().collect::<Vec<_>>();
+    let eip1559_est = provider.estimate_eip1559_fees().await.unwrap();
+    let mut tx = TxEip1559 {
+        max_fee_per_gas: eip1559_est.max_fee_per_gas,
+        max_priority_fee_per_gas: eip1559_est.max_priority_fee_per_gas,
+        gas_limit: 100000,
+        chain_id: 31337,
+        to: alloy_primitives::TxKind::Call(wallets[0].address()),
+        ..Default::default()
+    };
+    let signature = wallets[1].sign_transaction_sync(&mut tx).unwrap();
+    let tx = tx.into_signed(signature);
+    let expected_hash = *tx.hash();
+    let mut encoded = Vec::new();
+    tx.eip2718_encode(&mut encoded);
+
+    let response: Result<serde_json::Value, _> = provider
+        .client()
+        .request("eth_sendRawTransactionSync", (alloy_primitives::Bytes::from(encoded), 1u64))
+        .await;
+    let error = response.unwrap_err();
+    assert_eq!(error.tx_hash_data(), Some(expected_hash));
+    let error = error.as_error_resp().unwrap();
+    assert_eq!(error.code, 4);
+    assert_eq!(error.message, "Transaction confirmation timeout");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_send_raw_transaction_conditional() {
+    let node_config = NodeConfig::test().with_hardfork(Some(EthereumHardfork::Prague.into()));
+    let (_api, handle) = spawn(node_config).await;
+    let provider = http_provider(&handle.http_endpoint());
+
+    let wallets = handle.dev_wallets().collect::<Vec<_>>();
+    let eip1559_est = provider.estimate_eip1559_fees().await.unwrap();
+
+    let from = wallets[0].address();
+    let mut tx = TxEip1559 {
+        max_fee_per_gas: eip1559_est.max_fee_per_gas,
+        max_priority_fee_per_gas: eip1559_est.max_priority_fee_per_gas,
+        gas_limit: 100000,
+        chain_id: 31337,
+        to: alloy_primitives::TxKind::Call(from),
+        input: bytes!("11112222"),
+        ..Default::default()
+    };
+    let signature = wallets[1].sign_transaction_sync(&mut tx).unwrap();
+
+    let tx = tx.into_signed(signature);
+    let mut encoded = Vec::new();
+    tx.eip2718_encode(&mut encoded);
+
+    let tx_hash = provider
+        .raw_request(
+            "eth_sendRawTransactionConditional".into(),
+            (
+                alloy_primitives::Bytes::from(encoded),
+                TransactionConditional { block_number_min: Some(u64::MAX), ..Default::default() },
+            ),
+        )
+        .await
+        .unwrap();
+
+    let tx_hash = provider
+        .watch_pending_transaction(PendingTransactionConfig::new(tx_hash))
+        .await
+        .unwrap()
+        .await
+        .unwrap();
+
+    let receipt = provider.get_transaction_receipt(tx_hash).await.unwrap().unwrap();
+    assert_eq!(receipt.from(), wallets[1].address());
+    assert_eq!(receipt.to(), tx.to());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ignores_raw_transaction_conditional_prestate() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+
+    let result: std::result::Result<serde_json::Value, _> = provider
+        .raw_request(
+            "eth_sendRawTransactionConditional".into(),
+            (
+                alloy_primitives::Bytes::default(),
+                TransactionConditional { block_number_min: Some(u64::MAX), ..Default::default() },
+            ),
+        )
+        .await;
+
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("Empty transaction data"), "{err}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -452,7 +934,7 @@ async fn can_send_tx_sync() {
         .with_input(logger_bytecode);
 
     let receipt = api.send_transaction_sync(WithOtherFields::new(tx)).await.unwrap();
-    assert_eq!(receipt.from, wallets[0].address());
+    assert_eq!(receipt.from(), wallets[0].address());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -466,4 +948,309 @@ async fn can_get_code_by_hash() {
 
     let code = api.debug_code_by_hash(code_hash, None).await.unwrap();
     assert_eq!(&code.unwrap(), foundry_evm::constants::DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_debug_get_modified_accounts_by_number() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+
+    let response: serde_json::Value = provider
+        .raw_request("debug_getModifiedAccountsByNumber".into(), (0u64, 1u64))
+        .await
+        .unwrap();
+    assert_eq!(response, serde_json::Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_debug_free_os_memory() {
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    let provider = handle.http_provider();
+
+    let response: serde_json::Value =
+        provider.raw_request("debug_freeOSMemory".into(), ()).await.unwrap();
+    assert_eq!(response, serde_json::Value::Null);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_fills_chain_id() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    let tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(Address::random())
+        .with_gas_limit(21_000);
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Should fill with the chain id from provider
+    assert!(filled.tx.chain_id().is_some());
+    assert_eq!(filled.tx.chain_id().unwrap(), CHAIN_ID);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_fills_nonce() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+    let to = accounts[1].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    // Send a transaction to increment nonce
+    let tx = TransactionRequest::default().with_from(from).with_to(to).with_value(U256::from(100));
+    let tx = WithOtherFields::new(tx);
+    provider.send_transaction(tx).await.unwrap().get_receipt().await.unwrap();
+
+    // Now the account should have nonce 1
+    let tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(to)
+        .with_value(U256::from(1000))
+        .with_gas_limit(21_000);
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    assert_eq!(filled.tx.nonce(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_preserves_provided_fields() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    let provided_nonce = 100u64;
+    let provided_gas_limit = 50_000u64;
+
+    let tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(Address::random())
+        .with_value(U256::from(1000))
+        .with_nonce(provided_nonce)
+        .with_gas_limit(provided_gas_limit);
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Should preserve the provided nonce and gas limit
+    assert_eq!(filled.tx.nonce(), provided_nonce);
+    assert_eq!(filled.tx.gas_limit(), provided_gas_limit);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_fills_all_missing_fields() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    // Create a simple transfer transaction with minimal fields
+    let tx_req = TransactionRequest::default().with_from(from).with_to(Address::random());
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Should fill all required fields and be EIP-1559
+    assert!(filled.tx.is_eip1559());
+    assert!(filled.tx.gas_limit() > 0);
+    assert!(filled.tx.max_fee_per_gas() > 0);
+    assert!(filled.tx.max_priority_fee_per_gas().is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_eip4844_blob_fee() {
+    let node_config = NodeConfig::test().with_hardfork(Some(EthereumHardfork::Cancun.into()));
+    let (api, handle) = spawn(node_config).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    let mut builder = SidecarBuilder::<SimpleCoder>::new();
+    builder.ingest(b"dummy blob");
+    let sidecar: BlobTransactionSidecar = builder.build().unwrap();
+
+    // EIP-4844 blob transaction with sidecar but no blob fee
+    let mut tx_req = TransactionRequest::default().with_from(from).with_to(Address::random());
+    tx_req.sidecar = Some(sidecar.into());
+    tx_req.transaction_type = Some(3); // EIP-4844
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Blob transaction should have max_fee_per_blob_gas filled
+    assert!(
+        filled.tx.max_fee_per_blob_gas().is_some(),
+        "max_fee_per_blob_gas should be filled for blob tx"
+    );
+    assert!(filled.tx.blob_versioned_hashes().is_some(), "blob_versioned_hashes should be present");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_eip4844_preserves_blob_fee() {
+    let node_config = NodeConfig::test().with_hardfork(Some(EthereumHardfork::Cancun.into()));
+    let (api, handle) = spawn(node_config).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    let provided_blob_fee = 5_000_000u128;
+
+    let mut builder = SidecarBuilder::<SimpleCoder>::new();
+    builder.ingest(b"dummy blob");
+    let sidecar: BlobTransactionSidecar = builder.build().unwrap();
+
+    // EIP-4844 blob transaction with blob fee already set
+    let mut tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(Address::random())
+        .with_max_fee_per_blob_gas(provided_blob_fee);
+    tx_req.sidecar = Some(sidecar.into());
+    tx_req.transaction_type = Some(3); // EIP-4844
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Should preserve the provided blob fee
+    assert_eq!(
+        filled.tx.max_fee_per_blob_gas(),
+        Some(provided_blob_fee),
+        "should preserve provided max_fee_per_blob_gas"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_non_blob_tx_no_blob_fee() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+    let wallet = handle.dev_wallets().next().unwrap();
+    let from = wallet.address();
+
+    // EIP-1559 transaction without blob fields
+    let mut tx_req = TransactionRequest::default().with_from(from).with_to(Address::random());
+    tx_req.transaction_type = Some(2); // EIP-1559
+
+    let filled = api.fill_transaction(WithOtherFields::new(tx_req)).await.unwrap();
+
+    // Non-blob transaction should NOT have blob fee filled
+    assert!(
+        filled.tx.max_fee_per_blob_gas().is_none(),
+        "max_fee_per_blob_gas should not be set for non-blob tx"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_fill_transaction_reverts_on_gas_estimation_failure() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    // Deploy VendingMachine contract
+    let contract = VendingMachine::deploy(&provider).await.unwrap();
+    let contract_address = *contract.address();
+
+    // Call buy function with insufficient ether
+    let tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(contract_address)
+        .with_input(VendingMachine::buyCall { amount: U256::from(10) }.abi_encode());
+
+    // fill_transaction should fail because gas estimation fails due to revert
+    let result = api.fill_transaction(WithOtherFields::new(tx_req)).await;
+
+    assert!(result.is_err(), "fill_transaction should return an error when gas estimation fails");
+    let error_message = result.unwrap_err().to_string();
+    assert!(
+        error_message.contains("execution reverted"),
+        "Error should indicate a revert, got: {error_message}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_send_transaction_uses_valid_fallback_gas_on_osaka() {
+    let (api, handle) = spawn(
+        NodeConfig::test()
+            .with_hardfork(Some(EthereumHardfork::Osaka.into()))
+            .enable_tx_gas_limit(true),
+    )
+    .await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    // Deploy VendingMachine contract.
+    let contract = VendingMachine::deploy(&provider).await.unwrap();
+    let contract_address = *contract.address();
+
+    // Call buy with insufficient ether and without gas limit.
+    let tx_req = TransactionRequest::default()
+        .with_from(from)
+        .with_to(contract_address)
+        .with_input(VendingMachine::buyCall { amount: U256::from(10) }.abi_encode());
+
+    let receipt = api.send_transaction_sync(WithOtherFields::new(tx_req)).await.unwrap();
+    assert!(!receipt.status(), "transaction should preserve send-path revert semantics");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn can_get_execution_witness() {
+    let (api, handle) = spawn(NodeConfig::test()).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let signer: EthereumWallet = accounts[0].clone().into();
+    let from = accounts[0].address();
+    let to = accounts[1].address();
+
+    let provider = http_provider_with_signer(&handle.http_endpoint(), signer);
+
+    // Deploy a contract so the witness contains code and storage.
+    let contract = SimpleStorage::deploy(&provider, "initial".to_string()).await.unwrap();
+    let receipt = contract
+        .setValue("updated".to_string())
+        .from(from)
+        .send()
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+    let number = receipt.block_number.unwrap();
+
+    // No witness exists for the genesis block since it has no parent state.
+    api.debug_execution_witness(BlockNumberOrTag::Number(0)).await.unwrap_err();
+
+    let witness: ExecutionWitness = provider
+        .client()
+        .request("debug_executionWitness", (BlockNumberOrTag::Number(number),))
+        .await
+        .unwrap();
+
+    // The witness contains the full parent state trie, so the parent state root must be among the
+    // collected nodes.
+    let parent = provider.get_block(BlockId::number(number - 1)).await.unwrap().unwrap();
+    assert!(witness.state.iter().any(|node| keccak256(node) == parent.header.state_root));
+
+    // Preimages of the touched account addresses and the deployed code are included.
+    assert!(witness.keys.iter().any(|key| key.as_ref() == from.as_slice()));
+    assert!(witness.keys.iter().any(|key| key.as_ref() == to.as_slice()));
+    assert!(witness.keys.iter().any(|key| key.len() == 32));
+    assert!(!witness.codes.is_empty());
+
+    // Ancestor headers start at the parent block.
+    assert_eq!(witness.headers.len(), number as usize);
+    assert_eq!(keccak256(&witness.headers[0]), parent.header.hash);
+
+    let tx = TransactionRequest::default().with_from(from).with_to(to).with_value(U256::from(1));
+    provider.send_transaction(WithOtherFields::new(tx)).await.unwrap().get_receipt().await.unwrap();
+
+    // Witnesses for older blocks are served from the state history.
+    let historical: ExecutionWitness = provider
+        .client()
+        .request("debug_executionWitness", (BlockNumberOrTag::Number(number),))
+        .await
+        .unwrap();
+    assert_eq!(historical, witness);
 }

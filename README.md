@@ -87,10 +87,14 @@ pragma solidity ^0.8.18;
 
 import "forge-std/Test.sol";
 
+interface StylusVm {
+    function deployStylusCode(string calldata path) external returns (address);
+}
+
 contract StylusTest is Test {
     function testStylusContract() public {
         // Deploy the Stylus contract from a WASM file
-        address stylusContract = vm.deployStylusCode("path/to/your/program.wasm");
+        address stylusContract = StylusVm(address(vm)).deployStylusCode("path/to/your/program.wasm");
 
         // Interact with it like any other contract
         (bool success, bytes memory result) = stylusContract.call(
@@ -104,8 +108,31 @@ contract StylusTest is Test {
 3. Run your tests:
 
 ```bash
-forge test
+arbos-forge test --network arbitrum
 ```
+
+### Execution Network and Test Isolation
+
+Select the Arbitrum execution backend with `--network arbitrum`, or configure it
+for the project:
+
+```toml
+[profile.default]
+network = "arbitrum"
+fs_permissions = [{ access = "read", path = "./path/to/your" }]
+```
+
+Use `--stylus-debug` for WASM artifacts that import debug host functions such as
+`console.log_txt`. The same network flag is available to `arbos-anvil` and
+`arbos-chisel`. `arbos-cast call --trace` and `arbos-cast run` select their backend
+from project configuration or the RPC endpoint. Fork endpoints with a known
+Arbitrum chain ID select the Arbitrum backend automatically when no network
+override is set.
+
+Newer Foundry enables call isolation by default: top-level calls in a test run as
+separate transactions. Tests that intentionally share transient storage or warm
+accesses between those calls can retain the older behavior with `isolate = false`
+under `[profile.default]`, or `FOUNDRY_ISOLATE=false` for one invocation.
 
 ### Using vm.etch for Manual Deployment
 
@@ -325,6 +352,7 @@ contract GasInfoTest is Test {
 
 ```bash
 arbos-forge test \
+  --network arbitrum \
   --stylus-version 2 \
   --stylus-ink-price 10000 \
   --stylus-max-stack-depth 262144 \

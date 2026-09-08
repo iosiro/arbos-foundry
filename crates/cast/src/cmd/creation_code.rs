@@ -1,17 +1,16 @@
 use super::interface::load_abi_from_file;
 use crate::SimpleCast;
 use alloy_consensus::Transaction;
+use alloy_network::AnyNetwork;
 use alloy_primitives::{Address, Bytes};
-use alloy_provider::{Provider, ext::TraceApi};
+use alloy_provider::{Provider, RootProvider, ext::TraceApi};
 use alloy_rpc_types::trace::parity::{Action, CreateAction, CreateOutput, TraceOutput};
 use clap::Parser;
 use eyre::{OptionExt, Result, eyre};
-use foundry_block_explorers::Client;
 use foundry_cli::{
     opts::{EtherscanOpts, RpcOpts},
     utils::{self, LoadConfig, fetch_abi_from_etherscan},
 };
-use foundry_common::provider::RetryProvider;
 use foundry_config::Config;
 
 foundry_config::impl_figment_convert!(CreationCodeArgs, etherscan, rpc);
@@ -120,11 +119,19 @@ pub async fn parse_code_output(
     }
 
     let args_size = constructor.inputs.len() * 32;
+    let split = bytecode.len().checked_sub(args_size).ok_or_else(|| {
+        eyre!(
+            "Invalid creation bytecode length: have {} bytes, need at least {} for {} constructor inputs",
+            bytecode.len(),
+            args_size,
+            constructor.inputs.len()
+        )
+    })?;
 
     let bytecode = if without_args {
-        Bytes::from(bytecode[..bytecode.len() - args_size].to_vec())
+        Bytes::from(bytecode[..split].to_vec())
     } else if only_args {
-        Bytes::from(bytecode[bytecode.len() - args_size..].to_vec())
+        Bytes::from(bytecode[split..].to_vec())
     } else {
         unreachable!();
     };
@@ -136,11 +143,13 @@ pub async fn parse_code_output(
 pub async fn fetch_creation_code_from_etherscan(
     contract: Address,
     config: &Config,
-    provider: RetryProvider,
+    provider: RootProvider<AnyNetwork>,
 ) -> Result<Bytes> {
     let chain = config.chain.unwrap_or_default();
-    let api_key = config.get_etherscan_api_key(Some(chain)).unwrap_or_default();
-    let client = Client::new(chain, api_key)?;
+    let client = config
+        .get_etherscan_config_with_chain(Some(chain))?
+        .ok_or_else(|| eyre!("No Etherscan API key configured for chain {chain}"))?
+        .into_client_with_no_proxy(config.eth_rpc_no_proxy)?;
     let creation_data = client.contract_creation_data(contract).await?;
     let creation_tx_hash = creation_data.transaction_hash;
     let tx_data = provider.get_transaction_by_hash(creation_tx_hash).await?;
@@ -173,4 +182,38 @@ pub async fn fetch_creation_code_from_etherscan(
     };
 
     Ok(bytecode)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[tokio::test]
+    async fn rejects_creation_code_shorter_than_constructor_head() {
+        let mut abi = tempfile::NamedTempFile::new().unwrap();
+        write!(
+            abi,
+            r#"{{"abi":[{{"type":"constructor","inputs":[{{"name":"value","type":"uint256"}}]}}]}}"#
+        )
+        .unwrap();
+
+        for (without_args, only_args) in [(true, false), (false, true)] {
+            let err = parse_code_output(
+                Bytes::from(vec![0; 31]),
+                Address::ZERO,
+                &Config::default(),
+                abi.path().to_str(),
+                without_args,
+                only_args,
+            )
+            .await
+            .unwrap_err();
+
+            assert_eq!(
+                err.to_string(),
+                "Invalid creation bytecode length: have 31 bytes, need at least 32 for 1 constructor inputs"
+            );
+        }
+    }
 }

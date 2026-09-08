@@ -1,15 +1,22 @@
+use super::auth::confirm_auth_rpc_disclosure;
 use crate::tx::{CastTxBuilder, SenderKind};
 use alloy_ens::NameOrAddress;
+use alloy_network::{Ethereum, Network};
 use alloy_primitives::U256;
 use alloy_provider::Provider;
 use alloy_rpc_types::BlockId;
 use clap::Parser;
 use eyre::Result;
 use foundry_cli::{
-    opts::{EthereumOpts, TransactionOpts},
-    utils::{self, LoadConfig, parse_ether_value},
+    json::print_scalar,
+    opts::{RpcOpts, TransactionOpts},
+    utils::{LoadConfig, parse_ether_value},
 };
-use std::str::FromStr;
+use foundry_common::{FoundryTransactionBuilder, provider::ProviderBuilder, shell};
+use foundry_wallets::{BrowserWalletOpts, WalletOpts};
+use serde::Serialize;
+use std::{fmt::Display, str::FromStr};
+use tempo_alloy::TempoNetwork;
 
 /// CLI arguments for `cast estimate`.
 #[derive(Debug, Parser)]
@@ -37,14 +44,24 @@ pub struct EstimateArgs {
     #[arg(long)]
     cost: bool,
 
+    #[command(flatten)]
+    wallet: WalletOpts,
+
+    #[command(flatten)]
+    browser: BrowserWalletOpts,
+
     #[command(subcommand)]
     command: Option<EstimateSubcommands>,
 
     #[command(flatten)]
     tx: TransactionOpts,
 
+    /// Skip the EIP-7702 authorization disclosure confirmation.
+    #[arg(long)]
+    force: bool,
+
     #[command(flatten)]
-    eth: EthereumOpts,
+    rpc: RpcOpts,
 }
 
 #[derive(Debug, Parser)]
@@ -74,11 +91,39 @@ pub enum EstimateSubcommands {
 
 impl EstimateArgs {
     pub async fn run(self) -> Result<()> {
-        let Self { to, mut sig, mut args, mut tx, block, cost, eth, command } = self;
+        if self.tx.tempo.is_tempo() {
+            self.run_with_network::<TempoNetwork>().await
+        } else {
+            self.run_with_network::<Ethereum>().await
+        }
+    }
 
-        let config = eth.load_config()?;
-        let provider = utils::get_provider(&config)?;
-        let sender = SenderKind::from_wallet_opts(eth.wallet).await?;
+    pub async fn run_with_network<N: Network>(self) -> Result<()>
+    where
+        N::TransactionRequest: FoundryTransactionBuilder<N>,
+    {
+        let Self {
+            to,
+            mut sig,
+            mut args,
+            mut tx,
+            block,
+            cost,
+            wallet,
+            browser,
+            force,
+            rpc,
+            command,
+        } = self;
+
+        let config = rpc.load_config()?;
+        let provider = ProviderBuilder::<N>::from_config(&config)?.build()?;
+        let browser = browser.run::<N>().await?;
+        let sender = if let Some(browser) = &browser {
+            browser.address().into()
+        } else {
+            SenderKind::from_wallet_opts(wallet).await?
+        };
 
         let code = if let Some(EstimateSubcommands::Create {
             code,
@@ -97,24 +142,41 @@ impl EstimateArgs {
             None
         };
 
-        let (tx, _) = CastTxBuilder::new(&provider, tx, &config)
+        let builder = CastTxBuilder::new(&provider, tx, &config)
             .await?
             .with_to(to)
             .await?
             .with_code_sig_and_args(code, sig, args)
             .await?
-            .build_raw(sender)
-            .await?;
+            .raw();
+        if builder.has_auth() && !confirm_auth_rpc_disclosure(&builder, &sender, force)? {
+            return Ok(());
+        }
+        let (tx, _) = builder.build(sender).await?;
 
+        let tx = if browser.is_some() { tx.browser_wallet_gas_estimation_request() } else { tx };
         let gas = provider.estimate_gas(tx).block(block.unwrap_or_default()).await?;
         if cost {
             let gas_price_wei = provider.get_gas_price().await?;
             let cost = gas_price_wei * gas as u128;
             let cost_eth = cost as f64 / 1e18;
-            sh_println!("{cost_eth}")?;
+            print_estimate_result(cost_eth)?;
         } else {
-            sh_println!("{gas}")?;
+            print_estimate_result(gas)?;
         }
+        Ok(())
+    }
+}
+
+fn print_estimate_result(value: impl Serialize + Display) -> Result<()> {
+    if shell::is_json() {
+        print_scalar(value)
+    } else {
+        // Bypass the shell verbosity layer so `--quiet` does not suppress the primary result.
+        let mut shell = shell::Shell::get();
+        let out = shell.out();
+        writeln!(out, "{value}")?;
+        out.flush()?;
         Ok(())
     }
 }

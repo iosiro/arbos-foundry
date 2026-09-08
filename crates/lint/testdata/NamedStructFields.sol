@@ -1,3 +1,5 @@
+//@compile-flags: --only-lint named-struct-fields
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
