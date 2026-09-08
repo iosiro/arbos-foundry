@@ -396,11 +396,11 @@ impl ScriptArgs {
         }
 
         if evm_opts.networks.is_arbitrum() {
-            return Box::pin(self.run_generic_script::<ArbitrumEvmNetwork>(
-                config,
-                evm_opts,
-                ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
-            ))
+            let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                .stylus_config(evm_opts.stylus_config.clone());
+            return Box::pin(
+                self.run_generic_script::<ArbitrumEvmNetwork>(config, evm_opts, builder),
+            )
             .await;
         }
 
@@ -1141,12 +1141,7 @@ impl<FEN: FoundryEvmNetwork> ScriptConfig<FEN> {
         tx_env.set_fee_token(self.tempo.fee_token);
 
         let mut runner = ScriptRunner::new(
-            builder.stylus_config(self.evm_opts.stylus_config.clone()).build(
-                evm_env,
-                tx_env,
-                db,
-                self.evm_opts.networks,
-            ),
+            builder.try_build(evm_env, tx_env, db, self.evm_opts.networks)?,
             self.evm_opts.clone(),
         )
         .with_debug_bytecodes(debug);

@@ -2222,9 +2222,14 @@ interface Vm {
     #[cheatcode(group = Filesystem)]
     function getStylusCode(string calldata artifactPath) external view returns (bytes memory runtimeBytecode);
 
-    /// Returns EVM init code that deploys compressed, Stylus-prefixed runtime bytecode.
+    /// Returns zero-value EVM init code that deploys compressed, Stylus-prefixed runtime bytecode.
     #[cheatcode(group = Filesystem)]
     function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory initCode);
+
+    /// Returns EVM init code matching a Stylus deployment with the given CREATE value.
+    /// Use zero for deployments with constructor arguments, whose value is sent in the constructor call.
+    #[cheatcode(group = Filesystem)]
+    function getStylusInitCode(string calldata artifactPath, uint256 createValue) external view returns (bytes memory initCode);
 
     /// Compresses data using Nitro-compatible Brotli parameters.
     #[cheatcode(group = String)]

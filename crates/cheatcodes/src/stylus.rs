@@ -86,9 +86,15 @@ impl Cheatcode for getStylusCodeCall {
     }
 }
 
-impl Cheatcode for getStylusInitCodeCall {
+impl Cheatcode for getStylusInitCode_0Call {
     fn apply<FEN: FoundryEvmNetwork>(&self, state: &mut Cheatcodes<FEN>) -> Result {
-        get_stylus_init_code(state, &self.artifactPath)
+        get_stylus_init_code(state, &self.artifactPath, U256::ZERO)
+    }
+}
+
+impl Cheatcode for getStylusInitCode_1Call {
+    fn apply<FEN: FoundryEvmNetwork>(&self, state: &mut Cheatcodes<FEN>) -> Result {
+        get_stylus_init_code(state, &self.artifactPath, self.createValue)
     }
 }
 
@@ -121,10 +127,10 @@ fn deploy_stylus_code<FEN: FoundryEvmNetwork>(
     }
 
     let bytecode = get_stylus_bytecode(ccx.state, path)?;
-    let init_code = get_init_code(bytecode.as_ref())?;
     let scheme = salt.map_or(CreateScheme::Create, |salt| CreateScheme::Create2 { salt });
     let create_value =
         if constructor_args.is_some() { U256::ZERO } else { value.unwrap_or_default() };
+    let init_code = get_init_code(bytecode.as_ref(), !create_value.is_zero())?;
     let caller = ccx
         .state
         .config
@@ -200,14 +206,23 @@ fn get_stylus_bytecode<FEN: FoundryEvmNetwork>(
     Ok([arbos_revm::constants::STYLUS_DISCRIMINANT, &[0], compressed.as_slice()].concat().into())
 }
 
-fn get_init_code(bytecode: &[u8]) -> Result<Vec<u8>> {
+fn get_init_code(bytecode: &[u8], payable: bool) -> Result<Vec<u8>> {
     let length = u16::try_from(bytecode.len())
         .map_err(|_| fmt_err!("compressed Stylus bytecode exceeds 65535 bytes"))?;
     let mut init = Vec::with_capacity(32 + bytecode.len());
-    init.extend_from_slice(&hex!("608060405234801561001057600080fd5b50"));
+    // Preserve the existing zero-value initcode and its deterministic CREATE2 addresses.
+    // When CREATE itself carries value, omit the nonpayable guard.
+    if payable {
+        init.extend_from_slice(&hex!("6080604052"));
+    } else {
+        init.extend_from_slice(&hex!("608060405234801561001057600080fd5b50"));
+    }
+    let code_offset = (init.len() + 14) as u16;
     init.push(0x61);
     init.extend_from_slice(&length.to_be_bytes());
-    init.extend_from_slice(&hex!("806100206000396000f3fe"));
+    init.extend_from_slice(&hex!("8061"));
+    init.extend_from_slice(&code_offset.to_be_bytes());
+    init.extend_from_slice(&hex!("6000396000f3fe"));
     init.extend_from_slice(bytecode);
     Ok(init)
 }
@@ -216,7 +231,25 @@ fn get_stylus_code<FEN: FoundryEvmNetwork>(state: &Cheatcodes<FEN>, path: &str) 
     Ok(get_stylus_bytecode(state, path)?.abi_encode())
 }
 
-fn get_stylus_init_code<FEN: FoundryEvmNetwork>(state: &Cheatcodes<FEN>, path: &str) -> Result {
+fn get_stylus_init_code<FEN: FoundryEvmNetwork>(
+    state: &Cheatcodes<FEN>,
+    path: &str,
+    create_value: U256,
+) -> Result {
     let bytecode = get_stylus_bytecode(state, path)?;
-    Ok(Bytes::from(get_init_code(&bytecode)?).abi_encode())
+    Ok(Bytes::from(get_init_code(&bytecode, !create_value.is_zero())?).abi_encode())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_value_initcode_remains_byte_for_byte_compatible() {
+        let runtime = hex!("eff00000");
+        assert_eq!(
+            get_init_code(&runtime, false).unwrap(),
+            hex!("608060405234801561001057600080fd5b50610004806100206000396000f3feeff00000")
+        );
+    }
 }

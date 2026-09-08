@@ -128,7 +128,7 @@ pub struct EvmOpts {
     pub create2_deployer: Address,
 
     /// ArbOS and Stylus execution settings for local Arbitrum backends.
-    #[serde(default, rename = "stylus")]
+    #[serde(default, rename = "stylus", alias = "stylus_config")]
     pub stylus_config: StylusConfig,
 
     /// Most recently discovered endpoint identity, cached for network dispatch and revalidation.

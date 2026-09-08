@@ -170,6 +170,8 @@ pub trait FoundryEvmFactory:
     > + Clone
     + Debug
     + Default
+    + Send
+    + Sync
     + 'static
 {
     /// Chain type for EVM's context created by this factory.
@@ -180,11 +182,10 @@ pub trait FoundryEvmFactory:
     /// Most networks do not require database state outside ordinary transactions. Networks with
     /// system-contract state can override this hook; implementations must preserve already
     /// initialized fork state.
-    fn initialize_backend(
+    fn initialize_backend<DB: alloy_evm::Database + revm::DatabaseCommit>(
         &self,
-        _db: &mut dyn DatabaseExt<Self>,
+        _db: DB,
         _evm_env: &EvmEnv<Self::Spec, Self::BlockEnv>,
-        _stylus_config: &foundry_config::stylus::StylusConfig,
     ) -> eyre::Result<()> {
         Ok(())
     }

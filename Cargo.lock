@@ -1409,7 +1409,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-revm?rev=acadc594534e28a927b20daa25c312e73f482989#acadc594534e28a927b20daa25c312e73f482989"
+source = "git+https://github.com/iosiro/arbos-revm?rev=ae7630b5e1186e21d314def28005c24a886b4fea#ae7630b5e1186e21d314def28005c24a886b4fea"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6384,7 +6384,6 @@ version = "1.8.1"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
- "arbos-revm",
  "clap 4.6.6",
  "dirs",
  "dunce",

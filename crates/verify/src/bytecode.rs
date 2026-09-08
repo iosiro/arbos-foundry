@@ -251,12 +251,14 @@ impl VerifyBytecodeArgs {
 
         match network {
             NetworkVariant::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(config.stylus.clone());
                 self.run_with_network_and_config::<ArbitrumEvmNetwork>(
                     config,
                     endpoint_identity,
                     network_was_inferred,
                     replay_block_transactions::<ArbitrumEvmNetwork>,
-                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                    builder,
                 )
                 .await
             }

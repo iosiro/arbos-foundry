@@ -2717,6 +2717,8 @@ impl TestArgs {
     ) -> eyre::Result<(Libraries, TestOutcome)> {
         match network_dispatch_kind(dispatch_opts) {
             NetworkDispatchKind::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
                 self.build_and_run_tests::<ArbitrumEvmNetwork>(
                     config,
                     evm_opts,
@@ -2724,7 +2726,7 @@ impl TestArgs {
                     filter,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+                    builder,
                 )
                 .await
             }
@@ -2791,16 +2793,15 @@ impl TestArgs {
         filter: &ProjectPathsAwareFilter,
     ) -> eyre::Result<FuzzMinimizeReplayPass> {
         match network_dispatch_kind(dispatch_opts) {
-            NetworkDispatchKind::Arbitrum => self
-                .build_fuzz_minimize_runner::<ArbitrumEvmNetwork>(
-                    config,
-                    evm_opts,
-                    output,
-                    options,
-                    ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+            NetworkDispatchKind::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
+                self.build_fuzz_minimize_runner::<ArbitrumEvmNetwork>(
+                    config, evm_opts, output, options, builder,
                 )
                 .await
-                .map(|runner| fuzz_minimize_replay(runner, filter)),
+                .map(|runner| fuzz_minimize_replay(runner, filter))
+            }
             NetworkDispatchKind::Tempo => self
                 .build_fuzz_minimize_runner::<TempoEvmNetwork>(
                     config,

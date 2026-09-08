@@ -505,7 +505,7 @@ impl<FEN: FoundryEvmNetwork> CheatcodesExecutor<FEN> for InspectorStackInner {
         f: NestedEvmClosureFor<'_, FEN>,
     ) -> Result<(), EVMError<DatabaseError>> {
         let mut inspector = InspectorStackRefMut { cheatcodes: Some(cheats), inner: self };
-        let factory = FEN::EvmFactory::default();
+        let factory = ecx.db().evm_factory();
         let chain_context = ecx.chain().clone();
         #[cfg(feature = "monad")]
         let state = foundry_evm_core::FoundryJournal::capture_reserve_balance(ecx.journal());
@@ -552,12 +552,8 @@ impl<FEN: FoundryEvmNetwork> CheatcodesExecutor<FEN> for InspectorStackInner {
         f: NestedEvmClosureFor<'_, FEN>,
     ) -> Result<EvmEnvFor<FEN>, EVMError<DatabaseError>> {
         let mut inspector = InspectorStackRefMut { cheatcodes: Some(cheats), inner: self };
-        let mut evm = FEN::EvmFactory::default().create_foundry_nested_evm(
-            db,
-            evm_env,
-            chain_context,
-            &mut inspector,
-        );
+        let mut evm =
+            db.evm_factory().create_foundry_nested_evm(db, evm_env, chain_context, &mut inspector);
         f(&mut *evm)?;
         Ok(evm.to_evm_env())
     }
@@ -1076,7 +1072,7 @@ impl<FEN: FoundryEvmNetwork> InspectorStackRefMut<'_, FEN> {
 
         let evm_env = ecx.evm_clone();
         let tx_env = ecx.tx_clone();
-        let factory = FEN::EvmFactory::default();
+        let factory = ecx.db().evm_factory();
         let chain_context = ecx.chain().clone();
 
         let isolated_state = {
@@ -1976,6 +1972,11 @@ fn handle_arbitrum_system_call<FEN: FoundryEvmNetwork>(
     ecx: &mut FoundryContextFor<'_, FEN>,
     call: &CallInputs,
 ) -> Option<CallOutcome> {
+    // Compatibility fallbacks must never intercept an installed precompile: its provider owns
+    // validation, gas, value handling, and execution-family-specific block metadata.
+    if ecx.journal().precompile_addresses().contains(&call.bytecode_address) {
+        return None;
+    }
     if call.target_address != arbitrum::ARB_SYS_ADDRESS
         || call.bytecode_address != arbitrum::ARB_SYS_ADDRESS
         || !arbitrum::is_arbitrum_chain(ecx.cfg().chain_id())

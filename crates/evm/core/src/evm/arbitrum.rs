@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, FromRecoveredTx};
+use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, FromRecoveredTx, precompiles::PrecompilesMap};
 use alloy_network::{AnyRpcTransaction, TransactionResponse};
 use alloy_primitives::{Address, Bytes, U256, map::AddressSet};
 use arbos_revm::{
@@ -8,7 +8,6 @@ use arbos_revm::{
     config::ArbitrumConfig,
     handler::ArbitrumHandler,
     local_context::ArbitrumLocalContext,
-    precompiles::ArbitrumPrecompileProvider,
     state::{ArbState, ArbStateGetter, ArbosStateParams, types::StorageBackedTr},
     transaction::{ArbitrumTransaction, ArbitrumTransactionError},
 };
@@ -19,7 +18,9 @@ use revm::{
         BlockEnv, Context, ContextTr, DBErrorMarker, JournalTr,
         result::{EVMError, HaltReason, ResultAndState},
     },
-    handler::{EthFrame, FrameResult, SystemCallEvm, instructions::EthInstructions},
+    handler::{
+        EthFrame, FrameResult, PrecompileProvider, SystemCallEvm, instructions::EthInstructions,
+    },
     inspector::{InspectorHandler, NoOpInspector},
     interpreter::{FrameInput, interpreter::EthInterpreter},
     primitives::{TxKind, hardfork::SpecId},
@@ -33,7 +34,9 @@ use crate::{
 };
 
 type ArbInstructions<DB> = EthInstructions<EthInterpreter, ArbitrumContext<DB>>;
-type ArbPrecompiles<DB> = ArbitrumPrecompileProvider<ArbitrumContext<DB>>;
+mod overrides;
+
+type ArbPrecompiles<DB> = overrides::ArbitrumPrecompileOverrides<DB>;
 type ArbInnerEvm<DB, I> =
     ArbitrumEvm<ArbitrumContext<DB>, I, ArbPrecompiles<DB>, ArbInstructions<DB>, EthFrame>;
 
@@ -67,6 +70,14 @@ impl<DB: Database, I> AlloyArbitrumEvm<DB, I> {
 
     pub fn into_inner(self) -> ArbInnerEvm<DB, I> {
         self.inner
+    }
+
+    /// Installs explicit tool overrides without replacing the context-aware ArbOS provider.
+    pub fn install_precompile_overrides(&mut self, overrides: PrecompilesMap, removed: AddressSet) {
+        self.inner.0.precompiles.set_overrides(overrides, removed);
+        let addresses = self.inner.0.precompiles.warm_addresses().clone();
+        self.inner.0.ctx.journaled_state.warm_precompiles(&addresses);
+        self.precompiles.addresses = addresses;
     }
 }
 
@@ -151,10 +162,17 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ArbitrumEvmFactory;
+#[derive(Clone, Debug, Default)]
+pub struct ArbitrumEvmFactory {
+    config: foundry_config::stylus::StylusConfig,
+}
 
 impl ArbitrumEvmFactory {
+    /// Owns local execution policy independently of transaction-position state.
+    pub fn new(config: foundry_config::stylus::StylusConfig) -> Self {
+        Self { config }
+    }
+
     pub fn create_evm_with_inspector_and_context<
         DB: Database,
         I: Inspector<ArbitrumContext<DB>>,
@@ -165,10 +183,11 @@ impl ArbitrumEvmFactory {
         inspector: I,
         chain: ArbitrumChain,
     ) -> AlloyArbitrumEvm<DB, I> {
-        Self::build(db, env, inspector, true, chain)
+        self.build(db, env, inspector, true, chain)
     }
 
     fn build<DB: Database, I: Inspector<ArbitrumContext<DB>>>(
+        &self,
         db: DB,
         input: EvmEnv,
         inspector: I,
@@ -179,10 +198,10 @@ impl ArbitrumEvmFactory {
         let mut journal = Journal::new(db);
         journal.set_spec_id(spec);
         let mut cfg = ArbitrumConfig::from(input.cfg_env);
-        cfg.debug_mode = chain.debug_mode();
-        cfg.disable_auto_cache = chain.disable_auto_cache();
-        cfg.disable_auto_activate = chain.disable_auto_activate();
-        cfg.disable_stylus_deployment = chain.disable_stylus_deployment();
+        cfg.debug_mode = self.config.debug_mode_stylus;
+        cfg.disable_auto_cache = self.config.disable_auto_cache_stylus;
+        cfg.disable_auto_activate = self.config.disable_auto_activate_stylus;
+        cfg.disable_stylus_deployment = self.config.disable_stylus_deployment;
         let context = ArbitrumContext {
             journaled_state: journal,
             block: input.block_env,
@@ -192,8 +211,8 @@ impl ArbitrumEvmFactory {
             local: ArbitrumLocalContext::default(),
             error: Ok(()),
         };
-        let provider = ArbitrumPrecompileProvider::new(spec);
-        let precompiles = ArbitrumPrecompiles { addresses: provider.warm_addresses().collect() };
+        let provider = ArbPrecompiles::<DB>::new(spec);
+        let precompiles = ArbitrumPrecompiles { addresses: provider.warm_addresses().clone() };
         AlloyArbitrumEvm::new(
             ArbitrumEvm::new_with_inspector(
                 context,
@@ -218,7 +237,7 @@ impl EvmFactory for ArbitrumEvmFactory {
     type Precompiles = ArbitrumPrecompiles;
 
     fn create_evm<DB: Database>(&self, db: DB, input: EvmEnv) -> Self::Evm<DB, NoOpInspector> {
-        Self::build(db, input, NoOpInspector, false, ArbitrumChain::default())
+        self.build(db, input, NoOpInspector, false, ArbitrumChain::default())
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
@@ -227,18 +246,15 @@ impl EvmFactory for ArbitrumEvmFactory {
         input: EvmEnv,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        Self::build(db, input, inspector, true, ArbitrumChain::default())
+        self.build(db, input, inspector, true, ArbitrumChain::default())
     }
 }
 
 impl FoundryChain<ArbitrumTransaction> for ArbitrumChain {
-    fn configure_stylus(&mut self, config: &foundry_config::stylus::StylusConfig) {
-        self.configure_execution(
-            config.debug_mode_stylus,
-            config.disable_auto_cache_stylus,
-            config.disable_auto_activate_stylus,
-        );
-        self.set_disable_stylus_deployment(config.disable_stylus_deployment);
+    fn for_rpc_block(_tx: &ArbitrumTransaction, block_number: u64) -> Self {
+        let mut chain = Self::default();
+        chain.set_rpc_block_number(Some(block_number));
+        chain
     }
 }
 
@@ -261,14 +277,16 @@ impl FoundryContextExt for ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFacto
         &mut self.cfg.inner
     }
     fn set_chain_context(&mut self, mut chain: Self::Chain) {
-        // Fork-position metadata does not own the tool's local execution controls.
-        chain.configure_execution(
-            self.cfg.debug_mode,
-            self.cfg.disable_auto_cache,
-            self.cfg.disable_auto_activate,
-        );
-        chain.set_disable_stylus_deployment(self.cfg.disable_stylus_deployment);
+        chain.set_rpc_block_number(self.journaled_state.database.active_fork_block_number());
         self.chain = chain;
+        refresh_arbitrum_version(self);
+    }
+
+    fn set_evm(&mut self, env: EvmEnv) {
+        self.cfg.inner = env.cfg_env;
+        self.block = env.block_env;
+        self.chain.set_rpc_block_number(self.journaled_state.database.active_fork_block_number());
+        refresh_arbitrum_version(self);
     }
     fn db_journal_inner_mut(&mut self) -> (&mut Self::Db, &mut JournaledState) {
         (&mut self.journaled_state.database, &mut self.journaled_state.inner)
@@ -299,9 +317,24 @@ impl FoundryContextExt for ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFacto
                 eyre::eyre!("failed to decode Stylus bytecode: {}", String::from_utf8_lossy(&err))
             })?
             .ok_or_else(|| eyre::eyre!("program is not a Stylus WASM contract"))?;
-        arbos_revm::state::program::activate_program(self, code_hash, &wasm, true)
+        let cached = !self.cfg.disable_auto_cache;
+        arbos_revm::state::program::activate_program(self, code_hash, &wasm, cached)
             .map_err(|err| eyre::eyre!("failed to activate Stylus program: {err}"))?;
         Ok(())
+    }
+}
+
+fn refresh_arbitrum_version(
+    context: &mut ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFactory>>,
+) {
+    match context.arb_state(None, false).arbos_version().get() {
+        Ok(version) if version != 0 => context.cfg.arbos_version = version,
+        Ok(_) => {}
+        Err(error) => {
+            context.error = Err(revm::context::ContextError::Custom(format!(
+                "failed to refresh ArbOS version after context change: {error}"
+            )));
+        }
     }
 }
 
@@ -426,13 +459,12 @@ impl FoundryEvmFactory for ArbitrumEvmFactory {
     type FoundryEvm<'db, I: FoundryInspectorExt<Self::FoundryContext<'db>>> =
         AlloyArbitrumEvm<&'db mut dyn DatabaseExt<Self>, I>;
 
-    fn initialize_backend(
+    fn initialize_backend<DB: Database + revm::DatabaseCommit>(
         &self,
-        db: &mut dyn DatabaseExt<Self>,
+        db: DB,
         evm_env: &EvmEnv,
-        stylus_config: &foundry_config::stylus::StylusConfig,
     ) -> eyre::Result<()> {
-        initialize_arbitrum_backend(db, evm_env, stylus_config)
+        initialize_arbitrum_backend(db, evm_env, &self.config)
     }
 
     fn create_evm_with_context<DB: Database>(
@@ -441,27 +473,29 @@ impl FoundryEvmFactory for ArbitrumEvmFactory {
         evm_env: EvmEnv,
         chain_context: Self::Chain,
     ) -> Self::Evm<DB, NoOpInspector> {
-        Self::build(db, evm_env, NoOpInspector, false, chain_context)
+        self.build(db, evm_env, NoOpInspector, false, chain_context)
     }
 
     fn create_foundry_evm_with_inspector<'db, I: FoundryInspectorExt<Self::FoundryContext<'db>>>(
         &self,
         db: &'db mut dyn DatabaseExt<Self>,
         evm_env: EvmEnv,
-        chain_context: Self::Chain,
+        mut chain_context: Self::Chain,
         inspector: I,
     ) -> Self::FoundryEvm<'db, I> {
-        Self::build(db, evm_env, inspector, true, chain_context)
+        chain_context.set_rpc_block_number(db.active_fork_block_number());
+        self.build(db, evm_env, inspector, true, chain_context)
     }
 
     fn create_foundry_nested_evm<'db>(
         &self,
         db: &'db mut dyn DatabaseExt<Self>,
         evm_env: EvmEnv,
-        chain_context: Self::Chain,
+        mut chain_context: Self::Chain,
         inspector: &'db mut dyn FoundryInspectorExt<Self::FoundryContext<'db>>,
     ) -> NestedEvmFor<'db, Self> {
-        Box::new(Self::build(db, evm_env, inspector, true, chain_context).into_inner())
+        chain_context.set_rpc_block_number(db.active_fork_block_number());
+        Box::new(self.build(db, evm_env, inspector, true, chain_context).into_inner())
     }
 }
 
@@ -623,7 +657,7 @@ mod tests {
             AccountInfo::default()
                 .with_code(Bytecode::new_raw(Bytes::from_static(&[0x60, 0x2a, 0x60, 0, 0x55, 0]))),
         );
-        let mut evm = ArbitrumEvmFactory.create_evm(&mut db, env.clone());
+        let mut evm = ArbitrumEvmFactory::default().create_evm(&mut db, env.clone());
         let result = evm
             .transact_raw(
                 TxEnv {
@@ -648,7 +682,7 @@ mod tests {
             StylusConfig { arbos_version: Some(61), ink_price: Some(13_579), ..Default::default() };
         initialize_arbitrum_backend(&mut db, &env, &overrides).unwrap();
         assert_eq!(db.storage(contract, U256::ZERO).unwrap(), U256::from(42));
-        let mut evm = ArbitrumEvmFactory.create_evm(&mut db, env);
+        let mut evm = ArbitrumEvmFactory::default().create_evm(&mut db, env);
         let params = evm.arb_state(None, false).get().unwrap();
         assert_eq!(
             params.arbos_version, 59,
@@ -667,8 +701,7 @@ mod tests {
                 caller,
                 AccountInfo::from_balance(U256::from(1_000_000_000_u64)),
             );
-            let mut chain = ArbitrumChain::default();
-            chain.configure_stylus(&StylusConfig {
+            let factory = ArbitrumEvmFactory::new(StylusConfig {
                 disable_stylus_deployment: disabled,
                 ..Default::default()
             });
@@ -679,11 +712,11 @@ mod tests {
             initcode.extend(runtime);
             let mut env: EvmEnv = EvmEnv::default();
             env.block_env.basefee = 0;
-            let mut evm = ArbitrumEvmFactory.create_evm_with_inspector_and_context(
+            let mut evm = factory.create_evm_with_inspector_and_context(
                 &mut db,
                 env,
                 NoOpInspector,
-                chain,
+                ArbitrumChain::default(),
             );
             let result = evm
                 .transact_raw(
@@ -734,7 +767,7 @@ mod tests {
                     AccountInfo::default().with_code(Bytecode::new_raw(code.into())),
                 );
 
-                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                let mut evm = ArbitrumEvmFactory::default().create_evm(db, env);
                 evm.arb_state(None, false).network_fee_account().set(network_fee_account).unwrap();
                 evm.arb_state(None, false)
                     .retryable_state()
@@ -752,7 +785,7 @@ mod tests {
                 evm.journaled_state.database.commit(changes);
                 let (db, env) = evm.finish();
 
-                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                let mut evm = ArbitrumEvmFactory::default().create_evm(db, env);
                 evm.set_inspector_enabled(inspected);
                 let result = evm
                     .transact_raw(
@@ -794,7 +827,7 @@ mod tests {
                     if reverts { value } else { U256::ZERO }
                 );
                 assert_eq!(db.basic(refund_to).unwrap().unwrap().balance, expected_refund);
-                let mut evm = ArbitrumEvmFactory.create_evm(db, env);
+                let mut evm = ArbitrumEvmFactory::default().create_evm(db, env);
                 let timeout =
                     evm.arb_state(None, true).retryable(ticket_id).timeout().get().unwrap();
                 assert_eq!(timeout, if reverts { 1_000_000 } else { 0 });

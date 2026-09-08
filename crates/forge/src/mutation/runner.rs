@@ -636,7 +636,8 @@ fn compile_and_test(
             rerun_failures,
             selected_sources_relative,
             isolate,
-            ExecutorBuilder::<ArbitrumEvmNetwork>::new(),
+            ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                .stylus_config(evm.opts.stylus_config.clone()),
         )
     } else if evm.opts.networks.is_tempo() {
         compile_and_test_inner::<TempoEvmNetwork>(

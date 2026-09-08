@@ -216,9 +216,9 @@ impl RunArgs {
         evm_opts.infer_network_from_fork().await?;
 
         if evm_opts.networks.is_arbitrum() {
-            return self
-                .run_with_evm(config, evm_opts, ExecutorBuilder::<ArbitrumEvmNetwork>::new())
-                .await;
+            let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                .stylus_config(evm_opts.stylus_config.clone());
+            return self.run_with_evm(config, evm_opts, builder).await;
         }
 
         if evm_opts.networks.is_tempo() {

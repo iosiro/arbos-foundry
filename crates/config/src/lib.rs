@@ -8296,6 +8296,87 @@ mod tests {
     }
 
     #[test]
+    fn stylus_config_keys_parse_without_unknown_key_warnings() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                "foundry.toml",
+                r#"
+                [profile.default.stylus]
+                arbos_version = 61
+                stylus_version = 3
+                ink_price = 24680
+                max_stack_depth = 32768
+                free_pages = 2
+                page_gas = 1000
+                page_ramp = 620674314
+                page_limit = 128
+                max_fragment_count = 4
+                min_init_gas = 72
+                min_cached_init_gas = 11
+                init_cost_scalar = 2
+                cached_cost_scalar = 2
+                expiry_days = 365
+                keepalive_days = 31
+                block_cache_size = 32
+                max_wasm_size = 131072
+                disable_auto_cache_stylus = true
+                disable_auto_activate_stylus = true
+                debug_mode_stylus = true
+                deployer_address = "0x0000000000000000000000000000000000001234"
+                disable_stylus_deployment = true
+
+                [profile.custom.stylus]
+                ink_price = 13579
+                "#,
+            )?;
+
+            let cfg = Config::load().unwrap();
+            assert!(cfg.warnings.is_empty(), "unexpected warnings: {:?}", cfg.warnings);
+            assert_eq!(cfg.stylus.ink_price, Some(24_680));
+            assert_eq!(cfg.stylus.max_fragment_count, Some(4));
+            assert!(cfg.stylus.debug_mode_stylus);
+            assert!(cfg.stylus.disable_stylus_deployment);
+            assert_eq!(
+                serde_json::from_value::<StylusConfig>(serde_json::to_value(&cfg.stylus).unwrap())
+                    .unwrap(),
+                cfg.stylus
+            );
+
+            jail.set_env("FOUNDRY_PROFILE", "custom");
+            let custom = Config::load().unwrap();
+            assert!(custom.warnings.is_empty(), "unexpected warnings: {:?}", custom.warnings);
+            assert_eq!(custom.stylus.ink_price, Some(13_579));
+            assert_eq!(custom.stylus.max_fragment_count, Some(4));
+            assert!(custom.stylus.debug_mode_stylus);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn stylus_config_warns_on_unknown_nested_keys() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                "foundry.toml",
+                r#"
+                [profile.default.stylus]
+                ink_price = 24680
+                ink_prcie = 13579
+                "#,
+            )?;
+
+            let cfg = Config::load().unwrap();
+            assert_eq!(cfg.stylus.ink_price, Some(24_680));
+            assert_eq!(cfg.warnings.len(), 1, "unexpected warnings: {:?}", cfg.warnings);
+            assert!(matches!(
+                &cfg.warnings[0],
+                Warning::UnknownSectionKey { key, section, .. }
+                    if key == "ink_prcie" && section == "stylus"
+            ));
+            Ok(())
+        });
+    }
+
+    #[test]
     fn no_unknown_key_warning_for_network_field() {
         // Regression test: `network` is a flattened `Option` field of `NetworkConfigs`. It must
         // not trigger an unknown-key warning, regardless of whether it is set.

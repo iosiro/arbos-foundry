@@ -77,7 +77,7 @@ use alloy_network::{
 use alloy_op_evm::{OpEvmContext, OpEvmFactory, OpTx};
 use alloy_primitives::{
     Address, B256, Bloom, Bytes, Signature, TxKind, U64, U256, address, hex, keccak256,
-    map::{AddressMap, B256Set, HashMap, HashSet},
+    map::{AddressMap, AddressSet, B256Set, HashMap, HashSet},
 };
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::{
@@ -127,8 +127,7 @@ use foundry_evm::{
     backend::{BlockchainDb, DatabaseError, DatabaseResult, RevertStateSnapshotAction},
     constants::{DEFAULT_CREATE2_DEPLOYER, DEFAULT_CREATE2_DEPLOYER_RUNTIME_CODE},
     core::{
-        FoundryChain,
-        evm::{ArbitrumEvmFactory, ArbitrumPrecompiles, EvmEnvFor, TempoEvmNetwork},
+        evm::{ArbitrumEvmFactory, EvmEnvFor, TempoEvmNetwork},
         precompiles::EC_RECOVER,
     },
     decode::RevertDecoder,
@@ -178,6 +177,7 @@ use revm::{
 };
 use revm_inspectors::opcode::OpcodeGasInspector;
 use std::{
+    borrow::Cow,
     collections::BTreeMap,
     fmt::{self, Debug},
     io::{Read, Write},
@@ -213,47 +213,6 @@ use tempo_revm::{
     evm::TempoContext, gas_params::tempo_gas_params,
 };
 use tokio::{sync::RwLock as AsyncRwLock, task::JoinSet};
-
-trait AnvilPrecompileSet<N: Network> {
-    fn inject_configured(&mut self, backend: &Backend<N>, evm_env: &EvmEnv);
-
-    fn inject_replay(
-        &mut self,
-        backend: &Backend<N>,
-        evm_env: &EvmEnv,
-        arbitrum_rpc_block_number: Option<u64>,
-    );
-}
-
-impl<N: Network> AnvilPrecompileSet<N> for PrecompilesMap {
-    fn inject_configured(&mut self, backend: &Backend<N>, evm_env: &EvmEnv) {
-        backend.inject_precompiles(self, evm_env);
-    }
-
-    fn inject_replay(
-        &mut self,
-        backend: &Backend<N>,
-        evm_env: &EvmEnv,
-        arbitrum_rpc_block_number: Option<u64>,
-    ) {
-        backend.inject_precompiles(self, evm_env);
-        if let Some(block_number) = arbitrum_rpc_block_number {
-            backend.inject_arbitrum_precompile_at_block(self, block_number);
-        }
-    }
-}
-
-impl<N: Network> AnvilPrecompileSet<N> for ArbitrumPrecompiles {
-    fn inject_configured(&mut self, _backend: &Backend<N>, _evm_env: &EvmEnv) {}
-
-    fn inject_replay(
-        &mut self,
-        _backend: &Backend<N>,
-        _evm_env: &EvmEnv,
-        _arbitrum_rpc_block_number: Option<u64>,
-    ) {
-    }
-}
 
 /// Side-channel container for OP-specific deposit info produced by
 /// [`Backend::build_call_env_with_base`] and consumed by the OP transact path.
@@ -797,6 +756,7 @@ impl<DB: Database, T> BackendInspector<DB> for T where
     T: Inspector<EthEvmContext<DB>> + Inspector<ArbitrumContext<DB>> + Inspector<TempoContext<DB>>
 {
 }
+mod arbitrum_estimation;
 pub mod cache;
 pub mod fork_db;
 pub mod in_memory_db;
@@ -1724,8 +1684,13 @@ impl<N: Network> Backend<N> {
     /// Returns the environment for the next block
     fn next_evm_env(&self) -> EvmEnv {
         let mut evm_env = self.evm_env.read().clone();
-        // increase block number for this block
-        evm_env.block_env.number = evm_env.block_env.number.saturating_add(U256::from(1));
+        // A fork's environment can contain the L1 height. Pending blocks must use the same
+        // next L2 number as locally mined Arbitrum blocks.
+        evm_env.block_env.number = if is_arbitrum(self.protocol_chain_id()) {
+            U256::from(self.best_number().saturating_add(1))
+        } else {
+            evm_env.block_env.number.saturating_add(U256::from(1))
+        };
         evm_env.block_env.basefee = self.base_fee();
         evm_env.block_env.blob_excess_gas_and_price = self.excess_blob_gas_and_price();
         evm_env.block_env.timestamp = U256::from(self.time.current_call_timestamp());
@@ -2307,6 +2272,10 @@ impl<N: Network> Backend<N> {
             evm_env.block_env.timestamp.saturating_to(),
         );
 
+        self.inject_user_precompiles(precompiles);
+    }
+
+    fn inject_user_precompiles(&self, precompiles: &mut PrecompilesMap) {
         if let Some(factory) = &self.precompile_factory {
             factory.install(precompiles);
         }
@@ -2333,6 +2302,18 @@ impl<N: Network> Backend<N> {
         });
     }
 
+    fn inject_replay_precompiles(
+        &self,
+        precompiles: &mut PrecompilesMap,
+        evm_env: &EvmEnv,
+        arbitrum_rpc_block_number: Option<u64>,
+    ) {
+        self.inject_precompiles(precompiles, evm_env);
+        if let Some(block_number) = arbitrum_rpc_block_number {
+            self.inject_arbitrum_precompile_at_block(precompiles, block_number);
+        }
+    }
+
     fn simulation_precompile_overrides(
         &self,
         state_overrides: Option<&StateOverride>,
@@ -2349,7 +2330,7 @@ impl<N: Network> Backend<N> {
         if moves.is_empty() {
             return Ok(SimulationPrecompileOverrides::default());
         }
-        if self.is_optimism() || self.is_tempo() || self.is_monad() {
+        if self.is_optimism() || self.is_tempo() || self.is_monad() || self.is_arbitrum() {
             return Err(simulate_rpc_error(
                 -32000,
                 "precompile moves are not supported on this network",
@@ -2497,10 +2478,45 @@ impl<N: Network> Backend<N> {
         db: DB,
         env: EvmEnv,
         inspector: I,
+        rpc_block_number: Option<u64>,
     ) -> foundry_evm::core::evm::AlloyArbitrumEvm<DB, I> {
         let mut chain = ArbitrumChain::default();
-        chain.configure_stylus(&self.stylus_config);
-        ArbitrumEvmFactory.create_evm_with_inspector_and_context(db, env, inspector, chain)
+        chain.set_rpc_block_number(rpc_block_number.or_else(|| self.arbitrum_block_number(&env)));
+        let mut evm = ArbitrumEvmFactory::new(self.stylus_config.clone())
+            .create_evm_with_inspector_and_context(db, env, inspector, chain);
+        // User factories may wrap an existing Ethereum precompile. ArbOS precompiles remain in
+        // the context-aware provider unless the factory explicitly replaces their address.
+        let mut overrides = if self.precompile_factory.is_some() {
+            PrecompilesMap::from_static(Precompiles::new(PrecompileSpecId::from_spec_id(
+                evm.cfg_env().spec,
+            )))
+        } else {
+            PrecompilesMap::new(Cow::Owned(Precompiles::default()))
+        };
+        let mut removed = overrides.addresses().copied().collect::<AddressSet>();
+        self.inject_user_precompiles(&mut overrides);
+        for address in overrides.addresses() {
+            removed.remove(address);
+        }
+        evm.install_precompile_overrides(overrides, removed);
+        evm
+    }
+
+    /// Estimates the poster-gas allowance separately from request execution, which has no signed
+    /// envelope. Signed transactions continue to pay for their actual compressed bytes.
+    pub(crate) fn estimate_arbitrum_poster_gas(
+        &self,
+        state: &dyn DatabaseRef,
+        request: &TransactionRequest,
+        block: &BlockEnv,
+    ) -> Result<u128, BlockchainError> {
+        let mut env = self.evm_env.read().clone();
+        env.block_env = block.clone();
+        let mut evm = ArbitrumEvmFactory::new(self.stylus_config.clone())
+            .create_evm(WrapDatabaseRef(state), env);
+        arbitrum_estimation::poster_gas(&mut evm, request)
+            .map(u128::from)
+            .map_err(BlockchainError::Internal)
     }
 
     fn transact_arbitrum_with_inspector_ref<'db, I, DB>(
@@ -2515,7 +2531,8 @@ impl<N: Network> Backend<N> {
         I: Inspector<ArbitrumContext<WrapDatabaseRef<&'db DB>>>,
         WrapDatabaseRef<&'db DB>: Database<Error = DatabaseError>,
     {
-        let mut evm = self.create_arbitrum_evm(WrapDatabaseRef(db), evm_env.clone(), inspector);
+        let mut evm =
+            self.create_arbitrum_evm(WrapDatabaseRef(db), evm_env.clone(), inspector, None);
         evm.transact(tx).map_err(|err| BlockchainError::Internal(err.to_string()))
     }
 
@@ -2763,7 +2780,6 @@ impl<N: Network> Backend<N> {
                 $execute_transaction:expr,
                 $on_execution_error:expr
             ) => {{
-                $evm.precompiles_mut().inject_configured(self, evm_env);
                 let mut executor =
                     AnvilBlockExecutor::new($evm, parent_hash, spec_id, ethereum_transitions)
                         .with_max_blob_gas_per_block(gas_config.max_blob_gas_per_block);
@@ -2803,6 +2819,7 @@ impl<N: Network> Backend<N> {
             );
             let mut evm =
                 OpEvmFactory::<OpTx>::default().create_evm_with_inspector(db, op_env, inspector);
+            self.inject_precompiles(evm.precompiles_mut(), evm_env);
             return run!(
                 evm,
                 noop_before_transaction,
@@ -2815,6 +2832,7 @@ impl<N: Network> Backend<N> {
             let tempo_env = self.build_tempo_evm_env(evm_env);
             let mut evm =
                 TempoEvmFactory::default().create_evm_with_inspector(db, tempo_env, inspector);
+            self.inject_precompiles(evm.precompiles_mut(), evm_env);
             return run!(
                 evm,
                 noop_before_transaction,
@@ -2823,7 +2841,7 @@ impl<N: Network> Backend<N> {
             );
         }
         if self.is_arbitrum() {
-            let mut evm = self.create_arbitrum_evm(db, evm_env.clone(), inspector);
+            let evm = self.create_arbitrum_evm(db, evm_env.clone(), inspector, None);
             return run!(
                 evm,
                 noop_before_transaction,
@@ -2833,6 +2851,7 @@ impl<N: Network> Backend<N> {
         }
         let mut evm =
             EthEvmFactory::default().create_evm_with_inspector(db, evm_env.clone(), inspector);
+        self.inject_precompiles(evm.precompiles_mut(), evm_env);
         run!(evm, noop_before_transaction, execute_pool_transaction, noop_on_execution_error)
     }
 
@@ -5405,7 +5424,6 @@ where
                 ))
             }};
             ($evm:expr, $execute:expr) => {{
-                $evm.precompiles_mut().inject_replay(self, evm_env, arbitrum_rpc_block_number);
                 // Replay re-executes an already-valid historical prefix, so it does not apply the
                 // local EIP-4844 budget. Jovian still uses the source block's gas limit as its DA
                 // budget through `set_optimism_hardfork` below.
@@ -5445,6 +5463,11 @@ where
             );
             let mut evm =
                 OpEvmFactory::<OpTx>::default().create_evm_with_inspector(db, op_env, inspector);
+            self.inject_replay_precompiles(
+                evm.precompiles_mut(),
+                evm_env,
+                arbitrum_rpc_block_number,
+            );
             return run!(evm);
         }
 
@@ -5452,16 +5475,23 @@ where
             let tempo_env = self.build_tempo_evm_env(evm_env);
             let mut evm =
                 TempoEvmFactory::default().create_evm_with_inspector(db, tempo_env, inspector);
+            self.inject_replay_precompiles(
+                evm.precompiles_mut(),
+                evm_env,
+                arbitrum_rpc_block_number,
+            );
             return run!(evm);
         }
 
         if self.is_arbitrum() {
-            let mut evm = self.create_arbitrum_evm(db, evm_env.clone(), inspector);
+            let evm =
+                self.create_arbitrum_evm(db, evm_env.clone(), inspector, arbitrum_rpc_block_number);
             return run!(evm);
         }
 
         let mut evm =
             EthEvmFactory::default().create_evm_with_inspector(db, evm_env.clone(), inspector);
+        self.inject_replay_precompiles(evm.precompiles_mut(), evm_env, arbitrum_rpc_block_number);
         run!(evm)
     }
 
@@ -8316,7 +8346,8 @@ impl Backend<FoundryNetwork> {
                     trace!(target: "backend", env=?evm_env, spec=?evm_env.spec_id(),"simulate evm env");
                     let execution_result = match tx_env {
                         CallTxEnv::Eth(tx_env)
-                            if !validation
+                            if !self.is_arbitrum()
+                                && !validation
                                 && tx_env.tx_type == 3
                                 && tx_env.max_fee_per_blob_gas == 0 =>
                         {
@@ -9622,7 +9653,7 @@ mod tests {
         assert_eq!(arbitrum_replay_block_number(&block), U256::from(16_938_707));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn fork_arbitrum_transaction_replay_preserves_rpc_block_number() {
         const GENESIS_BLOCK: u64 = 101;
         const L1_BLOCK: u64 = 10;
@@ -9684,6 +9715,40 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output, expected);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fork_arbitrum_pending_block_uses_next_l2_number() {
+        const L2_BLOCK: u64 = 101;
+        let (_source_api, source_handle) = spawn(
+            NodeConfig::test()
+                .with_chain_id(Some(NamedChain::Arbitrum as u64))
+                .with_genesis_block_number(Some(L2_BLOCK)),
+        )
+        .await;
+        let (api, handle) =
+            spawn(NodeConfig::test().with_eth_rpc_url(Some(source_handle.http_endpoint()))).await;
+        // Model the distinct l1BlockNumber that a Nitro fork header supplies.
+        api.backend.evm_env().write().block_env.number = U256::from(10);
+
+        let pending = handle
+            .http_provider()
+            .get_block_by_number(alloy_rpc_types::BlockNumberOrTag::Pending)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(pending.header.number, L2_BLOCK + 1);
+        let output = handle
+            .http_provider()
+            .call(WithOtherFields::new(
+                TransactionRequest::default()
+                    .with_to(arbitrum::ARB_SYS_ADDRESS)
+                    .with_input(Bytes::copy_from_slice(&arbitrum::ARB_BLOCK_NUMBER_SELECTOR)),
+            ))
+            .block(alloy_rpc_types::BlockId::pending())
+            .await
+            .unwrap();
+        assert_eq!(output, arbitrum::arb_block_number_output(L2_BLOCK + 1));
     }
 
     fn test_endpoint_identity(

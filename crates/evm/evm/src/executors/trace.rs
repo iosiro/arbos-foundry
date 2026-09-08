@@ -42,7 +42,7 @@ impl<FEN: FoundryEvmNetwork> TracingExecutor<FEN> {
                 stack.trace_requirements(trace_requirements).create2_deployer(create2_deployer)
             })
             .spec_id_opt(version.map(evm_spec_id::<SpecFor<FEN>>))
-            .build(env.0, env.1, db, networks);
+            .try_build(env.0, env.1, db, networks)?;
 
         if let Some(state_overrides) = state_overrides {
             apply_state_overrides(&mut executor, state_overrides)?;

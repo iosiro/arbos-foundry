@@ -43,4 +43,23 @@ contract GetStylusInitCodeTest is DSTest {
         bytes memory runtimeCode = deployed.code;
         assertEq(runtimeCode, stylusCode);
     }
+
+    function testPayableInitCodeDeploysAtPredictedCreate2Address() public {
+        string memory path = "fixtures/Stylus/foundry_stylus_program.wasm";
+        assertEq(vm.getStylusInitCode(path, 0), vm.getStylusInitCode(path));
+        bytes memory initCode = vm.getStylusInitCode(path, 1);
+        bytes32 salt = keccak256("payable-test-salt");
+        address predicted = address(
+            uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), address(this), salt, keccak256(initCode)))))
+        );
+        vm.deal(address(this), 1);
+
+        address deployed;
+        assembly {
+            deployed := create2(1, add(initCode, 0x20), mload(initCode), salt)
+        }
+        assertEq(deployed, predicted);
+        assertEq(deployed.balance, 1);
+        assertEq(deployed.code, vm.getStylusCode(path));
+    }
 }

@@ -416,12 +416,14 @@ impl FoundryTransaction for TempoTxEnv {
 ///
 /// Every family that doesn't need chain metadata uses `()`.
 pub trait FoundryChain<Tx>: Clone + Debug + Default + Send + Sync {
-    /// Applies local Stylus runtime controls to this transaction context.
-    fn configure_stylus(&mut self, _config: &foundry_config::stylus::StylusConfig) {}
-
     /// Builds chain context for a standalone synthetic transaction.
     fn for_transaction(_tx: &Tx) -> Self {
         Self::default()
+    }
+
+    /// Builds transaction context at a known RPC block height.
+    fn for_rpc_block(tx: &Tx, _block_number: u64) -> Self {
+        Self::for_transaction(tx)
     }
 
     /// Builds chain context for a transaction at an exact block position.

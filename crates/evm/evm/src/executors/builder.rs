@@ -9,8 +9,8 @@ use foundry_evm_core::evm::OpEvmNetwork;
 use foundry_evm_core::{
     backend::Backend,
     evm::{
-        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor,
-        TempoEvmNetwork, TxEnvFor,
+        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, EvmEnvFor, FoundryEvmFactory,
+        FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
     },
 };
 #[cfg(feature = "monad")]
@@ -37,8 +37,8 @@ pub struct ExecutorBuilder<FEN: FoundryEvmNetwork> {
     /// The spec override. When `None`, the spec from `EvmEnv::cfg_env` is preserved.
     spec: Option<SpecFor<FEN>>,
     legacy_assertions: bool,
-    /// ArbOS and Stylus settings applied when an Arbitrum backend is initialized.
-    stylus_config: StylusConfig,
+    /// Concrete factory owning resolved execution policy.
+    factory: FEN::EvmFactory,
 }
 
 impl<FEN: FoundryEvmNetwork> Default for ExecutorBuilder<FEN> {
@@ -49,7 +49,7 @@ impl<FEN: FoundryEvmNetwork> Default for ExecutorBuilder<FEN> {
             gas_limit: None,
             spec: None,
             legacy_assertions: false,
-            stylus_config: StylusConfig::default(),
+            factory: FEN::EvmFactory::default(),
         }
     }
 }
@@ -100,25 +100,32 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
         self
     }
 
-    /// Sets ArbOS and Stylus settings for network-owned backend initialization.
-    #[inline]
-    pub const fn stylus_config(mut self, stylus_config: StylusConfig) -> Self {
-        self.stylus_config = stylus_config;
-        self
-    }
-
-    /// Builds the executor as configured.
+    /// Builds an executor when backend initialization is known to be infallible.
+    ///
+    /// Tool entry points must use [`Self::try_build`] to report database failures normally.
     #[inline]
     pub fn build(
         self,
-        mut evm_env: EvmEnvFor<FEN>,
+        evm_env: EvmEnvFor<FEN>,
         tx_env: TxEnvFor<FEN>,
         db: Backend<FEN>,
+        networks: NetworkConfigs,
+    ) -> Executor<FEN> {
+        self.try_build(evm_env, tx_env, db, networks)
+            .expect("failed to initialize network backend state")
+    }
+
+    /// Builds the executor, propagating failures to initialize network-owned database state.
+    pub fn try_build(
+        self,
+        mut evm_env: EvmEnvFor<FEN>,
+        tx_env: TxEnvFor<FEN>,
+        mut db: Backend<FEN>,
         // TODO(monad-fen-dispatch): Remove this argument after inspector inputs and backend fork
         // behavior are resolved by the initial concrete FEN dispatch.
         networks: NetworkConfigs,
-    ) -> Executor<FEN> {
-        let Self { mut stack, gas_limit, spec, legacy_assertions, stylus_config } = self;
+    ) -> eyre::Result<Executor<FEN>> {
+        let Self { mut stack, gas_limit, spec, legacy_assertions, factory } = self;
         stack.networks = networks;
         if stack.block.is_none() {
             stack.block = Some(evm_env.block_env.clone());
@@ -130,7 +137,8 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
         if let Some(spec) = spec {
             evm_env.cfg_env.set_spec_and_mainnet_gas_params(spec);
         }
-        Executor::new(
+        factory.initialize_backend(&mut db, &evm_env)?;
+        Ok(Executor::new(
             db,
             evm_env,
             tx_env,
@@ -138,8 +146,8 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
             networks,
             gas_limit,
             legacy_assertions,
-            stylus_config,
-        )
+            factory,
+        ))
     }
 }
 
@@ -152,6 +160,12 @@ impl ExecutorBuilder<EthEvmNetwork> {
 }
 
 impl ExecutorBuilder<ArbitrumEvmNetwork> {
+    /// Resolves ArbOS initialization and local execution settings for this factory.
+    pub fn stylus_config(mut self, config: StylusConfig) -> Self {
+        self.factory = foundry_evm_core::evm::ArbitrumEvmFactory::new(config);
+        self
+    }
+
     /// Creates the default Arbitrum executor builder.
     #[inline]
     pub fn new() -> Self {
