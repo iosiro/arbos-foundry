@@ -1,7 +1,7 @@
 use alloy_network::{ReceiptResponse, TransactionBuilder};
 use alloy_primitives::{Address, address};
 use alloy_provider::Provider;
-use alloy_rpc_types::TransactionRequest;
+use alloy_rpc_types::{TransactionRequest, anvil::Forking};
 use alloy_sol_types::{SolCall, SolValue, sol};
 use anvil::{NodeConfig, spawn};
 use foundry_config::stylus::StylusConfig;
@@ -95,6 +95,73 @@ async fn arbitrum_fork_preserves_remote_state_and_applies_local_stylus_override(
 }
 
 const ARB_WASM: Address = address!("0000000000000000000000000000000000000071");
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arbitrum_memory_reset_reinitializes_local_stylus_parameters() {
+    let (api, handle) = spawn(
+        NodeConfig::test()
+            .with_networks(NetworkConfigs::with_arbitrum())
+            .with_stylus_config(StylusConfig { ink_price: Some(24_680), ..Default::default() }),
+    )
+    .await;
+    let provider = handle.http_provider();
+    let query =
+        TransactionRequest::default().with_to(ARB_WASM).with_input(inkPriceCall {}.abi_encode());
+    assert_eq!(
+        u32::abi_decode(&provider.call(query.clone().into()).await.unwrap()).unwrap(),
+        24_680
+    );
+
+    api.anvil_reset(None).await.unwrap();
+    let output = provider.call(query.into()).await.unwrap();
+    assert_eq!(u32::abi_decode(&output).unwrap(), 24_680);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn arbitrum_fork_reset_reapplies_overrides_and_restores_local_state() {
+    let (_source_api, source) = spawn(
+        NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum())
+            .with_stylus_config(StylusConfig {
+                arbos_version: Some(40),
+                ink_price: Some(13_579),
+                ..Default::default()
+            }),
+    )
+    .await;
+    let endpoint = source.http_endpoint();
+    let (api, handle) = spawn(
+        NodeConfig::test()
+            .with_eth_rpc_url(Some(endpoint.clone()))
+            .with_stylus_config(StylusConfig { ink_price: Some(24_680), ..Default::default() }),
+    )
+    .await;
+    let provider = handle.http_provider();
+    let ink_query =
+        TransactionRequest::default().with_to(ARB_WASM).with_input(inkPriceCall {}.abi_encode());
+    let version_query = TransactionRequest::default()
+        .with_to(ARB_WASM)
+        .with_input(stylusVersionCall {}.abi_encode());
+
+    api.anvil_reset(Some(Forking { json_rpc_url: Some(endpoint), block_number: None }))
+        .await
+        .unwrap();
+    assert_eq!(
+        u32::abi_decode(&provider.call(ink_query.clone().into()).await.unwrap()).unwrap(),
+        24_680
+    );
+    assert_eq!(
+        u16::abi_decode(&provider.call(version_query.clone().into()).await.unwrap()).unwrap(),
+        2
+    );
+    let remote = source.http_provider().call(ink_query.clone().into()).await.unwrap();
+    assert_eq!(u32::abi_decode(&remote).unwrap(), 13_579, "the source must remain unchanged");
+
+    api.anvil_reset(None).await.unwrap();
+    assert_eq!(u32::abi_decode(&provider.call(ink_query.into()).await.unwrap()).unwrap(), 24_680);
+    assert_eq!(u16::abi_decode(&provider.call(version_query.into()).await.unwrap()).unwrap(), 3);
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn arbitrum_mode_initializes_arbos_and_routes_calls_to_arbos_revm() {

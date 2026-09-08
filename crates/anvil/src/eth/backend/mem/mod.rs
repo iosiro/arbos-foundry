@@ -4540,6 +4540,16 @@ impl<N: Network> Backend<N> {
             }
             self.apply_fork_genesis(Arc::clone(&staged_db), cache_lease.clone()).await?;
 
+            if self.networks.is_arbitrum() {
+                let mut db = staged_db.write().await;
+                foundry_evm::core::evm::initialize_arbitrum_backend(
+                    &mut **db,
+                    &staged_env,
+                    &staged_config.stylus,
+                )
+                .map_err(|err| BlockchainError::Internal(err.to_string()))?;
+            }
+
             #[cfg(feature = "monad")]
             if self.is_monad() {
                 monad::cache_fork_context(&staged_fork).await?;
@@ -4820,6 +4830,15 @@ impl<N: Network> Backend<N> {
             staged_storage.genesis_hash,
             install_create2_deployer,
         )?;
+
+        if self.networks.is_arbitrum() {
+            foundry_evm::core::evm::initialize_arbitrum_backend(
+                &mut *staged_db,
+                &staged_env,
+                &staged_config.stylus,
+            )
+            .map_err(|err| BlockchainError::Internal(err.to_string()))?;
+        }
 
         Ok(StagedMemoryReset {
             node_config: staged_config,
