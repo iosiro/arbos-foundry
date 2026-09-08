@@ -561,6 +561,11 @@ pub trait FoundryContextExt:
         *self.cfg_mut() = cfg;
     }
 
+    /// Replaces chain-position state while preserving local execution configuration.
+    fn set_chain_context(&mut self, chain: Self::Chain) {
+        *self.chain_mut() = chain;
+    }
+
     /// Sets journal inner.
     fn set_journal_inner(&mut self, journal_inner: JournaledState) {
         *self.db_journal_inner_mut().1 = journal_inner;

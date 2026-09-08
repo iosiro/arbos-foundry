@@ -20,4 +20,5 @@ Integrate ArbOS execution with the EVM factory architecture, retaining Stylus
 deployment, configuration, tracing, and nested-call support on the updated
 Foundry and REVM stack. Preserve existing ArbOS state when applying local Stylus
 overrides to a fork. Restore ArbOS initialization and configured Stylus parameters
-when resetting Anvil to a fork or local state.
+when resetting Anvil to a fork or local state. Preserve local Stylus execution
+controls across Forge fork creation, selection, and rolling in multi-network builds.

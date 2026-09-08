@@ -2181,6 +2181,66 @@ contract ArbosStateTest is Test {
     cmd.forge_fuse().args(["test", "--mc", "ArbosStateTest"]).assert_success();
 });
 
+forgetest_async!(arbitrum_fork_operations_preserve_stylus_deployment_policy, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let (api, handle) =
+        anvil::spawn(anvil::NodeConfig::test().with_networks(NetworkConfigs::with_arbitrum()))
+            .await;
+    api.mine_one().await.unwrap();
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "ArbitrumForkPolicy.t.sol",
+        &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract StylusPrefix {
+    constructor() {
+        assembly {
+            mstore(0, 0xeff00000)
+            return(28, 4)
+        }
+    }
+}
+
+contract ArbitrumForkPolicyTest is Test {
+    function assertDeploymentBlocked() external {
+        try new StylusPrefix() {
+            fail("Stylus deployment policy was lost");
+        } catch {}
+    }
+
+    function test_fork_operations_preserve_deployment_policy() public {
+        this.assertDeploymentBlocked{gas: 200_000}();
+        uint256 first = vm.createSelectFork("<rpc>", uint256(0));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.selectFork(first);
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.rollFork(uint256(1));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.selectFork(second);
+        this.assertDeploymentBlocked{gas: 200_000}();
+    }
+}
+"#
+        .replace("<rpc>", &handle.http_endpoint()),
+    );
+    cmd.args([
+        "test",
+        "--network",
+        "arbitrum",
+        "--stylus-disable-deployment",
+        "--mc",
+        "ArbitrumForkPolicyTest",
+        "-vvvv",
+    ])
+    .assert_success();
+});
+
 forgetest_init!(test_network_arbitrum_applies_stylus_cli_config, |prj, cmd| {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());

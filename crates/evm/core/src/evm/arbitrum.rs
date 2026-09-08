@@ -260,6 +260,16 @@ impl FoundryContextExt for ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFacto
     fn cfg_env_mut(&mut self) -> &mut revm::context::CfgEnv<Self::Spec> {
         &mut self.cfg.inner
     }
+    fn set_chain_context(&mut self, mut chain: Self::Chain) {
+        // Fork-position metadata does not own the tool's local execution controls.
+        chain.configure_execution(
+            self.cfg.debug_mode,
+            self.cfg.disable_auto_cache,
+            self.cfg.disable_auto_activate,
+        );
+        chain.set_disable_stylus_deployment(self.cfg.disable_stylus_deployment);
+        self.chain = chain;
+    }
     fn db_journal_inner_mut(&mut self) -> (&mut Self::Db, &mut JournaledState) {
         (&mut self.journaled_state.database, &mut self.journaled_state.inner)
     }
