@@ -173,6 +173,34 @@ pub(crate) fn exec_create<FEN: FoundryEvmNetwork>(
     Ok(outcome.unwrap())
 }
 
+/// Builds a sub-EVM from the current context and executes the given CALL frame.
+pub(crate) fn exec_call<FEN: FoundryEvmNetwork>(
+    executor: &mut dyn CheatcodesExecutor<FEN>,
+    inputs: CallInputs,
+    ccx: &mut CheatsCtxt<'_, '_, FEN>,
+) -> std::result::Result<CallOutcome, EVMError<DatabaseError>> {
+    let fee_token = ccx.ecx.tx().fee_token();
+    let tx_origin = ccx.ecx.tx().caller();
+    let mut inputs = Some(inputs);
+    let mut outcome = None;
+    executor.with_nested_evm(ccx.state, ccx.ecx, &mut |evm| {
+        evm.tx_mut().set_fee_token(fee_token);
+        evm.tx_mut().set_caller(tx_origin);
+        evm.journal_inner_mut().depth += 1;
+
+        let frame = FrameInput::Call(Box::new(inputs.take().unwrap()));
+        let result = match evm.run_execution(frame)? {
+            FrameResult::Call(call) => call,
+            FrameResult::Create(_) => unreachable!(),
+        };
+
+        evm.journal_inner_mut().depth -= 1;
+        outcome = Some(result);
+        Ok(())
+    })?;
+    Ok(outcome.unwrap())
+}
+
 /// Basic implementation of [CheatcodesExecutor] that simply returns the [Cheatcodes] instance as an
 /// inspector.
 #[derive(Debug, Default, Clone, Copy)]
@@ -185,7 +213,7 @@ impl<FEN: FoundryEvmNetwork> CheatcodesExecutor<FEN> for TransparentCheatcodesEx
         ecx: &mut FoundryContextFor<'_, FEN>,
         f: NestedEvmClosureFor<'_, FEN>,
     ) -> Result<(), EVMError<DatabaseError>> {
-        let factory = FEN::EvmFactory::default();
+        let factory = ecx.db().evm_factory();
         let chain_context = ecx.chain().clone();
         #[cfg(feature = "monad")]
         let state = foundry_evm_core::FoundryJournal::capture_reserve_balance(ecx.journal());
@@ -230,12 +258,8 @@ impl<FEN: FoundryEvmNetwork> CheatcodesExecutor<FEN> for TransparentCheatcodesEx
         chain_context: ChainFor<FEN>,
         f: NestedEvmClosureFor<'_, FEN>,
     ) -> Result<EvmEnv<SpecFor<FEN>, BlockEnvFor<FEN>>, EVMError<DatabaseError>> {
-        let mut evm = FEN::EvmFactory::default().create_foundry_nested_evm(
-            db,
-            evm_env,
-            chain_context,
-            cheats,
-        );
+        let mut evm =
+            db.evm_factory().create_foundry_nested_evm(db, evm_env, chain_context, cheats);
         f(&mut *evm)?;
         Ok(evm.to_evm_env())
     }

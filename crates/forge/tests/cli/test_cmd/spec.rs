@@ -1,5 +1,9 @@
+use alloy_network::{ReceiptResponse as _, TransactionBuilder as _};
+use alloy_provider::Provider as _;
 use foundry_compilers::artifacts::EvmVersion;
+use foundry_config::fs_permissions::PathPermission;
 use foundry_evm::hardforks::{FoundryHardfork, TempoHardfork};
+use foundry_evm_networks::NetworkConfigs;
 use foundry_test_utils::{rpc, util::OTHER_SOLC_VERSION};
 
 #[cfg(feature = "monad")]
@@ -2137,6 +2141,937 @@ contract TempoDefaultEvmVersionTest is Test {{
     );
 
     cmd.args(["test", "--network", "tempo", "--mc", "TempoDefaultEvmVersionTest"]).assert_success();
+});
+
+forgetest_init!(test_network_arbitrum_initializes_arbos_state, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+
+    prj.add_test(
+        "ArbosState.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface ArbWasm {
+    function stylusVersion() external view returns (uint16);
+    function inkPrice() external view returns (uint32);
+    function freePages() external view returns (uint16);
+    function maxStackDepth() external view returns (uint32);
+}
+
+contract ArbosStateTest is Test {
+    ArbWasm constant ARB_WASM = ArbWasm(address(0x71));
+
+    function test_arbos_state_is_initialized_for_local_execution() public view {
+        assertEq(ARB_WASM.stylusVersion(), 3);
+        assertEq(ARB_WASM.inkPrice(), 10_000);
+        assertEq(ARB_WASM.freePages(), 2);
+        assertEq(ARB_WASM.maxStackDepth(), 22_000);
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbosStateTest"]).assert_success();
+
+    prj.update_config(|config| {
+        config.networks = NetworkConfigs::with_arbitrum();
+    });
+    cmd.forge_fuse().args(["test", "--mc", "ArbosStateTest"]).assert_success();
+});
+
+forgetest_async!(arbitrum_fork_operations_preserve_stylus_deployment_policy, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let (api, handle) =
+        anvil::spawn(anvil::NodeConfig::test().with_networks(NetworkConfigs::with_arbitrum()))
+            .await;
+    api.mine_one().await.unwrap();
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "ArbitrumForkPolicy.t.sol",
+        &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract StylusPrefix {
+    constructor() {
+        assembly {
+            mstore(0, 0xeff00000)
+            return(28, 4)
+        }
+    }
+}
+
+contract ArbitrumForkPolicyTest is Test {
+    function assertDeploymentBlocked() external {
+        (bool ok, bytes memory output) = address(0x71).call(abi.encodeWithSignature("inkPrice()"));
+        assertTrue(ok);
+        assertEq(abi.decode(output, (uint32)), 24_680, "fork lost local ink-price override");
+        try new StylusPrefix() {
+            fail("Stylus deployment policy was lost");
+        } catch {}
+    }
+
+    function test_fork_operations_preserve_deployment_policy() public {
+        this.assertDeploymentBlocked{gas: 200_000}();
+        uint256 first = vm.createSelectFork("<rpc>", uint256(0));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.selectFork(first);
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.rollFork(uint256(1));
+        this.assertDeploymentBlocked{gas: 200_000}();
+        vm.selectFork(second);
+        this.assertDeploymentBlocked{gas: 200_000}();
+    }
+
+    function test_fork_snapshot_revert_restores_memory_backend() public {
+        uint256 snapshot = vm.snapshotState();
+        vm.createSelectFork("<rpc>", uint256(1));
+        assertTrue(vm.revertToState(snapshot));
+        (bool hasActiveFork,) = address(vm).call(abi.encodeWithSignature("activeFork()"));
+        assertFalse(hasActiveFork, "memory snapshot revert retained an active fork");
+        this.assertDeploymentBlocked{gas: 200_000}();
+    }
+}
+"#
+        .replace("<rpc>", &handle.http_endpoint()),
+    );
+    cmd.args([
+        "test",
+        "--network",
+        "arbitrum",
+        "--stylus-disable-deployment",
+        "--stylus-ink-price",
+        "24680",
+        "--mc",
+        "ArbitrumForkPolicyTest",
+        "-vvvv",
+    ])
+    .assert_success();
+});
+
+forgetest_async!(arbitrum_fork_refreshes_cached_source_state, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let mut node = anvil::NodeConfig::test()
+        .with_chain_id(Some(421_614_u64))
+        .with_networks(NetworkConfigs::with_arbitrum());
+    node.stylus.arbos_version = Some(40);
+    let (api, handle) = anvil::spawn(node).await;
+    let remote = alloy_primitives::address!("0000000000000000000000000000000000123456");
+    // Update slot zero from calldata so the next value is committed in a mined transaction.
+    api.anvil_set_code(remote, alloy_primitives::hex!("60003560005500").into()).await.unwrap();
+    api.anvil_set_balance(remote, alloy_primitives::U256::from(100)).await.unwrap();
+    api.anvil_set_storage_at(
+        remote,
+        alloy_primitives::U256::ZERO,
+        alloy_primitives::B256::from(alloy_primitives::U256::from(42).to_be_bytes::<32>()),
+    )
+    .await
+    .unwrap();
+    api.anvil_set_storage_at(
+        remote,
+        alloy_primitives::U256::from(1),
+        alloy_primitives::B256::from(alloy_primitives::U256::from(99).to_be_bytes::<32>()),
+    )
+    .await
+    .unwrap();
+    api.mine_one().await.unwrap();
+    let provider = handle.http_provider();
+    let pending = provider
+        .send_transaction(
+            <alloy_network::AnyNetwork as alloy_network::Network>::TransactionRequest::default()
+                .with_from(provider.get_accounts().await.unwrap()[0])
+                .with_to(remote)
+                .with_input(alloy_primitives::U256::from(43).to_be_bytes::<32>().to_vec())
+                .with_value(alloy_primitives::U256::from(100))
+                .with_gas_limit(1_000_000),
+        )
+        .await
+        .unwrap();
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(20), pending.get_receipt())
+        .await
+        .expect("source storage update must be mined")
+        .unwrap();
+    assert!(receipt.status());
+    assert_eq!(receipt.block_number(), Some(2));
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "ForkCachedState.t.sol",
+        &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract CreatedStorageControl { uint256 public value = 9; }
+
+contract ArbitrumForkVersionTest is Test {
+    function assertVersions(uint256 arbos, uint16 stylus) internal {
+        (bool ok, bytes memory output) = address(0x64).call(abi.encodeWithSignature("arbOSVersion()"));
+        assertTrue(ok);
+        assertEq(abi.decode(output, (uint256)), arbos, "ArbOS version retained previous backend state");
+        (ok, output) = address(0x71).call(abi.encodeWithSignature("stylusVersion()"));
+        assertTrue(ok);
+        assertEq(abi.decode(output, (uint16)), stylus, "Stylus version retained previous backend state");
+    }
+
+    function test_versions_follow_selected_backend() public {
+        assertVersions(116, 3);
+        uint256 snapshot = vm.snapshotState();
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertVersions(95, 2);
+        uint256 second = vm.createSelectFork("<rpc>", uint256(2));
+        assertVersions(95, 2);
+        vm.selectFork(first);
+        assertVersions(95, 2);
+        vm.rollFork(uint256(2));
+        assertVersions(95, 2);
+        vm.selectFork(second);
+        assertVersions(95, 2);
+        assertTrue(vm.revertToState(snapshot));
+        assertVersions(116, 3);
+    }
+}
+
+contract EthereumForkStorageControlTest is Test {
+    address constant REMOTE = address(0x123456);
+
+    function test_refresh_preserves_explicit_local_state() public {
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(0));
+        vm.store(REMOTE, bytes32(uint256(1)), bytes32(uint256(7)));
+        address persistent = address(0x234567);
+        vm.makePersistent(persistent);
+        vm.store(persistent, bytes32(0), bytes32(uint256(8)));
+        CreatedStorageControl created = new CreatedStorageControl();
+        vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(42)), "read cache masked remote storage");
+        assertEq(vm.load(REMOTE, bytes32(uint256(1))), bytes32(uint256(7)), "explicit setup write lost");
+        assertEq(vm.load(persistent, bytes32(0)), bytes32(uint256(8)), "persistent storage lost");
+        assertEq(created.value(), 9, "created account storage lost");
+    }
+
+    function test_inactive_roll_refreshes_read_cache() public {
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(42)));
+        uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+        vm.rollFork(first, uint256(2));
+        assertEq(vm.activeFork(), second);
+        vm.selectFork(first);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)), "inactive roll retained stale read cache");
+    }
+
+    function checkRoll(bool inactive) internal {
+        // Read caches and explicit setup storage must be distinguished on every roll.
+        assertEq(REMOTE.balance, 0);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(0));
+        vm.store(REMOTE, bytes32(uint256(1)), bytes32(uint256(7)));
+        address persistent = address(0x234567);
+        vm.makePersistent(persistent);
+        CreatedStorageControl created = new CreatedStorageControl();
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(REMOTE.balance, 100);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(42)));
+        vm.store(REMOTE, bytes32(0), bytes32(uint256(123)));
+        vm.store(REMOTE, bytes32(uint256(1)), bytes32(uint256(456)));
+        vm.deal(REMOTE, 777);
+        vm.setNonce(REMOTE, 42);
+        vm.etch(REMOTE, hex"00");
+        vm.store(persistent, bytes32(0), bytes32(uint256(8)));
+        vm.store(address(created), bytes32(0), bytes32(uint256(10)));
+        if (inactive) {
+            uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+            vm.rollFork(first, uint256(2));
+            assertEq(vm.activeFork(), second);
+            vm.selectFork(first);
+        } else {
+            vm.rollFork(uint256(2));
+        }
+        assertEq(REMOTE.balance, 200, "roll retained stale balance");
+        assertEq(vm.getNonce(REMOTE), 0, "roll retained stale nonce");
+        assertEq(REMOTE.code, hex"60003560005500", "roll retained stale code");
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)), "fork-local write survived roll");
+        assertEq(vm.load(REMOTE, bytes32(uint256(1))), bytes32(uint256(7)), "setup write lost");
+        assertEq(vm.load(persistent, bytes32(0)), bytes32(uint256(8)), "persistent write lost");
+        assertEq(created.value(), 10, "created account lost");
+    }
+
+    function test_active_roll_discards_fork_local_changes() public { checkRoll(false); }
+    function test_inactive_roll_discards_fork_local_changes() public { checkRoll(true); }
+
+    function test_roll_refreshes_read_only_account_info() public {
+        assertEq(REMOTE.balance, 0);
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(REMOTE.balance, 100);
+        vm.rollFork(uint256(2));
+        assertEq(REMOTE.balance, 200);
+        vm.rollFork(uint256(1));
+        assertEq(REMOTE.balance, 100);
+        vm.createSelectFork("<rpc>", uint256(2));
+        assertEq(REMOTE.balance, 200);
+        vm.rollFork(first, uint256(2));
+        vm.selectFork(first);
+        assertEq(REMOTE.balance, 200);
+    }
+
+    function selectAndRollThenRevert() external {
+        checkRoll(true);
+        revert("intentional");
+    }
+
+    function test_fork_roll_inside_reverting_call() public {
+        try this.selectAndRollThenRevert() { fail(); } catch Error(string memory reason) {
+            assertEq(reason, "intentional");
+        }
+        assertEq(REMOTE.balance, 200);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)));
+    }
+}
+"#
+        .replace("<rpc>", &handle.http_endpoint()),
+    );
+    for isolated in [true, false] {
+        prj.update_config(|config| config.isolate = isolated);
+        cmd.forge_fuse()
+            .args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkVersionTest", "-vvvv"])
+            .assert_success();
+        for network in ["ethereum", "arbitrum"] {
+            cmd.forge_fuse()
+                .args([
+                    "test",
+                    "--network",
+                    network,
+                    "--mc",
+                    "EthereumForkStorageControlTest",
+                    "-vvvv",
+                ])
+                .assert_success();
+        }
+    }
+});
+
+forgetest_async!(arbitrum_fork_transaction_replay_keeps_l1_and_l2_numbers_distinct, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let (api, handle) = anvil::spawn(
+        anvil::NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum()),
+    )
+    .await;
+    let provider = handle.http_provider();
+    let sender = provider.get_accounts().await.unwrap()[0];
+    let recorder = alloy_primitives::Address::repeat_byte(0x42);
+    // Store ArbSys.arbBlockNumber() in slot 0 and the NUMBER opcode in slot 1.
+    api.anvil_set_code(
+        recorder,
+        alloy_primitives::hex!(
+            "63a3b1b31d60e01b600052602060006004600060645afa506000516000554360015500"
+        )
+        .into(),
+    )
+    .await
+    .unwrap();
+    api.anvil_set_auto_mine(false).await.unwrap();
+    let first = provider
+        .send_transaction(
+            <alloy_network::AnyNetwork as alloy_network::Network>::TransactionRequest::default()
+                .with_from(sender)
+                .with_to(recorder)
+                .with_nonce(0)
+                .with_gas_limit(1_000_000),
+        )
+        .await
+        .unwrap();
+    let target = provider
+        .send_transaction(
+            <alloy_network::AnyNetwork as alloy_network::Network>::TransactionRequest::default()
+                .with_from(sender)
+                .with_to(alloy_primitives::Address::repeat_byte(0x43))
+                .with_nonce(1)
+                .with_gas_limit(1_000_000),
+        )
+        .await
+        .unwrap();
+    let target_hash = *target.tx_hash();
+    api.mine_one().await.unwrap();
+    let (first, target) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        (first.get_receipt().await.unwrap(), target.get_receipt().await.unwrap())
+    })
+    .await
+    .expect("source transactions must be mined before replay");
+    assert_eq!(first.transaction_index(), Some(0));
+    assert_eq!(target.transaction_index(), Some(1));
+    assert_eq!(target.block_number(), Some(1));
+
+    let upstream = handle.http_endpoint();
+    let client = reqwest::Client::new();
+    let app = axum::Router::new().fallback(move |body: axum::body::Bytes| {
+        let upstream = upstream.clone();
+        let client = client.clone();
+        async move {
+            let mut response = client
+                .post(upstream)
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+                .json::<serde_json::Value>()
+                .await
+                .unwrap();
+            let responses = match &mut response {
+                serde_json::Value::Array(items) => items.as_mut_slice(),
+                single => std::slice::from_mut(single),
+            };
+            for response in responses {
+                if let Some(block) =
+                    response.get_mut("result").and_then(serde_json::Value::as_object_mut)
+                    && block.contains_key("transactions")
+                    && block.contains_key("number")
+                {
+                    block.insert("l1BlockNumber".into(), serde_json::json!("0x3e7"));
+                }
+            }
+            axum::Json(response)
+        }
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let proxy = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    prj.update_config(|config| config.solc = Some(OTHER_SOLC_VERSION.into()));
+    prj.add_test(
+        "ArbitrumReplayNumbers.t.sol",
+        &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract ArbitrumReplayNumbersTest is Test {
+    function assertReplayedNumbers() internal view {
+        assertEq(uint256(vm.load(address(0x4242424242424242424242424242424242424242), bytes32(0))), 1);
+        assertEq(uint256(vm.load(address(0x4242424242424242424242424242424242424242), bytes32(uint256(1)))), 999);
+    }
+
+    function test_fork_creation_replays_with_distinct_numbers() public {
+        vm.createSelectFork("<rpc>", bytes32(<target>));
+        assertReplayedNumbers();
+    }
+
+    function test_fork_rolling_replays_with_distinct_numbers() public {
+        vm.createSelectFork("<rpc>", uint256(0));
+        vm.rollFork(bytes32(<target>));
+        assertReplayedNumbers();
+    }
+}
+"#
+        .replace("<rpc>", &endpoint)
+        .replace("<target>", &target_hash.to_string()),
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumReplayNumbersTest", "-vvvv"])
+        .assert_success();
+    proxy.abort();
+});
+
+forgetest_init!(test_arbitrum_execute_transaction_preserves_deployment_policy, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "NestedStylusPolicy.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+interface NestedStylusVm {
+    function executeTransaction(bytes calldata rawTx) external returns (bytes memory);
+}
+
+contract NestedStylusPolicyTest is Test {
+    NestedStylusVm constant NESTED_VM = NestedStylusVm(address(vm));
+
+    function directCreate() internal returns (address deployed) {
+        bytes memory initCode = hex"6004600c60003960046000f3eff00000";
+        assembly { deployed := create(0, add(initCode, 32), mload(initCode)) }
+    }
+
+    function nestedCreate() internal returns (bool ok) {
+        vm.deal(0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf, 1 ether);
+        // Signed CREATE: chain 421614, nonce 0, gas 1000000, zero fee/value, runtime eff00000.
+        (ok,) = address(NESTED_VM).call(abi.encodeCall(NestedStylusVm.executeTransaction, (
+            hex"f85f8080830f42408080906004600c60003960046000f3eff00000830cde00a0280e0e2966dfe3858dbfe800380f080b6cf909a1a3d656e1607dfb6284b82c4aa01adee7bee0d89ae2eaafabd1c9b0375d25e5d7847c3ed74adf7b310dd58f3ce4"
+        )));
+    }
+
+    function test_directCreateRejectsWhenDisabled() public {
+        assertEq(directCreate(), address(0));
+    }
+
+    function test_nestedCreateRejectsWhenDisabled() public {
+        assertFalse(nestedCreate(), "nested execution lost the Stylus deployment policy");
+    }
+
+    function test_directCreateAllowedControl() public {
+        address deployed = directCreate();
+        assertTrue(deployed != address(0));
+        assertEq(deployed.code, hex"eff00000");
+    }
+
+    function test_nestedCreateAllowedControl() public {
+        assertTrue(nestedCreate());
+        address deployed = vm.computeCreateAddress(0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf, 0);
+        assertEq(deployed.code, hex"eff00000");
+    }
+}
+"#,
+    );
+    cmd.args([
+        "test",
+        "--network",
+        "arbitrum",
+        "--chain-id",
+        "421614",
+        "--stylus-disable-deployment",
+        "--mc",
+        "NestedStylusPolicyTest",
+        "--mt",
+        "RejectsWhenDisabled",
+        "-vvvv",
+    ])
+    .assert_success();
+    cmd.forge_fuse()
+        .args([
+            "test",
+            "--network",
+            "arbitrum",
+            "--chain-id",
+            "421614",
+            "--mc",
+            "NestedStylusPolicyTest",
+            "--mt",
+            "AllowedControl",
+            "-vvvv",
+        ])
+        .assert_success();
+});
+
+forgetest_async!(arbitrum_fork_uses_registered_arb_sys_precompile, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let (api, handle) = anvil::spawn(
+        anvil::NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum()),
+    )
+    .await;
+    api.mine_one().await.unwrap();
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "ArbSysProvider.t.sol",
+        &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract ArbSysProviderTest is Test {
+    function arbBlockNumber() internal returns (uint256) {
+        (bool ok, bytes memory output) = address(100).call(abi.encodeWithSignature("arbBlockNumber()"));
+        assertTrue(ok);
+        return abi.decode(output, (uint256));
+    }
+
+    function test_fork_block_numbers_follow_position() public {
+        uint256 first = vm.createSelectFork("<rpc>", uint256(0));
+        assertEq(arbBlockNumber(), 0);
+        uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(arbBlockNumber(), 1);
+        vm.selectFork(first);
+        assertEq(arbBlockNumber(), 0);
+        vm.rollFork(uint256(1));
+        assertEq(arbBlockNumber(), 1);
+        vm.selectFork(second);
+        assertEq(arbBlockNumber(), 1);
+    }
+
+    function assertNonpayableCallReverts() internal {
+        vm.deal(address(this), 1 ether);
+        uint256 previousBalance = address(this).balance;
+        (bool ok,) = address(100).call{value: 1, gas: 100_000}(
+            abi.encodeWithSignature("arbBlockNumber()")
+        );
+        assertFalse(ok, "nonpayable ArbSys call must revert");
+        assertEq(address(this).balance, previousBalance);
+    }
+
+    function test_nonpayable_local_control() public {
+        assertNonpayableCallReverts();
+    }
+
+    function test_fork_nonpayable_call_reverts() public {
+        vm.createSelectFork("<rpc>", uint256(1));
+        assertNonpayableCallReverts();
+    }
+}
+"#
+        .replace("<rpc>", &handle.http_endpoint()),
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbSysProviderTest", "-vvvv"])
+        .assert_success();
+    // The Ethereum executor still needs the fallback when it has no ArbSys provider.
+    cmd.forge_fuse()
+        .args([
+            "test",
+            "--network",
+            "ethereum",
+            "--mc",
+            "ArbSysProviderTest",
+            "--mt",
+            "test_fork_block_numbers_follow_position",
+            "-vvvv",
+        ])
+        .assert_success();
+});
+
+forgetest_init!(test_network_arbitrum_applies_stylus_cli_config, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+
+    prj.add_test(
+        "ConfiguredArbosState.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface ArbWasm {
+    function stylusVersion() external view returns (uint16);
+    function inkPrice() external view returns (uint32);
+    function freePages() external view returns (uint16);
+    function maxStackDepth() external view returns (uint32);
+}
+
+contract ConfiguredArbosStateTest is Test {
+    ArbWasm constant ARB_WASM = ArbWasm(address(0x71));
+
+    function test_stylus_cli_config_initializes_local_arbos_state() public view {
+        assertEq(ARB_WASM.stylusVersion(), 2);
+        assertEq(ARB_WASM.inkPrice(), 12_345);
+        assertEq(ARB_WASM.freePages(), 7);
+        assertEq(ARB_WASM.maxStackDepth(), 23_456);
+    }
+}
+"#,
+    );
+
+    cmd.args([
+        "test",
+        "--network",
+        "arbitrum",
+        "--mc",
+        "ConfiguredArbosStateTest",
+        "--arbos-version",
+        "40",
+        "--stylus-version",
+        "2",
+        "--stylus-ink-price",
+        "12345",
+        "--stylus-free-pages",
+        "7",
+        "--stylus-max-stack-depth",
+        "23456",
+    ])
+    .assert_success();
+});
+
+forgetest_init!(test_stylus_utility_cheatcodes, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    prj.create_file("dummy.wasm.br", "synthetic-precompressed-stylus-program");
+    prj.add_test(
+        "StylusUtilities.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface StylusVm {
+    function brotliCompress(bytes calldata) external pure returns (bytes memory);
+    function brotliDecompress(bytes calldata) external pure returns (bytes memory);
+    function getStylusCode(string calldata) external view returns (bytes memory);
+    function getStylusInitCode(string calldata) external view returns (bytes memory);
+}
+
+contract StylusUtilitiesTest is Test {
+    StylusVm constant STYLUS_VM = StylusVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+    function test_stylus_utility_cheatcodes() public {
+        bytes memory input = new bytes(4096);
+        for (uint256 i; i < input.length; ++i) input[i] = bytes1(uint8(65 + i % 7));
+        bytes memory compressed = STYLUS_VM.brotliCompress(input);
+        assertLt(compressed.length, input.length);
+        assertEq(STYLUS_VM.brotliDecompress(compressed), input);
+
+        bytes memory runtimeCode = STYLUS_VM.getStylusCode("dummy.wasm.br");
+        assertEq(bytes4(runtimeCode), hex"eff00000");
+        bytes memory initCode = STYLUS_VM.getStylusInitCode("dummy.wasm.br");
+        address deployed;
+        assembly { deployed := create(0, add(initCode, 0x20), mload(initCode)) }
+        assertTrue(deployed != address(0));
+        assertEq(deployed.code, runtimeCode);
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "StylusUtilitiesTest"]).assert_success();
+});
+
+forgetest_init!(test_stylus_block_cache_gas, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixtures/Stylus");
+    for name in ["foundry_stylus_program.wasm", "foundry_stylus_debug.wasm"] {
+        std::fs::copy(fixtures.join(name), prj.root().join(name)).unwrap();
+    }
+    prj.add_test(
+        "BlockCache.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+interface StylusCode { function getStylusCode(string calldata) external view returns (bytes memory); }
+
+contract BlockCacheTest is Test {
+    address constant A = address(0xaaa);
+    address constant B = address(0xbbb);
+
+    function callGas(address target) internal returns (uint256 used) {
+        uint256 beforeGas = gasleft();
+        (bool ok, bytes memory output) = target.call(hex"deadbeef");
+        used = beforeGas - gasleft();
+        assertTrue(ok);
+        assertEq(output, hex"deadbeef");
+    }
+
+    function test_eviction_and_block_lifetime() public {
+        vm.etch(A, StylusCode(address(vm)).getStylusCode("foundry_stylus_program.wasm"));
+        vm.etch(B, StylusCode(address(vm)).getStylusCode("foundry_stylus_debug.wasm"));
+        // Activate both programs before measuring their initialization gas.
+        callGas(A);
+        callGas(B);
+        vm.roll(block.number + 1);
+        uint256 cold = callGas(A);
+        callGas(B);
+        uint256 evicted = callGas(A);
+        uint256 warm = callGas(A);
+        assertApproxEqAbs(cold, evicted, 64, "size zero and one must evict A after B");
+        assertGt(evicted, warm + 1000, "same-block calls must share the recent cache");
+        vm.roll(block.number + 1);
+        uint256 nextBlock = callGas(A);
+        assertApproxEqAbs(nextBlock, cold, 64, "new block must clear the cache");
+    }
+}
+"#,
+    );
+    for isolated in [false, true] {
+        prj.update_config(|config| config.isolate = isolated);
+        for capacity in ["0", "1"] {
+            cmd.forge_fuse()
+                .args([
+                    "test",
+                    "--network",
+                    "arbitrum",
+                    "--arbos-version",
+                    "61",
+                    "--stylus-disable-auto-cache",
+                    "--stylus-debug",
+                    "--stylus-block-cache-size",
+                    capacity,
+                    "--mc",
+                    "BlockCacheTest",
+                    "-vvvv",
+                ])
+                .assert_success();
+        }
+    }
+});
+
+forgetest_init!(test_deploy_stylus_code_executes_program, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/fixtures/Stylus/foundry_stylus_program.wasm");
+    std::fs::copy(fixture, prj.root().join("echo.wasm")).unwrap();
+    prj.add_test(
+        "DeployStylus.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+
+interface StylusVm {
+    function deployStylusCode(string calldata) external returns (address);
+    function deployStylusCode(string calldata, bytes32) external returns (address);
+    function deployStylusCode(string calldata, uint256) external returns (address);
+    function deployStylusCode(string calldata, uint256, bytes32) external returns (address);
+    function deployStylusCode(string calldata, bytes calldata, uint256) external returns (address);
+    function deployStylusCode(string calldata, bytes calldata, uint256, bytes32) external returns (address);
+    function getStylusInitCode(string calldata) external returns (bytes memory);
+    function getStylusInitCode(string calldata, uint256) external returns (bytes memory);
+}
+
+contract DeployStylusTest is Test {
+    StylusVm constant STYLUS_VM = StylusVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+
+    function test_deploy_and_execute_stylus_echo() public {
+        address program = STYLUS_VM.deployStylusCode("echo.wasm");
+        bytes memory input = hex"deadbeef01234567";
+        (bool ok, bytes memory output) = program.call(input);
+        assertTrue(ok);
+        assertEq(output, input);
+    }
+
+    function test_create2_deployment_is_deterministic() public {
+        bytes32 salt = keccak256("stylus-salt");
+        bytes memory initCode = STYLUS_VM.getStylusInitCode("echo.wasm");
+        assertEq(initCode, STYLUS_VM.getStylusInitCode("echo.wasm", uint256(0)));
+        address expected = address(uint160(uint256(keccak256(abi.encodePacked(
+            bytes1(0xff), address(0xcEcba2F1DC234f70Dd89F2041029807F8D03A990), salt,
+            keccak256(initCode)
+        )))));
+        address first = STYLUS_VM.deployStylusCode("echo.wasm", salt);
+        assertEq(first, expected);
+        (bool ok, bytes memory output) = first.call(hex"c0ffee");
+        assertTrue(ok);
+        assertEq(output, hex"c0ffee");
+    }
+
+    function test_create_with_value() public {
+        address deployer = 0xcEcba2F1DC234f70Dd89F2041029807F8D03A990;
+        vm.deal(deployer, 1 ether);
+        address program = STYLUS_VM.deployStylusCode("echo.wasm", uint256(1));
+        assertEq(program.balance, 1);
+        assertEq(deployer.balance, 1 ether - 1);
+        (bool ok, bytes memory output) = program.call(hex"c0ffee");
+        assertTrue(ok);
+        assertEq(output, hex"c0ffee");
+    }
+
+    function test_create2_with_value() public {
+        address deployer = 0xcEcba2F1DC234f70Dd89F2041029807F8D03A990;
+        vm.deal(deployer, 1 ether);
+        bytes32 salt = keccak256("payable-stylus-salt");
+        bytes memory initCode = STYLUS_VM.getStylusInitCode("echo.wasm", uint256(1));
+        address expected = address(uint160(uint256(keccak256(abi.encodePacked(
+            bytes1(0xff), deployer, salt, keccak256(initCode)
+        )))));
+        address program = STYLUS_VM.deployStylusCode(
+            "echo.wasm", uint256(1), salt
+        );
+        assertEq(program, expected);
+        assertEq(program.balance, 1);
+        assertEq(deployer.balance, 1 ether - 1);
+        (bool ok, bytes memory output) = program.call(hex"c0ffee");
+        assertTrue(ok);
+        assertEq(output, hex"c0ffee");
+    }
+
+    function test_constructor_receives_value_from_caller() public {
+        address deployer = 0xcEcba2F1DC234f70Dd89F2041029807F8D03A990;
+        vm.deal(deployer, 0);
+        vm.deal(address(this), 1 ether);
+        address program = STYLUS_VM.deployStylusCode("echo.wasm", bytes(""), uint256(1));
+        assertEq(program.balance, 1);
+        assertEq(deployer.balance, 0);
+        assertEq(address(this).balance, 1 ether - 1);
+    }
+
+    function test_create2_constructor_preserves_initcode_and_receives_value() public {
+        address deployer = 0xcEcba2F1DC234f70Dd89F2041029807F8D03A990;
+        vm.deal(deployer, 0);
+        vm.deal(address(this), 1 ether);
+        bytes32 salt = keccak256("stylus-constructor-salt");
+        bytes memory initCode = STYLUS_VM.getStylusInitCode("echo.wasm");
+        address expected = address(uint160(uint256(keccak256(abi.encodePacked(
+            bytes1(0xff), deployer, salt, keccak256(initCode)
+        )))));
+        address program = STYLUS_VM.deployStylusCode("echo.wasm", bytes(""), uint256(1), salt);
+        assertEq(program, expected);
+        assertEq(program.balance, 1);
+        assertEq(deployer.balance, 0);
+        assertEq(address(this).balance, 1 ether - 1);
+    }
+}
+
+interface StylusCache {
+    function codehashIsCached(bytes32 codehash) external view returns (bool);
+}
+
+contract StylusCachePolicyTest is Test {
+    StylusVm constant STYLUS_VM = StylusVm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    StylusCache constant CACHE = StylusCache(address(0x72));
+
+    function test_deployment_cached_by_default() public {
+        address program = STYLUS_VM.deployStylusCode("echo.wasm");
+        assertTrue(CACHE.codehashIsCached(program.codehash));
+    }
+
+    function test_deployment_without_auto_cache() public {
+        address program = STYLUS_VM.deployStylusCode("echo.wasm");
+        assertFalse(CACHE.codehashIsCached(program.codehash));
+        (bool ok, bytes memory output) = program.call(hex"c0ffee");
+        assertTrue(ok);
+        assertEq(output, hex"c0ffee");
+        assertFalse(CACHE.codehashIsCached(program.codehash));
+    }
+}
+"#,
+    );
+
+    cmd.args(["test", "--network", "arbitrum", "--mc", "DeployStylusTest"]).assert_success();
+    cmd.forge_fuse()
+        .args([
+            "test",
+            "--network",
+            "arbitrum",
+            "--mc",
+            "StylusCachePolicyTest",
+            "--mt",
+            "cached_by_default",
+        ])
+        .assert_success();
+    cmd.forge_fuse()
+        .args([
+            "test",
+            "--network",
+            "arbitrum",
+            "--stylus-disable-auto-cache",
+            "--mc",
+            "StylusCachePolicyTest",
+            "--mt",
+            "without_auto_cache",
+        ])
+        .assert_success();
+
+    // Nested CREATE and CREATE2 must retain debug configuration for activation and execution.
+    let debug_fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/fixtures/Stylus/foundry_stylus_debug.wasm");
+    std::fs::copy(debug_fixture, prj.root().join("echo.wasm")).unwrap();
+    cmd.forge_fuse()
+        .args(["test", "--network", "arbitrum", "--stylus-debug", "--mc", "DeployStylusTest"])
+        .assert_success();
 });
 
 // Validates T5 implicit-approval wiring: the cheatcodes, the AddressRegistry selector,

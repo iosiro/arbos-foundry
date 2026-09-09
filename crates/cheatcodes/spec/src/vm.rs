@@ -2186,6 +2186,59 @@ interface Vm {
     #[cheatcode(group = Filesystem)]
     function getDeployedCode(string calldata artifactPath) external view returns (bytes memory runtimeBytecode);
 
+    /// Deploys and activates a Stylus contract from a `.wasm` or `.wasm.br` artifact.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract, then invokes its constructor with ABI-encoded arguments.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract with value.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, uint256 value) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract with constructor arguments and value.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract using CREATE2.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract using CREATE2, then invokes its constructor.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract with value using CREATE2.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, uint256 value, bytes32 salt) external returns (address deployedAddress);
+
+    /// Deploys and activates a Stylus contract with constructor arguments and value using CREATE2.
+    #[cheatcode(group = Filesystem)]
+    function deployStylusCode(string calldata artifactPath, bytes calldata constructorArgs, uint256 value, bytes32 salt) external returns (address deployedAddress);
+
+    /// Returns compressed, Stylus-prefixed runtime bytecode for a `.wasm` or `.wasm.br` artifact.
+    #[cheatcode(group = Filesystem)]
+    function getStylusCode(string calldata artifactPath) external view returns (bytes memory runtimeBytecode);
+
+    /// Returns zero-value EVM init code that deploys compressed, Stylus-prefixed runtime bytecode.
+    #[cheatcode(group = Filesystem)]
+    function getStylusInitCode(string calldata artifactPath) external view returns (bytes memory initCode);
+
+    /// Returns EVM init code matching a Stylus deployment with the given CREATE value.
+    /// Use zero for deployments with constructor arguments, whose value is sent in the constructor call.
+    #[cheatcode(group = Filesystem)]
+    function getStylusInitCode(string calldata artifactPath, uint256 createValue) external view returns (bytes memory initCode);
+
+    /// Compresses data using Nitro-compatible Brotli parameters.
+    #[cheatcode(group = String)]
+    function brotliCompress(bytes calldata data) external pure returns (bytes memory compressed);
+
+    /// Decompresses Brotli-compressed data.
+    #[cheatcode(group = String)]
+    function brotliDecompress(bytes calldata compressed) external pure returns (bytes memory data);
+
     /// Returns the most recent broadcast for the given contract on `chainId` matching `txType`.
     ///
     /// For example:

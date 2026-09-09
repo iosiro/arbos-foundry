@@ -3,7 +3,9 @@
 use crate::{
     ContractRunner, TestFilter,
     progress::TestsProgress,
-    result::{SuiteResult, SymbolicCounterexampleArtifact, SymbolicCounterexampleArtifactKind},
+    result::{
+        SuiteResult, SymbolicCounterexampleArtifact, SymbolicCounterexampleArtifactKind, TestResult,
+    },
     runner::{
         ContractRunnerContext, InvariantCampaignScope, count_runnable_invariant_campaign_anchors,
     },
@@ -375,12 +377,28 @@ impl<FEN: FoundryEvmNetwork> MultiContractRunner<FEN> {
 
         debug!("start executing all tests in contract");
 
-        let executor = self.tcfg.executor(
+        let executor = match self.tcfg.executor(
             self.known_contracts.clone(),
             self.analysis.clone(),
             artifact_id,
             db.clone(),
-        );
+        ) {
+            Ok(executor) => executor,
+            Err(error) => {
+                self.tcfg.early_exit.record_failure();
+                return SuiteResult::new(
+                    Default::default(),
+                    [(
+                        "setUp()".to_string(),
+                        TestResult::fail(format!(
+                            "failed to initialize execution backend: {error:#}"
+                        )),
+                    )]
+                    .into(),
+                    Vec::new(),
+                );
+            }
+        };
         let runner = ContractRunner::new(&identifier, contract, executor, span, self, context);
         let r = runner.run_tests(filter);
 
@@ -613,7 +631,7 @@ impl<FEN: FoundryEvmNetwork> TestRunnerConfig<FEN> {
         analysis: Arc<solar::sema::Compiler>,
         artifact_id: &ArtifactId,
         db: Backend<FEN>,
-    ) -> Executor<FEN> {
+    ) -> Result<Executor<FEN>> {
         let mut cheats_config = CheatsConfig::new(
             &self.config,
             self.evm_opts.clone(),
@@ -638,7 +656,7 @@ impl<FEN: FoundryEvmNetwork> TestRunnerConfig<FEN> {
             .spec_id(self.spec_id)
             .gas_limit(self.evm_opts.gas_limit())
             .legacy_assertions(self.config.legacy_assertions)
-            .build(self.evm_env.clone(), self.tx_env.clone(), db, self.evm_opts.networks)
+            .try_build(self.evm_env.clone(), self.tx_env.clone(), db, self.evm_opts.networks)
     }
 
     fn trace_requirements(&self) -> TraceRequirements {

@@ -96,6 +96,32 @@ const TRACING_KEYS: &[&str] = &[
     "external_identification_timeout",
 ];
 
+/// Allowed keys for StylusConfig, whose unset fields are omitted from serialization.
+const STYLUS_KEYS: &[&str] = &[
+    "arbos_version",
+    "stylus_version",
+    "ink_price",
+    "max_stack_depth",
+    "free_pages",
+    "page_gas",
+    "page_ramp",
+    "page_limit",
+    "max_fragment_count",
+    "min_init_gas",
+    "min_cached_init_gas",
+    "init_cost_scalar",
+    "cached_cost_scalar",
+    "expiry_days",
+    "keepalive_days",
+    "block_cache_size",
+    "max_wasm_size",
+    "disable_auto_cache_stylus",
+    "disable_auto_activate_stylus",
+    "debug_mode_stylus",
+    "deployer_address",
+    "disable_stylus_deployment",
+];
+
 /// Reserved keys that should not trigger unknown key warnings.
 const RESERVED_KEYS: &[&str] = &["extends"];
 
@@ -187,7 +213,9 @@ impl<P: Provider> WarningsProvider<P> {
         if let Ok(default_map) = figment::providers::Serialized::defaults(&Config::default()).data()
             && let Some(default_dict) = default_map.get(&Config::DEFAULT_PROFILE)
         {
-            let allowed_keys: BTreeSet<String> = default_dict.keys().cloned().collect();
+            let mut allowed_keys: BTreeSet<String> = default_dict.keys().cloned().collect();
+            // The whole Stylus section is omitted when no overrides are configured.
+            allowed_keys.insert("stylus".to_string());
             for profile_map in profiles.clone() {
                 for (profile, value) in profile_map {
                     let Some(profile_dict) = value.as_dict() else {
@@ -347,6 +375,8 @@ impl<P: Provider> WarningsProvider<P> {
                 SYMBOLIC_KEYS.iter().map(|s| s.to_string()).collect()
             } else if key == "tracing" {
                 TRACING_KEYS.iter().map(|s| s.to_string()).collect()
+            } else if key == "stylus" {
+                STYLUS_KEYS.iter().map(|s| s.to_string()).collect()
             } else {
                 let Some(default_value) = default_dict.get(key) else {
                     continue;

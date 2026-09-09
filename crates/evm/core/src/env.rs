@@ -421,6 +421,11 @@ pub trait FoundryChain<Tx>: Clone + Debug + Default + Send + Sync {
         Self::default()
     }
 
+    /// Builds transaction context at a known RPC block height.
+    fn for_rpc_block(tx: &Tx, _block_number: u64) -> Self {
+        Self::for_transaction(tx)
+    }
+
     /// Builds chain context for a transaction at an exact block position.
     fn for_block(
         _grandparent: &[Tx],
@@ -533,6 +538,11 @@ pub trait FoundryContextExt:
     /// Reference to the journal inner.
     fn journal_inner(&self) -> &JournaledState;
 
+    /// Activates deployed Stylus bytecode when supported by the active execution family.
+    fn activate_stylus_program(&mut self, _address: Address) -> eyre::Result<()> {
+        eyre::bail!("Stylus activation requires the Arbitrum execution network")
+    }
+
     /// Sets the spec and refreshes gas params for the concrete EVM family.
     fn set_spec_and_gas_params(&mut self, spec: Self::Spec) {
         self.cfg_env_mut().set_spec_and_mainnet_gas_params(spec);
@@ -553,6 +563,11 @@ pub trait FoundryContextExt:
         *self.cfg_mut() = cfg;
     }
 
+    /// Replaces chain-position state while preserving local execution configuration.
+    fn set_chain_context(&mut self, chain: Self::Chain) {
+        *self.chain_mut() = chain;
+    }
+
     /// Sets journal inner.
     fn set_journal_inner(&mut self, journal_inner: JournaledState) {
         *self.db_journal_inner_mut().1 = journal_inner;
@@ -560,7 +575,9 @@ pub trait FoundryContextExt:
 
     /// Sets EVM environment.
     fn set_evm(&mut self, evm_env: EvmEnv<Self::Spec, Self::Block>) {
-        *self.cfg_mut() = evm_env.cfg_env.into();
+        // Update the shared environment without replacing network-owned
+        // configuration that is not represented by Alloy's CfgEnv.
+        *self.cfg_env_mut() = evm_env.cfg_env;
         *self.block_mut() = evm_env.block_env;
     }
 

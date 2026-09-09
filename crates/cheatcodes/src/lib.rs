@@ -62,6 +62,8 @@ pub use script::{Wallets, WalletsInner};
 
 mod string;
 
+mod stylus;
+
 mod tempo;
 
 mod test;

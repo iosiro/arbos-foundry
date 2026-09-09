@@ -14,6 +14,8 @@ pub mod cmd;
 
 pub mod dispatcher;
 
+pub mod evm;
+
 pub mod executor;
 
 pub mod opts;

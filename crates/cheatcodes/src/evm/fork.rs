@@ -430,7 +430,7 @@ fn apply_context_update<FEN: FoundryEvmNetwork>(
     match context_update {
         foundry_evm_core::backend::ContextUpdate::Unchanged => {}
         foundry_evm_core::backend::ContextUpdate::Replace(chain_context) => {
-            *ecx.chain_mut() = chain_context;
+            ecx.set_chain_context(chain_context);
             foundry_evm_core::refresh_chain_journal(ecx);
         }
         foundry_evm_core::backend::ContextUpdate::Rebase => {

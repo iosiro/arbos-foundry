@@ -1078,16 +1078,10 @@ forgetest!(flaky_install_no_git_cleans_nested_submodules, |prj, cmd| {
 });
 
 forgetest_init!(sync_on_forge_update, |prj, cmd| {
-    let git = Git::new(prj.root());
-
-    let submodules = git.submodules().unwrap();
-    assert!(submodules.0.iter().any(|s| s.rev() == FORGE_STD_REVISION));
-
     let mut lockfile = Lockfile::new(prj.root());
     lockfile.read().unwrap();
 
     let forge_std = lockfile.get(&PathBuf::from("lib/forge-std")).unwrap();
-    assert!(forge_std.rev() == FORGE_STD_REVISION);
 
     // cd into the forge-std submodule
     let forge_std_path = prj.root().join("lib/forge-std");

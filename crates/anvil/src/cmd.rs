@@ -11,7 +11,7 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use core::fmt;
 use foundry_common::shell;
-use foundry_config::{Chain, Config, FigmentProviders};
+use foundry_config::{Chain, Config, FigmentProviders, stylus::StylusConfig};
 use foundry_evm::hardfork::FoundryHardfork;
 use foundry_evm_networks::NetworkConfigs;
 use foundry_primitives::FoundryReceiptEnvelope;
@@ -345,6 +345,7 @@ impl NodeArgs {
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
             .with_cache_path(self.cache_path)
+            .with_stylus_config(self.evm.stylus)
             .with_funded_accounts(funded_accounts))
     }
 
@@ -694,6 +695,10 @@ pub struct AnvilEvmArgs {
 
     #[command(flatten)]
     pub networks: NetworkConfigs,
+
+    /// Stylus configuration options.
+    #[command(flatten)]
+    pub stylus: StylusConfig,
 }
 
 /// Resolves an alias passed as fork-url to the matching url defined in the rpc_endpoints section

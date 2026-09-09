@@ -1729,6 +1729,14 @@ async fn test_call_tracer_debug_trace_call_pre_state_tracer() {
   "0x0000000000000000000000000000000000000000": {
     "balance": "0x12670f"
   },
+  "0xa4b05fffffffffffffffffffffffffffffffffff": {
+    "balance": "0x0",
+    "nonce": 1,
+    "storage": {
+      "0x15fed0451499512d95f3ec5a41c878b9de55f21878b5b4e190d4667ec709b400": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "0xe54de2a4cdacc0a0059d2b6e16348103df8c4aff409c31e40ec73d11926c8201": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
   "0x5fbdb2315678afecb367f032d93f642f64180aa3": {
     "balance": "0x0",
     "nonce": 1
@@ -1752,7 +1760,9 @@ async fn test_call_tracer_debug_trace_call_pre_state_tracer() {
     match result {
         GethTrace::PreStateTracer(PreStateFrame::Default(pre_state_mode)) => {
             for (addr, acc) in pre_state_mode.0 {
-                let expected_acc = expected.get(&addr).unwrap();
+                let expected_acc = expected.get(&addr).unwrap_or_else(|| {
+                    panic!("unexpected account in pre-state trace: {addr}: {acc:?}")
+                });
                 assert_eq!(acc.balance, expected_acc.balance);
                 assert_eq!(acc.nonce, expected_acc.nonce);
                 let expected_storage = &expected_acc.storage;
@@ -1819,6 +1829,14 @@ async fn test_debug_trace_transaction_pre_state_tracer() {
   "0x0000000000000000000000000000000000000000": {
     "balance": "1206031000000000"
   },
+  "0xa4b05fffffffffffffffffffffffffffffffffff": {
+    "balance": "0x0",
+    "nonce": 1,
+    "storage": {
+      "0x15fed0451499512d95f3ec5a41c878b9de55f21878b5b4e190d4667ec709b400": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "0xe54de2a4cdacc0a0059d2b6e16348103df8c4aff409c31e40ec73d11926c8201": "0x0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
   "0x5fbdb2315678afecb367f032d93f642f64180aa3": {
     "balance": "0x0",
     "nonce": 1
@@ -1842,7 +1860,9 @@ async fn test_debug_trace_transaction_pre_state_tracer() {
     match result {
         GethTrace::PreStateTracer(PreStateFrame::Default(pre_state_mode)) => {
             for (addr, acc) in pre_state_mode.0 {
-                let expected_acc = expected.get(&addr).unwrap();
+                let expected_acc = expected.get(&addr).unwrap_or_else(|| {
+                    panic!("unexpected account in pre-state trace: {addr}: {acc:?}")
+                });
                 assert_eq!(acc.balance, expected_acc.balance);
                 assert_eq!(acc.nonce, expected_acc.nonce);
                 let expected_storage = &expected_acc.storage;

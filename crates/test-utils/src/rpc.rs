@@ -88,15 +88,6 @@ shuffled_list!(
     ],
 );
 
-// List of general purpose DRPC keys to rotate through
-shuffled_list!(
-    DRPC_KEYS,
-    vec![
-        "Agc9NK9-6UzYh-vQDDM80Tv0A5UnBkUR8I3qssvAG40d",
-        "AjUPUPonSEInt2CZ_7A-ai3hMyxxBlsR8I4EssvAG40d",
-    ],
-);
-
 // List of etherscan keys.
 shuffled_list!(
     ETHERSCAN_KEYS,
@@ -167,8 +158,21 @@ pub fn next_ws_archive_rpc_url() -> String {
     next_archive_url(true)
 }
 
+/// Returns an Arbitrum URL that has access to archive state.
+pub fn arbitrum_archive_rpc_url() -> String {
+    ["ARBITRUM_ARCHIVE_RPC", "ARBITRUM_RPC"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|url| !url.is_empty()))
+        .unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string())
+}
+
 /// Returns a URL that has access to archive state.
 fn next_archive_url(is_ws: bool) -> String {
+    let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+    if let Some(url) = env_rpc_url(env_var) {
+        test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
+        return url;
+    }
     let domain = if is_ws { &WS_ARCHIVE_DOMAINS } else { &HTTP_ARCHIVE_DOMAINS }.next();
     let url = if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
@@ -233,22 +237,31 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
     }
 
     if matches!(chain, Arbitrum) {
-        return env_rpc_url("ARBITRUM_RPC").unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string());
+        return arbitrum_archive_rpc_url();
+    }
+
+    if matches!(chain, Mainnet) {
+        let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+        if let Some(url) = env_rpc_url(env_var) {
+            return url;
+        }
+    }
+
+    let publicnode_domain = match chain {
+        Sepolia => Some("ethereum-sepolia-rpc.publicnode.com"),
+        Polygon => Some("polygon-bor-rpc.publicnode.com"),
+        NamedChain::BinanceSmartChain => Some("bsc-rpc.publicnode.com"),
+        _ => None,
+    };
+    if let Some(domain) = publicnode_domain {
+        return if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     }
 
     let reth_works = true;
     let domain = if reth_works && matches!(chain, Mainnet) {
         *(if is_ws { &WS_DOMAINS } else { &HTTP_DOMAINS }).next()
     } else {
-        // DRPC for other networks used in tests.
-        let key = DRPC_KEYS.next();
-        let network = match chain {
-            Mainnet => "ethereum",
-            Polygon => "polygon",
-            Sepolia => "sepolia",
-            _ => "",
-        };
-        &format!("lb.drpc.org/ogrpc?network={network}&dkey={key}")
+        panic!("no test RPC endpoint configured for {chain:?}")
     };
 
     if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") }
@@ -256,7 +269,9 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
 
 /// Returns the RPC URL configured in the `var` environment variable, if it is set and non-empty.
 fn env_rpc_url(var: &str) -> Option<String> {
-    env::var(var).ok().filter(|url| !url.is_empty())
+    env::var(var).ok().and_then(|urls| {
+        urls.split(',').find(|url| !url.trim().is_empty()).map(str::trim).map(str::to_owned)
+    })
 }
 
 /// Basic redaction for debugging RPC URLs.

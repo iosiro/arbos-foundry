@@ -4,6 +4,7 @@
 //! of both builtin commands and Solidity snippets.
 
 use crate::{
+    evm::ChiselEvmNetwork,
     executor::InspectResult,
     prelude::{ChiselCommand, ChiselResult, ChiselSession, SessionSourceConfig, SolidityHelper},
     source::SessionSource,
@@ -63,7 +64,7 @@ pub fn format_source(source: &str, config: FormatterConfig) -> eyre::Result<Stri
     Ok(formatted)
 }
 
-impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
+impl<FEN: ChiselEvmNetwork> ChiselDispatcher<FEN> {
     /// Associated public function to create a new Dispatcher instance
     pub fn new(config: SessionSourceConfig<FEN>) -> eyre::Result<Self> {
         let session = ChiselSession::new(config)?;
@@ -254,7 +255,7 @@ impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
 }
 
 /// [`ChiselCommand`] implementations.
-impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
+impl<FEN: ChiselEvmNetwork> ChiselDispatcher<FEN> {
     /// Dispatches a [`ChiselCommand`].
     pub async fn dispatch_command(&mut self, cmd: ChiselCommand) -> Result<ControlFlow<()>> {
         match cmd {
@@ -335,10 +336,9 @@ impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
             sh_println!("{}", "Saved current session!".green())?;
         }
 
-        let executor_builder = self.session.source.config.executor_builder.clone();
         let mut new_session = match id {
-            "latest" => ChiselSession::<FEN>::latest(executor_builder),
-            id => ChiselSession::<FEN>::load(id, executor_builder),
+            "latest" => ChiselSession::<FEN>::latest(),
+            id => ChiselSession::<FEN>::load(id),
         }
         .wrap_err("failed to load session")?;
 

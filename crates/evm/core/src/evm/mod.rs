@@ -10,7 +10,7 @@ use alloy_evm::{
     EthEvmFactory, Evm, EvmEnv, EvmFactory, FromRecoveredTx, precompiles::PrecompilesMap,
 };
 use alloy_network::{Ethereum, Network};
-use alloy_primitives::{Address, Signature, U256};
+use alloy_primitives::{Address, ChainId, Signature, U256, map::AddressSet};
 use alloy_rlp::Decodable;
 use foundry_common::{FoundryReceiptResponse, FoundryTransactionBuilder, fmt::UIfmt};
 use foundry_config::ExecutionSpec;
@@ -35,6 +35,7 @@ use tempo_alloy::TempoNetwork;
 use tempo_evm::evm::TempoEvmFactory;
 use tempo_revm::TempoHaltReason;
 
+pub mod arbitrum;
 pub mod eth;
 #[cfg(feature = "monad")]
 pub mod monad;
@@ -45,12 +46,42 @@ pub mod tempo;
 mod block_context;
 pub use block_context::*;
 
+pub use arbitrum::*;
 pub use eth::*;
 #[cfg(feature = "monad")]
 pub use monad::*;
 #[cfg(feature = "optimism")]
 pub use op::*;
 pub use tempo::*;
+
+/// Operations Foundry needs from an execution family's precompile handle.
+pub trait FoundryPrecompiles {
+    fn addresses(&self) -> AddressSet;
+
+    fn configure_for_replay(
+        &mut self,
+        _networks: foundry_evm_networks::NetworkConfigs,
+        _chain_id: ChainId,
+        _timestamp: u64,
+    ) {
+    }
+}
+
+impl FoundryPrecompiles for PrecompilesMap {
+    fn addresses(&self) -> AddressSet {
+        self.addresses().copied().collect()
+    }
+
+    fn configure_for_replay(
+        &mut self,
+        networks: foundry_evm_networks::NetworkConfigs,
+        chain_id: ChainId,
+        timestamp: u64,
+    ) {
+        networks.inject_precompiles(self);
+        foundry_evm_networks::apply_bsc_p256_precompile(self, chain_id, timestamp);
+    }
+}
 
 /// Foundry's compatibility trait associating a [`Network`] with a [`FoundryEvmFactory`].
 pub trait FoundryEvmNetwork: Copy + Debug + Default + 'static {
@@ -75,6 +106,13 @@ pub struct EthEvmNetwork;
 impl FoundryEvmNetwork for EthEvmNetwork {
     type Network = Ethereum;
     type EvmFactory = EthEvmFactory;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ArbitrumEvmNetwork;
+impl FoundryEvmNetwork for ArbitrumEvmNetwork {
+    type Network = Ethereum;
+    type EvmFactory = ArbitrumEvmFactory;
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -128,14 +166,29 @@ pub trait FoundryEvmFactory:
         BlockEnv: FoundryBlock + ForkBlockEnv + Default + Unpin,
         Tx: Clone + Debug + FoundryTransaction + FromAnyRpcTransaction + Default + Send + Sync,
         HaltReason: IntoInstructionResult,
-        Precompiles = PrecompilesMap,
+        Precompiles: FoundryPrecompiles,
     > + Clone
     + Debug
     + Default
+    + Send
+    + Sync
     + 'static
 {
     /// Chain type for EVM's context created by this factory.
     type Chain: FoundryChain<Self::Tx>;
+
+    /// Initializes network-owned state in a newly constructed backend.
+    ///
+    /// Most networks do not require database state outside ordinary transactions. Networks with
+    /// system-contract state can override this hook; implementations must preserve already
+    /// initialized fork state.
+    fn initialize_backend<DB: alloy_evm::Database + revm::DatabaseCommit>(
+        &self,
+        _db: DB,
+        _evm_env: &EvmEnv<Self::Spec, Self::BlockEnv>,
+    ) -> eyre::Result<()> {
+        Ok(())
+    }
 
     /// Foundry Context abstraction
     type FoundryContext<'db>: FoundryContextExt<

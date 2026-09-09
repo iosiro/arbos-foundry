@@ -41,7 +41,7 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING, REQUEST_TIMEOUT,
     provider::{ProviderBuilder, RetryProvider, is_rpc_method_not_found, redact_url},
 };
-use foundry_config::Config;
+use foundry_config::{Config, stylus::StylusConfig};
 use foundry_evm::{
     backend::{BlockchainDb, BlockchainDbMeta, ForkBlock, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
@@ -287,6 +287,8 @@ pub struct NodeConfig {
     pub precompile_factory: Option<Arc<dyn PrecompileFactory>>,
     /// Networks to enable features for.
     pub networks: NetworkConfigs,
+    /// ArbOS initialization and Stylus execution settings.
+    pub stylus: StylusConfig,
     /// The account used to sponsor Tempo fee-payer requests.
     ///
     /// Must be an unlocked signer account. Defaults to the last dev account on Tempo networks.
@@ -631,6 +633,7 @@ impl Default for NodeConfig {
             memory_limit: None,
             precompile_factory: None,
             networks: Default::default(),
+            stylus: Default::default(),
             tempo_fee_payer: None,
             silent: false,
             cache_path: None,
@@ -1242,6 +1245,11 @@ impl NodeConfig {
         self
     }
 
+    pub fn with_stylus_config(mut self, stylus: StylusConfig) -> Self {
+        self.stylus = stylus;
+        self
+    }
+
     /// Enable Tempo network features.
     #[must_use]
     pub fn with_tempo(mut self) -> Self {
@@ -1470,6 +1478,10 @@ impl NodeConfig {
             Arc::new(TokioRwLock::new(self.clone())),
         )
         .await?;
+
+        if self.networks.is_arbitrum() {
+            backend.initialize_arbos_state().await?;
+        }
 
         // Writes the default create2 deployer to the backend,
         // if the option is not disabled and we are not forking.

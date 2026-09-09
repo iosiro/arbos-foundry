@@ -101,7 +101,7 @@ forgetest_async!(fork_execution_uses_exact_ancestry_after_reorg, |prj, cmd| {
                 } else {
                     None
                 };
-                let exact_state = state_block_hash == Some(&anchor_hash);
+                let exact_state = state_block_hash == Some(anchor_hash.as_str());
                 if exact_state
                     && method == "eth_getBalance"
                     && request["params"][0] == "0x0000000000000000000000000000000000000100"

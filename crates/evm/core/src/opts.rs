@@ -20,7 +20,9 @@ use foundry_common::{
     ALCHEMY_FREE_TIER_CUPS, NON_ARCHIVE_NODE_WARNING,
     provider::{ProviderBuilder, is_rpc_method_not_found},
 };
-use foundry_config::{Chain, Config, ExecutionSpec, FoundryHardfork, GasLimit};
+use foundry_config::{
+    Chain, Config, ExecutionSpec, FoundryHardfork, GasLimit, stylus::StylusConfig,
+};
 use foundry_evm_hardforks::TempoHardfork;
 use foundry_evm_networks::{NetworkConfigs, NetworkVariant};
 use revm::{context::CfgEnv, primitives::hardfork::SpecId};
@@ -124,6 +126,10 @@ pub struct EvmOpts {
 
     /// The CREATE2 deployer's address.
     pub create2_deployer: Address,
+
+    /// ArbOS and Stylus execution settings for local Arbitrum backends.
+    #[serde(default, rename = "stylus", alias = "stylus_config")]
+    pub stylus_config: StylusConfig,
 
     /// Most recently discovered endpoint identity, cached for network dispatch and revalidation.
     #[serde(skip)]
@@ -324,6 +330,7 @@ impl Default for EvmOpts {
             enable_tx_gas_limit: false,
             networks: NetworkConfigs::default(),
             create2_deployer: DEFAULT_CREATE2_DEPLOYER,
+            stylus_config: StylusConfig::default(),
             fork_endpoint: None,
             expected_fork_endpoint: None,
             fork_network_is_inferred: false,

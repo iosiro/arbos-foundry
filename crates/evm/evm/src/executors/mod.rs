@@ -264,6 +264,7 @@ impl Executor<MonadEvmNetwork> {
 impl<FEN: FoundryEvmNetwork> Executor<FEN> {
     /// Creates a new `Executor` with the given arguments.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mut backend: Backend<FEN>,
         evm_env: EvmEnvFor<FEN>,
@@ -272,9 +273,11 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         networks: NetworkConfigs,
         gas_limit: u64,
         legacy_assertions: bool,
+        factory: FEN::EvmFactory,
     ) -> Self {
         inspector.networks(networks);
         backend.set_networks(networks);
+        backend.set_evm_factory(factory.clone());
         let extra_cheatcode_addresses = inspector.extra_cheatcode_addresses();
         backend.extend_persistent_accounts(extra_cheatcode_addresses.iter().copied());
 
@@ -841,7 +844,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         let inspector = self.inspector().clone();
         let mut state = {
             let mut backend = CowBackend::new_borrowed(self.backend());
-            let mut evm = FEN::EvmFactory::default().create_foundry_evm_with_inspector(
+            let mut evm = backend.evm_factory().create_foundry_evm_with_inspector(
                 &mut backend,
                 evm_env.clone(),
                 ChainFor::<FEN>::for_transaction(&TxEnvFor::<FEN>::default()),
@@ -990,7 +993,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
             if !replay.is_empty() {
                 evm_env.cfg_env.disable_balance_check = true;
             }
-            let evm = FEN::EvmFactory::default().create_foundry_evm_with_inspector(
+            let evm = backend.evm_factory().create_foundry_evm_with_inspector(
                 backend,
                 evm_env,
                 target_chain_context,

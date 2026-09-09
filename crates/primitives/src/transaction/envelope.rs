@@ -15,6 +15,7 @@ use alloy_network::{
 };
 use alloy_primitives::{Address, B256, Bytes, Signature, TxHash};
 use alloy_rpc_types::ConversionError;
+use arbos_revm::transaction::ArbitrumTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::{DEPOSIT_TX_TYPE_ID, POST_EXEC_TX_TYPE_ID, TxDeposit, TxPostExec};
 use revm::context::TxEnv;
@@ -466,6 +467,19 @@ impl FromRecoveredTx<FoundryTxEnvelope> for TxEnv {
 impl FromTxWithEncoded<FoundryTxEnvelope> for TxEnv {
     fn from_encoded_tx(tx: &FoundryTxEnvelope, sender: Address, _encoded: Bytes) -> Self {
         Self::from_recovered_tx(tx, sender)
+    }
+}
+
+impl FromRecoveredTx<FoundryTxEnvelope> for ArbitrumTransaction {
+    fn from_recovered_tx(tx: &FoundryTxEnvelope, sender: Address) -> Self {
+        Self::from_encoded_tx(tx, sender, tx.encoded_2718().into())
+    }
+}
+
+impl FromTxWithEncoded<FoundryTxEnvelope> for ArbitrumTransaction {
+    fn from_encoded_tx(tx: &FoundryTxEnvelope, sender: Address, encoded: Bytes) -> Self {
+        Self::new_with_enveloped(TxEnv::from_recovered_tx(tx, sender), encoded)
+            .with_canonical_hash(tx.hash())
     }
 }
 

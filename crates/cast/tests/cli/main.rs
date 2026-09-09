@@ -37,6 +37,7 @@ use tempo_primitives::{
 #[macro_use]
 extern crate foundry_test_utils;
 
+mod arbitrum;
 mod erc20;
 mod erc4626;
 mod keychain;

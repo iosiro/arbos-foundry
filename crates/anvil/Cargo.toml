@@ -14,11 +14,17 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "anvil"
+name = "arbos-anvil"
 path = "bin/main.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "anvil"
+path = "bin/anvil.rs"
+required-features = ["cli"]
+
 [dependencies]
+arbos-revm.workspace = true
 # foundry internal
 anvil-core = { path = "core", default-features = false }
 anvil-rpc = { path = "rpc" }

@@ -17,8 +17,12 @@ workspace = true
 name = "cast"
 
 [[bin]]
-name = "cast"
+name = "arbos-cast"
 path = "bin/main.rs"
+
+[[bin]]
+name = "cast"
+path = "bin/cast.rs"
 
 [dependencies]
 # lib

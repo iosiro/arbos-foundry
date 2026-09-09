@@ -43,6 +43,7 @@ alloy-rpc-types = { workspace = true, features = ["anvil"] }
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
 foundry-fork-db.workspace = true
+arbos-revm.workspace = true
 
 revm = { workspace = true, features = [
     "std",
@@ -80,6 +81,9 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "macros"] }
 tracing.workspace = true
 url.workspace = true
+
+[build-dependencies]
+wat.workspace = true
 
 [dev-dependencies]
 alloy-serde.workspace = true

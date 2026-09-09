@@ -129,6 +129,7 @@ pub const TEMPO_PRECOMPILE_ADDRESSES: &[Address] = &[
 pub enum NetworkVariant {
     #[default]
     Ethereum,
+    Arbitrum,
     #[cfg(feature = "optimism")]
     Optimism,
     Tempo,
@@ -151,6 +152,7 @@ impl std::str::FromStr for NetworkVariant {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "ethereum" => Ok(Self::Ethereum),
+            "arbitrum" => Ok(Self::Arbitrum),
             #[cfg(feature = "optimism")]
             "optimism" => Ok(Self::Optimism),
             "tempo" => Ok(Self::Tempo),
@@ -169,6 +171,9 @@ impl NetworkVariant {
     /// this returns an error rather than silently selecting a different EVM.
     pub fn from_known_chain_id(chain_id: ChainId) -> Result<Option<Self>, String> {
         let chain = Chain::from_id(chain_id);
+        if chain.named().is_some_and(NamedChain::is_arbitrum) {
+            return Ok(Some(Self::Arbitrum));
+        }
         if chain.is_tempo() {
             return Ok(Some(Self::Tempo));
         }
@@ -194,6 +199,7 @@ impl NetworkVariant {
     pub fn from_node_info_name(network: &str) -> Result<Self, String> {
         match network {
             "ethereum" => Ok(Self::Ethereum),
+            "arbitrum" => Ok(Self::Arbitrum),
             #[cfg(feature = "optimism")]
             "optimism" => Ok(Self::Optimism),
             #[cfg(not(feature = "optimism"))]
@@ -253,7 +259,7 @@ impl NetworkVariant {
     /// the lookup so an explicit network choice is not overridden by the chain ID's family.
     pub fn hardfork_at(self, chain_id: ChainId, timestamp: u64) -> FoundryHardfork {
         match self {
-            Self::Ethereum => {
+            Self::Ethereum | Self::Arbitrum => {
                 EthereumHardfork::from_chain_and_timestamp(Chain::from_id(chain_id), timestamp)
                     .unwrap_or_default()
                     .into()
@@ -277,6 +283,10 @@ impl NetworkVariant {
     /// Returns `true` if this is the Ethereum network variant.
     pub const fn is_ethereum(&self) -> bool {
         matches!(self, Self::Ethereum)
+    }
+
+    pub const fn is_arbitrum(&self) -> bool {
+        matches!(self, Self::Arbitrum)
     }
 
     /// Returns `true` if this is the Optimism network variant.
@@ -312,6 +322,7 @@ impl NetworkVariant {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Ethereum => "ethereum",
+            Self::Arbitrum => "arbitrum",
             #[cfg(feature = "optimism")]
             Self::Optimism => "optimism",
             Self::Tempo => "tempo",
@@ -323,7 +334,7 @@ impl NetworkVariant {
     /// Returns the hardfork namespace used by this network family.
     pub const fn hardfork_namespace(&self) -> Option<&'static str> {
         match self {
-            Self::Ethereum => None,
+            Self::Ethereum | Self::Arbitrum => None,
             #[cfg(feature = "optimism")]
             Self::Optimism => Some("optimism"),
             Self::Tempo => Some("tempo"),
@@ -443,6 +454,14 @@ impl NetworkConfigs {
 
     pub fn with_ethereum() -> Self {
         Self { network: Some(NetworkVariant::Ethereum), ..Default::default() }
+    }
+
+    pub fn with_arbitrum() -> Self {
+        Self { network: Some(NetworkVariant::Arbitrum), ..Default::default() }
+    }
+
+    pub const fn is_arbitrum(&self) -> bool {
+        if let Some(network) = self.resolved_network() { network.is_arbitrum() } else { false }
     }
 
     pub fn with_celo() -> Self {
@@ -890,6 +909,7 @@ impl From<NetworkVariant> for NetworkConfigs {
     fn from(network: NetworkVariant) -> Self {
         match network {
             NetworkVariant::Ethereum => Self::with_ethereum(),
+            NetworkVariant::Arbitrum => Self::with_arbitrum(),
             NetworkVariant::Tempo => {
                 Self { network: Some(network), tempo: true, ..Default::default() }
             }

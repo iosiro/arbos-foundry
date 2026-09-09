@@ -2,6 +2,7 @@ mod abi;
 mod anvil;
 mod anvil_api;
 mod api;
+mod arbitrum;
 mod beacon_api;
 mod block_index;
 mod eip2935;
@@ -28,6 +29,7 @@ mod simulate;
 #[cfg(feature = "cmd")]
 mod state;
 mod storage_values;
+mod stylus;
 mod tempo;
 mod traces;
 mod transaction;

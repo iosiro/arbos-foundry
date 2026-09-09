@@ -14,8 +14,12 @@ repository.workspace = true
 workspace = true
 
 [[bin]]
-name = "forge"
+name = "arbos-forge"
 path = "bin/main.rs"
+
+[[bin]]
+name = "forge"
+path = "bin/forge.rs"
 
 [[test]]
 name = "ui"

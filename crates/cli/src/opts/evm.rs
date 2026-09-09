@@ -9,6 +9,7 @@ use foundry_config::{
         error::Kind::InvalidType,
         value::{Dict, Map, Value},
     },
+    stylus::StylusConfig,
 };
 use foundry_evm_networks::NetworkConfigs;
 use serde::Serialize;
@@ -136,6 +137,11 @@ pub struct EvmArgs {
     #[command(flatten)]
     #[serde(skip)]
     pub networks: NetworkConfigs,
+
+    /// ArbOS and Stylus execution options.
+    #[command(flatten)]
+    #[serde(default)]
+    pub stylus: StylusConfig,
 }
 
 // Make this set of options a `figment::Provider` so that it can be merged into the `Config`
@@ -198,6 +204,13 @@ impl Provider for EvmArgs {
         }
         if self.networks.is_celo() {
             dict.insert("celo".to_string(), true.into());
+        }
+
+        let stylus = Value::serialize(&self.stylus)?;
+        let actual = stylus.to_actual();
+        let stylus = stylus.into_dict().ok_or(InvalidType(actual, "map".into()))?;
+        if !stylus.is_empty() {
+            dict.insert("stylus".to_string(), stylus.into());
         }
 
         Ok(Map::from([(Config::selected_profile(), dict)]))

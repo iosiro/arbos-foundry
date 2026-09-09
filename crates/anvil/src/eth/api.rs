@@ -1791,6 +1791,17 @@ impl EthApi<FoundryNetwork> {
             }
         }
 
+        // Unsigned Arbitrum requests do not carry the envelope charged during mining. Reserve
+        // the network's padded poster estimate before searching the compute-gas allowance.
+        let poster_gas = if self.backend.is_arbitrum() {
+            self.backend.estimate_arbitrum_poster_gas(state, inner, &block_env)?
+        } else {
+            0
+        };
+        highest_gas_limit = highest_gas_limit
+            .checked_sub(poster_gas)
+            .ok_or(InvalidTransactionError::BasicOutOfGas(highest_gas_limit))?;
+
         // If the request is a simple native token transfer we can optimize
         // We assume it's a transfer if we have no input data.
         // Skip this optimization for Tempo mode since native ETH transfers are not allowed
@@ -1811,7 +1822,7 @@ impl EthApi<FoundryNetwork> {
                 && let Ok(target_code) = self.backend.get_code_with_state(&state, *to)
                 && target_code.as_ref().is_empty()
             {
-                return Ok(MIN_TRANSACTION_GAS);
+                return Ok(MIN_TRANSACTION_GAS + poster_gas);
             }
         }
 
@@ -1893,7 +1904,7 @@ impl EthApi<FoundryNetwork> {
 
         trace!(target : "node", "Estimated Gas for call {:?}", highest_gas_limit);
 
-        Ok(highest_gas_limit)
+        Ok(highest_gas_limit + poster_gas)
     }
 
     /// Executes the [EthRequest] and returns an RPC [ResponseResult].

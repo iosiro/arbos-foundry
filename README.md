@@ -1,111 +1,436 @@
-<div align="center">
-  <img src=".github/assets/banner.png" alt="Foundry banner" />
+# arbos-foundry
 
-&nbsp;
+A fork of [Foundry](https://github.com/foundry-rs/foundry) with native support for testing [Arbitrum Stylus](https://docs.arbitrum.io/stylus/stylus-gentle-introduction) programs.
 
-[![Github Actions][gha-badge]][gha-url] [![Telegram Chat][tg-badge]][tg-url] [![Telegram Support][tg-support-badge]][tg-support-url]
+This project was developed by [iosiro](https://www.iosiro.com/) as part of the [Arbitrum Stylus Sprint](https://blog.arbitrum.io/stylus-sprint/).
 
-[gha-badge]: https://img.shields.io/github/actions/workflow/status/foundry-rs/foundry/test.yml?branch=master&style=flat-square
-[gha-url]: https://github.com/foundry-rs/foundry/actions
-[tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Ffoundry_rs
-[tg-url]: https://t.me/foundry_rs
-[tg-support-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=support&style=flat-square&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Ffoundry_support
-[tg-support-url]: https://t.me/foundry_support
+> **Note:** For standard Foundry documentation, see [FOUNDRY_README.md](./FOUNDRY_README.md) or the official [Foundry Book](https://book.getfoundry.sh/).
 
-**[Install](https://getfoundry.sh/getting-started/installation)**
-| [Docs][foundry-docs]
-| [Benchmarks](https://www.getfoundry.sh/benchmarks)
-| [Developer Guidelines](./docs/dev/README.md)
-| [Contributing](./CONTRIBUTING.md)
-| [Crate Docs](https://foundry-rs.github.io/foundry)
+## Features
 
-</div>
-
----
-
-Blazing fast, portable and modular toolkit for Ethereum application development, written in Rust.
-
-- [**Forge**](https://getfoundry.sh/forge) — Build, test, fuzz, debug and deploy Solidity contracts.
-- [**Cast**](https://getfoundry.sh/cast) — Swiss Army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- [**Anvil**](https://getfoundry.sh/anvil) — Fast local Ethereum development node.
-- [**Chisel**](https://getfoundry.sh/chisel) — Fast, utilitarian and verbose Solidity REPL.
-
-![Demo](.github/assets/demo.gif)
+- **Native Stylus Execution**: Execute Stylus WASM programs directly in Forge tests without requiring a network fork
+- **Stylus Deployment Cheatcodes**: Deploy Stylus contracts using `vm.deployStylusCode()`, `vm.getStylusCode()`, and `vm.getStylusInitCode()`
+- **Brotli Compression**: Built-in `vm.brotliCompress()` and `vm.brotliDecompress()` cheatcodes for Stylus bytecode handling
+- **ArbOS State**: Automatic initialization of ArbOS state with configurable parameters
+- **Arbitrum Precompiles**: Full support for 13 Arbitrum-specific precompiles (see [Supported Precompiles](#supported-precompiles))
+- **Configurable Stylus Parameters**: Tune ink price, stack depth, free pages, and more via CLI or config
 
 ## Installation
 
-```sh
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
+### Using arbos-foundryup (Recommended)
+
+Install arbos-foundryup:
+
+```bash
+curl -L https://raw.githubusercontent.com/iosiro/arbos-foundry/HEAD/foundryup/arbos-install | bash
 ```
 
-See the [installation guide](https://getfoundry.sh/getting-started/installation) for more details.
+Then install arbos-foundry:
 
-To verify a downloaded release archive or container image, see [Verifying Releases](./SECURITY.md#verifying-releases).
-
-## Getting Started
-
-Initialize a new project, build and test:
-
-```sh
-forge init counter && cd counter
-forge build
-forge test
+```bash
+arbos-foundryup
 ```
 
-Interact with a live network:
+This will install the `arbos-*` binaries to `~/.foundry/bin/`:
+- `arbos-forge`
+- `arbos-cast`
+- `arbos-anvil`
+- `arbos-chisel`
 
-```sh
-cast block-number --rpc-url https://eth.merkle.io
-cast balance vitalik.eth --ether --rpc-url https://eth.merkle.io
+#### arbos-foundryup Options
+
+```bash
+# Install a specific version
+arbos-foundryup --install v0.1.0
+
+# Install from a specific branch
+arbos-foundryup --branch main
+
+# Install from a local repository
+arbos-foundryup --path /path/to/arbos-foundry
+
+# List installed versions
+arbos-foundryup --list
+
+# Use a specific installed version
+arbos-foundryup --use v0.1.0
+
+# Update arbos-foundryup itself
+arbos-foundryup --update
 ```
 
-Fork mainnet locally:
+### Build from Source
 
-```sh
-anvil --fork-url https://eth.merkle.io
+```bash
+git clone https://github.com/iosiro/arbos-foundry
+cd arbos-foundry
+cargo build --release
 ```
 
-Read the [Foundry Docs][foundry-docs] to learn more.
+The binaries will be available in `target/release/`:
+- `arbos-forge`
+- `arbos-cast`
+- `arbos-anvil`
+- `arbos-chisel`
 
-### Solidity editor integration
+## Quick Start
 
-Configure your editor's Solidity language server command as `forge lsp`. The
-server is embedded in Forge, so the standalone `solar` executable is not
-required. Solar uses `foundry.toml`, workspace folders, remappings, and
-`evm_version` from the project automatically.
+### Testing a Stylus Program
 
-Solar's default flycheck runs `forge lint --json` with the same Forge executable
-that started the server. Solar's existing `initializationOptions.forgePath`
-option overrides that executable.
+1. Compile your Stylus program to WASM (e.g., using `cargo stylus`)
 
-`forge lsp` follows Forge's normal environment setup, global-option parsing, and
-command dispatch. Project dotenv warnings use stderr, leaving stdout reserved
-for the LSP transport.
+2. Write a Forge test:
 
-## Contributing
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.18;
 
-Contributions are welcome and highly appreciated. To get started, check out the [contributing guidelines](./CONTRIBUTING.md).
+import "forge-std/Test.sol";
 
-Join our [Telegram][tg-url] to chat about the development of Foundry.
+interface StylusVm {
+    function deployStylusCode(string calldata path) external returns (address);
+}
 
-## Support
+contract StylusTest is Test {
+    function testStylusContract() public {
+        // Deploy the Stylus contract from a WASM file
+        address stylusContract = StylusVm(address(vm)).deployStylusCode("path/to/your/program.wasm");
 
-Having trouble? Check the [Foundry Docs][foundry-docs], join the [support Telegram][tg-support-url], or [open an issue](https://github.com/foundry-rs/foundry/issues/new).
+        // Interact with it like any other contract
+        (bool success, bytes memory result) = stylusContract.call(
+            abi.encodeWithSignature("yourFunction()")
+        );
+        assertTrue(success);
+    }
+}
+```
 
-#### License
+3. Run your tests:
 
-<sup>
-Licensed under either of <a href="LICENSE-APACHE">Apache License, Version
-2.0</a> or <a href="LICENSE-MIT">MIT license</a> at your option.
-</sup>
+```bash
+arbos-forge test --network arbitrum
+```
 
-<br>
+### Execution Network and Test Isolation
 
-<sub>
-Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in these crates by you, as defined in the Apache-2.0 license,
-shall be dual licensed as above, without any additional terms or conditions.
-</sub>
+Select the Arbitrum execution backend with `--network arbitrum`, or configure it
+for the project:
 
-[foundry-docs]: https://getfoundry.sh
+```toml
+[profile.default]
+network = "arbitrum"
+fs_permissions = [{ access = "read", path = "./path/to/your" }]
+```
+
+Use `--stylus-debug` for WASM artifacts that import debug host functions such as
+`console.log_txt`. The same network flag is available to `arbos-anvil` and
+`arbos-chisel`. `arbos-cast call --trace` and `arbos-cast run` select their backend
+from project configuration or the RPC endpoint. Fork endpoints with a known
+Arbitrum chain ID select the Arbitrum backend automatically when no network
+override is set.
+
+Newer Foundry enables call isolation by default: top-level calls in a test run as
+separate transactions. Tests that intentionally share transient storage or warm
+accesses between those calls can retain the older behavior with `isolate = false`
+under `[profile.default]`, or `FOUNDRY_ISOLATE=false` for one invocation.
+
+Historical replay currently accepts Ethereum transaction envelopes. Native Arbitrum
+deposit, retryable, and internal transaction replay is not fully integrated, so an
+ordinary transaction replay does not reconstruct all ArbOS system transitions in
+its block. Forking the required post-block state avoids relying on prefix replay.
+
+An ArbOS version override controls ArbOS state, not the Ethereum hardfork setting.
+For historical tests, select the matching `--evm-version` explicitly: Shanghai for
+ArbOS 11–19, Cancun for 20–39, Prague for 40–49, and Osaka for 50 and later.
+Local ArbOS initialization uses the zero address for its initial owner and fee
+accounts; tests can change these through the owner precompiles.
+
+### Using vm.etch for Manual Deployment
+
+You can also manually deploy Stylus bytecode using `vm.etch`:
+
+```solidity
+function testStylusWithEtch() public {
+    // Get compressed Stylus bytecode with magic prefix
+    bytes memory stylusCode = vm.getStylusCode("path/to/program.wasm");
+
+    // Etch to a specific address
+    address stylusContract = address(0x1234);
+    vm.etch(stylusContract, stylusCode);
+
+    // Call the contract
+    (bool success, bytes memory result) = stylusContract.call(abi.encodeWithSignature("echo(bytes)", hex"deadbeef"));
+    assertTrue(success);
+}
+```
+
+## Cheatcodes
+
+### Stylus Deployment
+
+```solidity
+// Deploy a Stylus contract from a WASM file
+address deployed = vm.deployStylusCode(string artifactPath);
+address deployed = vm.deployStylusCode(string artifactPath, bytes constructorArgs);
+address deployed = vm.deployStylusCode(string artifactPath, uint256 value);
+address deployed = vm.deployStylusCode(string artifactPath, bytes constructorArgs, uint256 value);
+address deployed = vm.deployStylusCode(string artifactPath, bytes32 salt);
+// ... and more variants with salt
+
+// Get Stylus bytecode (compressed with magic prefix)
+bytes memory code = vm.getStylusCode(string artifactPath);
+
+// Get init code for CREATE/CREATE2 deployment
+bytes memory initCode = vm.getStylusInitCode(string artifactPath);
+// Match value-bearing CREATE2 deployment when predicting its address.
+bytes memory payableInitCode = vm.getStylusInitCode(string artifactPath, uint256 createValue);
+```
+
+### Brotli Compression
+
+```solidity
+// Compress data using Brotli (used by Stylus for WASM compression)
+bytes memory compressed = vm.brotliCompress(bytes data);
+
+// Decompress Brotli data
+bytes memory decompressed = vm.brotliDecompress(bytes compressed);
+```
+
+## WASM Processing
+
+When you use `vm.deployStylusCode()`, `vm.getStylusCode()`, or `vm.getStylusInitCode()`, the WASM binary is automatically processed to match the behavior of `cargo stylus deploy`:
+
+### 1. Metadata Stripping
+
+Custom and unknown WASM sections are removed to:
+- Remove sensitive user metadata (build paths, timestamps, etc.)
+- Reduce binary size for cheaper deployment
+- Match the exact behavior of the official Stylus tooling
+
+### 2. Reference Type Cleanup
+
+The WASM is converted to WAT (text format) and back to binary to remove dangling reference types that are not yet supported by Arbitrum chain backends.
+
+### 3. Brotli Compression
+
+The stripped WASM is compressed using Brotli (quality 11, window 22) and prefixed with the Stylus discriminant (`0xEFF00000`).
+
+### Supported Input Formats
+
+- `path/to/contract.wasm` - Uncompressed WASM (will be stripped and compressed)
+- `path/to/contract.wasm.br` - Pre-compressed WASM (used as-is if already prefixed)
+
+## Program Activation and Caching
+
+Stylus programs must be **activated** before execution. Activation compiles the WASM to native code and stores program metadata in ArbOS state.
+
+### Automatic Activation
+
+By default, arbos-foundry **automatically activates** programs when they are first called:
+
+```solidity
+// Program is automatically activated on first call
+address stylus = vm.deployStylusCode("counter.wasm");
+(bool success,) = stylus.call(abi.encodeWithSignature("increment()"));
+// ^ Activation happens here transparently
+```
+
+To disable automatic activation (requiring explicit `ArbWasm.activateProgram()`):
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+disable_auto_activate_stylus = true
+```
+
+### Program Caching
+
+Activated programs are cached in an LRU cache (up to 1024 entries) to avoid recompilation on subsequent calls. Additionally, ArbOS maintains a **block cache** for recently-used programs within a block.
+
+**Caching behavior:**
+- Programs marked as `cached` use lower initialization gas costs
+- The `block_cache_size` parameter controls how many programs are cached per block (default: 32)
+- Programs used multiple times in the same block automatically benefit from caching
+
+To disable automatic caching:
+
+```toml
+# foundry.toml
+[profile.default.stylus]
+disable_auto_cache_stylus = true
+```
+
+### Gas Costs
+
+Program execution incurs several gas costs:
+
+| Cost Type | Description |
+|-----------|-------------|
+| **Init Cost** | One-time cost when program is not cached: `(min_init_gas * 128) + (init_cost * init_cost_scalar * 2%)` |
+| **Cached Cost** | Lower cost for cached programs: `(min_cached_init_gas * 32) + (cached_cost * cached_cost_scalar * 2%)` |
+| **Page Cost** | Memory allocation: linear cost per page + exponential growth factor |
+| **Ink Cost** | Execution metering (1 gas = `ink_price` ink, default 10000) |
+
+### Manual Activation via ArbWasm
+
+For explicit control, you can activate programs through the ArbWasm precompile:
+
+```solidity
+interface IArbWasm {
+    function activateProgram(address program) external payable returns (uint16 version, uint256 dataFee);
+}
+
+contract ManualActivationTest is Test {
+    IArbWasm constant ARBWASM = IArbWasm(address(0x71));
+
+    function testManualActivation() public {
+        address stylus = vm.deployStylusCode("counter.wasm");
+
+        // Manually activate (pays data fee for on-chain storage)
+        (uint16 version, uint256 dataFee) = ARBWASM.activateProgram{value: 1 ether}(stylus);
+
+        // Now call the program
+        (bool success,) = stylus.call(abi.encodeWithSignature("increment()"));
+        assertTrue(success);
+    }
+}
+```
+
+### Program Expiry
+
+Activated programs expire after `expiry_days` (default: 365 days). Expired programs must be reactivated. Use `ArbWasm.codehashKeepalive()` to extend program lifetime before expiry.
+
+## Supported Precompiles
+
+This fork includes full support for Arbitrum-specific precompiles via [arbos-revm](https://github.com/iosiro/arbos-revm):
+
+| Address | Contract | Description |
+|---------|----------|-------------|
+| `0x64` | **ArbSys** | System-level L2 functionality (block number, chain ID, L2-to-L1 messaging) |
+| `0x65` | **ArbInfo** | Chain information queries |
+| `0x66` | **ArbAddressTable** | Address compression utilities |
+| `0x6b` | **ArbOwnerPublic** | Public admin information |
+| `0x6c` | **ArbGasInfo** | Gas pricing, L1 fees, and cost estimation |
+| `0x6d` | **ArbAggregator** | Preferred aggregator configuration |
+| `0x6e` | **ArbRetryableTx** | Retryable transaction management |
+| `0x6f` | **ArbStatistics** | Block statistics |
+| `0x70` | **ArbOwner** | Admin functions (restricted) |
+| `0x71` | **ArbWasm** | Stylus program management (activation, versioning, parameters) |
+| `0x72` | **ArbWasmCache** | Program caching control |
+| `0x73` | **ArbNativeTokenManager** | Native token management |
+| `0xff` | **ArbDebug** | Debug utilities |
+
+### Example: Using ArbSys
+
+```solidity
+interface IArbSys {
+    function arbBlockNumber() external view returns (uint256);
+    function arbChainID() external view returns (uint256);
+    function arbOSVersion() external view returns (uint256);
+}
+
+contract ArbSysTest is Test {
+    IArbSys constant ARBSYS = IArbSys(address(0x64));
+
+    function testArbSys() public {
+        uint256 blockNum = ARBSYS.arbBlockNumber();
+        uint256 chainId = ARBSYS.arbChainID();
+        uint256 arbosVersion = ARBSYS.arbOSVersion();
+    }
+}
+```
+
+### Example: Using ArbGasInfo
+
+```solidity
+interface IArbGasInfo {
+    function getMinimumGasPrice() external view returns (uint256);
+    function getL1BaseFeeEstimate() external view returns (uint256);
+    function getPricesInWei() external view returns (uint256, uint256, uint256, uint256, uint256, uint256);
+}
+
+contract GasInfoTest is Test {
+    IArbGasInfo constant ARBGASINFO = IArbGasInfo(address(0x6c));
+
+    function testGasInfo() public {
+        uint256 minGasPrice = ARBGASINFO.getMinimumGasPrice();
+        uint256 l1BaseFee = ARBGASINFO.getL1BaseFeeEstimate();
+    }
+}
+```
+
+## Configuration
+
+### CLI Options
+
+```bash
+arbos-forge test \
+  --network arbitrum \
+  --stylus-version 2 \
+  --stylus-ink-price 10000 \
+  --stylus-max-stack-depth 262144 \
+  --free-pages 2
+```
+
+### foundry.toml
+
+```toml
+[profile.default.stylus]
+stylus_version = 2
+ink_price = 10000
+max_stack_depth = 262144
+free_pages = 2
+page_gas = 1000
+expiry_days = 365
+```
+
+### Inline Configuration
+
+Inline test configuration does not currently reconfigure Stylus execution settings.
+Use CLI flags or a `foundry.toml` profile for these settings.
+
+### All Stylus Configuration Options
+
+| Option | CLI Flag | Description | Default |
+|--------|----------|-------------|---------|
+| `arbos_version` | `--arbos-version` | ArbOS version | - |
+| `stylus_version` | `--stylus-version` | Stylus version | 2 |
+| `ink_price` | `--stylus-ink-price` | Price of ink in gas | 10000 |
+| `max_stack_depth` | `--stylus-max-stack-depth` | Maximum WASM stack depth | 262144 |
+| `free_pages` | `--free-pages` | Free WASM pages per program | 2 |
+| `page_gas` | `--stylus-page-gas` | Gas cost per page | - |
+| `page_ramp` | `--stylus-page-ramp` | Gas ramp for pages | - |
+| `page_limit` | `--stylus-page-limit` | Maximum pages | - |
+| `expiry_days` | `--stylus-expiry-days` | Days until program expiry | - |
+| `keepalive_days` | `--stylus-keepalive-days` | Days to keep program alive | - |
+| `block_cache_size` | `--stylus-block-cache-size` | Block cache size | - |
+| `max_wasm_size` | `--stylus-max-wasm-size` | Maximum WASM size | - |
+| `deployer_address` | `--stylus-deployer-address` | Stylus deployer contract address | - |
+| `disable_auto_cache_stylus` | `--stylus-disable-auto-cache` | Disable auto caching | false |
+| `disable_auto_activate_stylus` | `--stylus-disable-auto-activate` | Disable auto activation | false |
+| `debug_mode_stylus` | `--stylus-debug` | Enable debug mode | false |
+
+## Differences from Upstream Foundry
+
+This fork is based on Foundry v1.8.1 with the following changes:
+
+- **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
+- **Added**: ArbOS state initialization with configurable parameters
+- **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`, `getStylusInitCode`)
+- **Added**: Brotli compression cheatcodes (`brotliCompress`, `brotliDecompress`)
+- **Added**: 13 Arbitrum precompiles (ArbSys, ArbWasm, ArbGasInfo, etc.)
+- **Added**: Stylus configuration options (CLI and foundry.toml)
+
+Arbitrum execution uses a concrete factory and context alongside upstream execution
+families. The factory owns resolved execution policy; a context-aware provider owns
+ArbOS precompiles. Upstream Optimism and Celo support is retained.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](./LICENSE-APACHE) or [MIT License](./LICENSE-MIT) at your option.
+
+## Acknowledgements
+
+- [Foundry](https://github.com/foundry-rs/foundry) - The blazing fast Ethereum development toolkit this fork is based on
+- [Arbitrum](https://arbitrum.io/) - For creating Stylus and the Stylus Sprint program
+- [iosiro](https://www.iosiro.com/) - Development of this fork

@@ -997,7 +997,7 @@ pub async fn run_command(args: CastArgs) -> Result<()> {
                 Some(NetworkVariant::Tempo) => {
                     SimpleCast::decode_raw_transaction::<TempoNetwork>(&tx)?
                 }
-                Some(NetworkVariant::Ethereum) => {
+                Some(NetworkVariant::Ethereum | NetworkVariant::Arbitrum) => {
                     SimpleCast::decode_raw_transaction::<Ethereum>(&tx)?
                 }
                 #[cfg(feature = "monad")]
