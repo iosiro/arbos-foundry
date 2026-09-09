@@ -1,14 +1,9 @@
 //! Utility functions
 
-use crate::{Config, stylus::StylusConfig};
+use crate::Config;
 use alloy_primitives::U256;
-use arbos_revm::state::{ArbosStateParams, program::StylusParams};
 use figment::value::Value;
-use foundry_compilers::artifacts::{
-    EvmVersion,
-    remappings::{Remapping, RemappingError},
-};
-use revm::primitives::hardfork::SpecId;
+use foundry_compilers::artifacts::remappings::{Remapping, RemappingError};
 use serde::{Deserialize, Deserializer, Serializer, de::Error};
 use std::{
     io,
@@ -149,10 +144,36 @@ pub fn foundry_toml_dirs(root: impl AsRef<Path>) -> Vec<PathBuf> {
         .max_depth(1)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_dir())
-        .filter_map(|e| dunce::canonicalize(e.path()).ok())
-        .filter(|p| p.join(Config::FILE_NAME).exists())
+        .filter(|entry| entry.file_type().is_dir())
+        .filter_map(|entry| dunce::canonicalize(entry.path()).ok())
+        .filter(|path| path.join(Config::FILE_NAME).exists())
         .collect()
+}
+
+/// A depth-one dependency path and the canonical directory it resolves to.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct FoundryTomlDir {
+    /// The canonical directory used to identify the dependency config.
+    pub canonical: PathBuf,
+    /// The lexical path under the configured dependency directory.
+    pub path: PathBuf,
+}
+
+/// Returns depth-one dependency entries that resolve to directories containing `foundry.toml`.
+pub(crate) fn foundry_toml_dir_entries(root: impl AsRef<Path>) -> Vec<FoundryTomlDir> {
+    let mut dirs = walkdir::WalkDir::new(root)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let canonical = dunce::canonicalize(entry.path()).ok()?;
+            (canonical.is_dir() && canonical.join(Config::FILE_NAME).exists())
+                .then(|| FoundryTomlDir { path: entry.path().to_path_buf(), canonical })
+        })
+        .collect::<Vec<_>>();
+    dirs.sort_unstable_by(|a, b| a.canonical.cmp(&b.canonical).then_with(|| a.path.cmp(&b.path)));
+    dirs.dedup();
+    dirs
 }
 
 /// Returns a remapping for the given dir
@@ -214,7 +235,22 @@ where
     deserialize_u64_or_max(deserializer)?.try_into().map_err(D::Error::custom)
 }
 
-/// Deserialize into `U256` from either a `u64` or a `U256` hex string.
+/// Serialize a `usize` as `"max"` if it equals `usize::MAX`, as a string if it exceeds
+/// `i64::MAX` (TOML integer limit), or as a plain number otherwise.
+pub(crate) fn serialize_usize_or_max<S>(value: &usize, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if *value == usize::MAX {
+        serializer.serialize_str("max")
+    } else if *value > i64::MAX as usize {
+        serializer.serialize_str(&value.to_string())
+    } else {
+        serializer.serialize_u64(*value as u64)
+    }
+}
+
+/// Deserialize into `U256` from either a `u64`, a `U256` hex string, or a decimal string.
 pub fn deserialize_u64_to_u256<'de, D>(deserializer: D) -> Result<U256, D::Error>
 where
     D: Deserializer<'de>,
@@ -224,11 +260,16 @@ where
     enum NumericValue {
         U256(U256),
         U64(u64),
+        String(String),
     }
 
     match NumericValue::deserialize(deserializer)? {
         NumericValue::U64(n) => Ok(U256::from(n)),
         NumericValue::U256(n) => Ok(n),
+        NumericValue::String(s) => {
+            // Handle decimal strings (e.g., "18446744073709551615")
+            U256::from_str(&s).map_err(D::Error::custom)
+        }
     }
 }
 
@@ -283,93 +324,82 @@ impl FromStr for Numeric {
     }
 }
 
-/// Returns the [SpecId] derived from [EvmVersion]
-pub fn evm_spec_id(evm_version: EvmVersion) -> SpecId {
-    match evm_version {
-        EvmVersion::Homestead => SpecId::HOMESTEAD,
-        EvmVersion::TangerineWhistle => SpecId::TANGERINE,
-        EvmVersion::SpuriousDragon => SpecId::SPURIOUS_DRAGON,
-        EvmVersion::Byzantium => SpecId::BYZANTIUM,
-        EvmVersion::Constantinople => SpecId::CONSTANTINOPLE,
-        EvmVersion::Petersburg => SpecId::PETERSBURG,
-        EvmVersion::Istanbul => SpecId::ISTANBUL,
-        EvmVersion::Berlin => SpecId::BERLIN,
-        EvmVersion::London => SpecId::LONDON,
-        EvmVersion::Paris => SpecId::MERGE,
-        EvmVersion::Shanghai => SpecId::SHANGHAI,
-        EvmVersion::Cancun => SpecId::CANCUN,
-        EvmVersion::Prague => SpecId::PRAGUE,
-        EvmVersion::Osaka => SpecId::OSAKA,
-    }
-}
-
-/// Applies Stylus configuration overrides to ArbOS state parameters.
-pub fn apply_stylus_config(params: &mut ArbosStateParams, override_config: &StylusConfig) {
-    if let Some(v) = override_config.arbos_version {
-        params.arbos_version = u64::from(v);
-        params.stylus_params = StylusParams::for_arbos_version(u64::from(v));
-    }
-    if let Some(v) = override_config.stylus_version {
-        params.stylus_params.version = v;
-    }
-    if let Some(v) = override_config.ink_price {
-        params.stylus_params.ink_price = v;
-    }
-    if let Some(v) = override_config.max_stack_depth {
-        params.stylus_params.max_stack_depth = v;
-    }
-    if let Some(v) = override_config.free_pages {
-        params.stylus_params.free_pages = v;
-    }
-    if let Some(v) = override_config.page_gas {
-        params.stylus_params.page_gas = v;
-    }
-    if let Some(v) = override_config.page_ramp {
-        params.stylus_params.page_ramp = v;
-    }
-    if let Some(v) = override_config.page_limit {
-        params.stylus_params.page_limit = v;
-    }
-    if let Some(v) = override_config.min_init_gas {
-        params.stylus_params.min_init_gas = v;
-    }
-    if let Some(v) = override_config.min_cached_init_gas {
-        params.stylus_params.min_cached_init_gas = v;
-    }
-    if let Some(v) = override_config.init_cost_scalar {
-        params.stylus_params.init_cost_scalar = v;
-    }
-    if let Some(v) = override_config.cached_cost_scalar {
-        params.stylus_params.cached_cost_scalar = v;
-    }
-    if let Some(v) = override_config.expiry_days {
-        params.stylus_params.expiry_days = v;
-    }
-    if let Some(v) = override_config.keepalive_days {
-        params.stylus_params.keepalive_days = v;
-    }
-    if let Some(v) = override_config.block_cache_size {
-        params.stylus_params.block_cache_size = v;
-    }
-    if let Some(v) = override_config.max_wasm_size {
-        params.stylus_params.max_wasm_size = v;
-    }
-}
-
-#[cfg(test)]
-mod stylus_tests {
-    use super::*;
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{FoundryTomlDir, foundry_toml_dir_entries, foundry_toml_dirs};
+    use std::{fs, os::unix::fs::symlink};
+    use tempfile::tempdir;
 
     #[test]
-    fn arbos_version_selects_matching_stylus_defaults_before_overrides() {
-        let mut params = ArbosStateParams::default();
-        let config =
-            StylusConfig { arbos_version: Some(40), ink_price: Some(20_000), ..Default::default() };
+    fn finds_physical_foundry_toml_dirs_without_recursing() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("lib");
+        let dependency = root.join("dependency");
+        let nested = dependency.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(dependency.join("foundry.toml"), "").unwrap();
+        fs::write(nested.join("foundry.toml"), "").unwrap();
 
-        apply_stylus_config(&mut params, &config);
+        assert_eq!(foundry_toml_dirs(&root), vec![dunce::canonicalize(dependency).unwrap()]);
+    }
 
-        assert_eq!(params.arbos_version, 40);
-        assert_eq!(params.stylus_params.version, 2);
-        assert_eq!(params.stylus_params.ink_price, 20_000);
+    #[test]
+    fn preserves_sorted_aliases_for_the_same_canonical_dependency() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("lib");
+        let dependency = temp.path().join("dependency");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&dependency).unwrap();
+        fs::write(dependency.join("foundry.toml"), "").unwrap();
+        symlink(&dependency, root.join("z-alias")).unwrap();
+        symlink(&dependency, root.join("a-alias")).unwrap();
+
+        let canonical = dunce::canonicalize(dependency).unwrap();
+        assert_eq!(
+            foundry_toml_dir_entries(&root),
+            vec![
+                FoundryTomlDir { path: root.join("a-alias"), canonical: canonical.clone() },
+                FoundryTomlDir { path: root.join("z-alias"), canonical },
+            ]
+        );
+    }
+
+    #[test]
+    fn sorts_distinct_dependencies_by_canonical_path() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("lib");
+        let dependency_a = temp.path().join("dependency-a");
+        let dependency_z = temp.path().join("dependency-z");
+        fs::create_dir_all(&root).unwrap();
+        for dependency in [&dependency_z, &dependency_a] {
+            fs::create_dir_all(dependency).unwrap();
+            fs::write(dependency.join("foundry.toml"), "").unwrap();
+        }
+        symlink(&dependency_z, root.join("a-alias")).unwrap();
+        symlink(&dependency_a, root.join("z-alias")).unwrap();
+
+        let canonical = foundry_toml_dir_entries(&root)
+            .into_iter()
+            .map(|entry| entry.canonical)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            canonical,
+            vec![
+                dunce::canonicalize(dependency_a).unwrap(),
+                dunce::canonicalize(dependency_z).unwrap(),
+            ]
+        );
+    }
+
+    #[test]
+    fn ignores_broken_and_cyclic_symlinks() {
+        let temp = tempdir().unwrap();
+        let root = temp.path().join("lib");
+        fs::create_dir_all(&root).unwrap();
+        symlink("missing", root.join("broken")).unwrap();
+        symlink("cycle-b", root.join("cycle-a")).unwrap();
+        symlink("cycle-a", root.join("cycle-b")).unwrap();
+
+        assert!(foundry_toml_dir_entries(&root).is_empty());
     }
 }

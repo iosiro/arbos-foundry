@@ -87,10 +87,14 @@ pragma solidity ^0.8.18;
 
 import "forge-std/Test.sol";
 
+interface StylusVm {
+    function deployStylusCode(string calldata path) external returns (address);
+}
+
 contract StylusTest is Test {
     function testStylusContract() public {
         // Deploy the Stylus contract from a WASM file
-        address stylusContract = vm.deployStylusCode("path/to/your/program.wasm");
+        address stylusContract = StylusVm(address(vm)).deployStylusCode("path/to/your/program.wasm");
 
         // Interact with it like any other contract
         (bool success, bytes memory result) = stylusContract.call(
@@ -104,8 +108,42 @@ contract StylusTest is Test {
 3. Run your tests:
 
 ```bash
-forge test
+arbos-forge test --network arbitrum
 ```
+
+### Execution Network and Test Isolation
+
+Select the Arbitrum execution backend with `--network arbitrum`, or configure it
+for the project:
+
+```toml
+[profile.default]
+network = "arbitrum"
+fs_permissions = [{ access = "read", path = "./path/to/your" }]
+```
+
+Use `--stylus-debug` for WASM artifacts that import debug host functions such as
+`console.log_txt`. The same network flag is available to `arbos-anvil` and
+`arbos-chisel`. `arbos-cast call --trace` and `arbos-cast run` select their backend
+from project configuration or the RPC endpoint. Fork endpoints with a known
+Arbitrum chain ID select the Arbitrum backend automatically when no network
+override is set.
+
+Newer Foundry enables call isolation by default: top-level calls in a test run as
+separate transactions. Tests that intentionally share transient storage or warm
+accesses between those calls can retain the older behavior with `isolate = false`
+under `[profile.default]`, or `FOUNDRY_ISOLATE=false` for one invocation.
+
+Historical replay currently accepts Ethereum transaction envelopes. Native Arbitrum
+deposit, retryable, and internal transaction replay is not fully integrated, so an
+ordinary transaction replay does not reconstruct all ArbOS system transitions in
+its block. Forking the required post-block state avoids relying on prefix replay.
+
+An ArbOS version override controls ArbOS state, not the Ethereum hardfork setting.
+For historical tests, select the matching `--evm-version` explicitly: Shanghai for
+ArbOS 11–19, Cancun for 20–39, Prague for 40–49, and Osaka for 50 and later.
+Local ArbOS initialization uses the zero address for its initial owner and fee
+accounts; tests can change these through the owner precompiles.
 
 ### Using vm.etch for Manual Deployment
 
@@ -144,6 +182,8 @@ bytes memory code = vm.getStylusCode(string artifactPath);
 
 // Get init code for CREATE/CREATE2 deployment
 bytes memory initCode = vm.getStylusInitCode(string artifactPath);
+// Match value-bearing CREATE2 deployment when predicting its address.
+bytes memory payableInitCode = vm.getStylusInitCode(string artifactPath, uint256 createValue);
 ```
 
 ### Brotli Compression
@@ -325,6 +365,7 @@ contract GasInfoTest is Test {
 
 ```bash
 arbos-forge test \
+  --network arbitrum \
   --stylus-version 2 \
   --stylus-ink-price 10000 \
   --stylus-max-stack-depth 262144 \
@@ -345,26 +386,8 @@ expiry_days = 365
 
 ### Inline Configuration
 
-Configure Stylus parameters at the contract or function level:
-
-```solidity
-/// forge-config: default.stylus.stylus_version = 5
-/// forge-config: default.stylus.ink_price = 20000
-contract MyStylusTest is Test {
-    // Tests in this contract use stylus_version=5 and ink_price=20000
-}
-```
-
-Function-level overrides:
-
-```solidity
-contract MyStylusTest is Test {
-    /// forge-config: default.stylus.ink_price = 15000
-    function testWithCustomInkPrice() public {
-        // This test uses ink_price=15000
-    }
-}
-```
+Inline test configuration does not currently reconfigure Stylus execution settings.
+Use CLI flags or a `foundry.toml` profile for these settings.
 
 ### All Stylus Configuration Options
 
@@ -389,16 +412,18 @@ contract MyStylusTest is Test {
 
 ## Differences from Upstream Foundry
 
-This fork is based on Foundry v1.5.1 with the following changes:
+This fork is based on Foundry v1.8.1 with the following changes:
 
 - **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
 - **Added**: ArbOS state initialization with configurable parameters
 - **Added**: Stylus deployment cheatcodes (`deployStylusCode`, `getStylusCode`, `getStylusInitCode`)
 - **Added**: Brotli compression cheatcodes (`brotliCompress`, `brotliDecompress`)
 - **Added**: 13 Arbitrum precompiles (ArbSys, ArbWasm, ArbGasInfo, etc.)
-- **Added**: Stylus configuration options (CLI, foundry.toml, inline)
-- **Removed**: Optimism network support
-- **Removed**: Celo network support
+- **Added**: Stylus configuration options (CLI and foundry.toml)
+
+Arbitrum execution uses a concrete factory and context alongside upstream execution
+families. The factory owns resolved execution policy; a context-aware provider owns
+ArbOS precompiles. Upstream Optimism and Celo support is retained.
 
 ## License
 

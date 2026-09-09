@@ -1,4 +1,5 @@
 use crate::{
+    evm::ChiselEvmNetwork,
     opts::{Chisel, ChiselSubcommand},
     prelude::{ChiselCommand, ChiselDispatcher, SolidityHelper},
 };
@@ -6,12 +7,24 @@ use clap::Parser;
 use eyre::{Context, Result};
 use foundry_cli::utils::{self, LoadConfig};
 use foundry_common::fs;
+use foundry_config::Config;
+#[cfg(feature = "monad")]
+use foundry_evm::core::evm::MonadEvmNetwork;
+#[cfg(feature = "optimism")]
+use foundry_evm::core::evm::OpEvmNetwork;
+use foundry_evm::{
+    core::evm::{ArbitrumEvmNetwork, EthEvmNetwork, TempoEvmNetwork},
+    opts::EvmOpts,
+};
+use foundry_evm_networks::NetworkConfigs;
 use rustyline::{Editor, config::Configurer, error::ReadlineError};
 use std::{ops::ControlFlow, path::PathBuf};
 use yansi::Paint;
 
 /// Run the `chisel` command line interface.
 pub fn run() -> Result<()> {
+    foundry_cli::opts::GlobalArgs::check_markdown_help::<Chisel>();
+
     setup()?;
 
     let args = Chisel::parse();
@@ -39,16 +52,108 @@ macro_rules! try_cf {
 /// Run the subcommand.
 pub async fn run_command(args: Chisel) -> Result<()> {
     // Load configuration
-    let (config, evm_opts) = args.load_config_and_evm_opts()?;
+    let (mut config, mut evm_opts) = args.load_config_and_evm_opts()?;
 
+    evm_opts.networks =
+        infer_network_from_chain_id(evm_opts.networks, config.chain.map(|chain| chain.id()))?;
+    evm_opts.infer_network_from_fork().await?;
+    evm_opts.pin_fork_block().await?;
+    config.networks = evm_opts.networks;
+    let local_networks = evm_opts.networks;
+    let local_chain_id = evm_opts.env.chain_id.or(config.chain.map(|chain| chain.id()));
+
+    if evm_opts.networks.is_arbitrum() {
+        return Box::pin(run_command_with_network::<ArbitrumEvmNetwork>(
+            args,
+            config,
+            evm_opts,
+            local_networks,
+            local_chain_id,
+        ))
+        .await;
+    }
+
+    if evm_opts.networks.is_tempo() {
+        return Box::pin(run_command_with_network::<TempoEvmNetwork>(
+            args,
+            config,
+            evm_opts,
+            local_networks,
+            local_chain_id,
+        ))
+        .await;
+    }
+
+    #[cfg(feature = "monad")]
+    if evm_opts.networks.is_monad() {
+        return Box::pin(run_command_with_network::<MonadEvmNetwork>(
+            args,
+            config,
+            evm_opts,
+            local_networks,
+            local_chain_id,
+        ))
+        .await;
+    }
+
+    #[cfg(feature = "optimism")]
+    if evm_opts.networks.is_optimism() {
+        return Box::pin(run_command_with_network::<OpEvmNetwork>(
+            args,
+            config,
+            evm_opts,
+            local_networks,
+            local_chain_id,
+        ))
+        .await;
+    }
+
+    Box::pin(run_command_with_network::<EthEvmNetwork>(
+        args,
+        config,
+        evm_opts,
+        local_networks,
+        local_chain_id,
+    ))
+    .await
+}
+
+fn infer_network_from_chain_id(
+    networks: NetworkConfigs,
+    chain_id: Option<u64>,
+) -> Result<NetworkConfigs> {
+    if let Some(chain_id) = chain_id {
+        networks.try_with_chain_id(chain_id).map_err(eyre::Report::msg)
+    } else {
+        Ok(networks)
+    }
+}
+
+async fn run_command_with_network<FEN: ChiselEvmNetwork>(
+    args: Chisel,
+    config: Config,
+    evm_opts: EvmOpts,
+    local_networks: NetworkConfigs,
+    local_chain_id: Option<u64>,
+) -> Result<()> {
+    let executor_builder = FEN::executor_builder(&evm_opts);
+    let fork_network_is_inferred = evm_opts.fork_network_is_inferred;
+    let fork_chain_id_is_inferred = evm_opts.fork_chain_id_is_inferred;
     // Create a new cli dispatcher
-    let mut dispatcher = ChiselDispatcher::new(crate::source::SessionSourceConfig {
+    let mut dispatcher = ChiselDispatcher::<FEN>::new(crate::source::SessionSourceConfig {
         // Enable traces if any level of verbosity was passed
         traces: config.verbosity > 0,
         foundry_config: config,
         no_vm: args.no_vm,
         evm_opts,
-        backend: None,
+        executor_builder,
+        local_networks: Some(local_networks),
+        local_chain_id,
+        fork_network_is_inferred,
+        fork_chain_id_is_inferred,
+        resolved_hardfork: None,
+        source_chain_id: None,
+        cached_backend: None,
         calldata: None,
         ir_minimum: args.ir_minimum,
     })?;
@@ -73,7 +178,8 @@ pub async fn run_command(args: Chisel) -> Result<()> {
     // REPL loop.
     let mut interrupt = false;
     loop {
-        match rl.readline(&dispatcher.get_prompt()) {
+        let prompt = dispatcher.get_prompt();
+        match rl.readline(prompt.as_ref()) {
             Ok(line) => {
                 debug!("dispatching next line: {line}");
                 // Clear interrupt flag.
@@ -93,10 +199,9 @@ pub async fn run_command(args: Chisel) -> Result<()> {
             Err(ReadlineError::Interrupted) => {
                 if interrupt {
                     break;
-                } else {
-                    sh_println!("(To exit, press Ctrl+C again)")?;
-                    interrupt = true;
                 }
+                sh_println!("(To exit, press Ctrl+C again)")?;
+                interrupt = true;
             }
             Err(ReadlineError::Eof) => break,
             Err(err) => {
@@ -115,8 +220,8 @@ pub async fn run_command(args: Chisel) -> Result<()> {
 
 /// Evaluate multiple Solidity source files contained within a
 /// Chisel prelude directory.
-async fn evaluate_prelude(
-    dispatcher: &mut ChiselDispatcher,
+async fn evaluate_prelude<FEN: ChiselEvmNetwork>(
+    dispatcher: &mut ChiselDispatcher<FEN>,
     maybe_prelude: Option<PathBuf>,
 ) -> Result<()> {
     let Some(prelude_dir) = maybe_prelude else { return Ok(()) };
@@ -141,17 +246,17 @@ async fn evaluate_prelude(
 }
 
 /// Loads a single Solidity file into the prelude.
-async fn load_prelude_file(
-    dispatcher: &mut ChiselDispatcher,
+async fn load_prelude_file<FEN: ChiselEvmNetwork>(
+    dispatcher: &mut ChiselDispatcher<FEN>,
     file: PathBuf,
 ) -> Result<ControlFlow<()>> {
     let prelude = fs::read_to_string(file)
         .wrap_err("Could not load source file. Are you sure this path is correct?")?;
-    dispatcher.dispatch(&prelude).await
+    dispatcher.dispatch_solidity(&prelude).await
 }
 
-async fn handle_cli_command(
-    d: &mut ChiselDispatcher,
+async fn handle_cli_command<FEN: ChiselEvmNetwork>(
+    d: &mut ChiselDispatcher<FEN>,
     cmd: ChiselSubcommand,
 ) -> Result<ControlFlow<()>> {
     match cmd {
@@ -181,5 +286,42 @@ mod tests {
     #[test]
     fn verify_cli() {
         Chisel::command().debug_assert();
+    }
+
+    #[test]
+    #[cfg(not(feature = "monad"))]
+    fn chain_id_rejects_disabled_monad_network() {
+        let error = infer_network_from_chain_id(NetworkConfigs::default(), Some(143)).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "cannot infer execution network from chain ID 143: network family `monad` is not \
+             enabled in this build"
+        );
+    }
+
+    #[test]
+    fn explicit_ethereum_overrides_chain_id_inference() {
+        let ethereum = NetworkConfigs::with_ethereum();
+        let inferred = infer_network_from_chain_id(ethereum, Some(143)).unwrap();
+
+        assert_eq!(inferred, ethereum);
+    }
+
+    #[tokio::test]
+    async fn prelude_does_not_dispatch_chisel_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("prelude.sol");
+        std::fs::write(&file, "!calldata 0x00").unwrap();
+        let config = crate::source::SessionSourceConfig::<EthEvmNetwork> {
+            foundry_config: Config {
+                solc: Some(foundry_config::SolcReq::Version(semver::Version::new(0, 8, 29))),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut dispatcher = ChiselDispatcher::new(config).unwrap();
+
+        assert!(load_prelude_file(&mut dispatcher, file).await.is_err());
     }
 }

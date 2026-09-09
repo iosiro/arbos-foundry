@@ -1,8 +1,8 @@
 //! foundry.lock handler type.
 
 use alloy_primitives::map::HashMap;
-use eyre::{OptionExt, Result};
-use foundry_cli::utils::Git;
+use eyre::{Context, OptionExt, Result};
+use foundry_cli::utils::{Git, SubmoduleCheckoutStatus};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, hash_map::Entry},
@@ -13,6 +13,72 @@ pub const FOUNDRY_LOCK: &str = "foundry.lock";
 
 /// A type alias for a HashMap of dependencies keyed by relative path to the submodule dir.
 pub type DepMap = HashMap<PathBuf, DepIdentifier>;
+
+/// A difference between `foundry.lock` and an installed dependency submodule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LockfileMismatch {
+    /// An installed dependency is not recorded in the lockfile.
+    MissingLockEntry { path: PathBuf, actual: Option<String> },
+    /// A lockfile entry does not have a corresponding dependency submodule.
+    MissingSubmodule { path: PathBuf, expected: String },
+    /// The index contains a dependency gitlink without a `.gitmodules` mapping.
+    MissingSubmoduleMapping { path: PathBuf },
+    /// A dependency submodule has not been initialized.
+    Uninitialized { path: PathBuf, expected: Option<String> },
+    /// A dependency submodule has merge conflicts.
+    Conflicted { path: PathBuf },
+    /// The installed revision differs from the locked revision.
+    Revision { path: PathBuf, expected: String, actual: String },
+}
+
+impl LockfileMismatch {
+    /// Returns the dependency path associated with this mismatch.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::MissingLockEntry { path, .. }
+            | Self::MissingSubmodule { path, .. }
+            | Self::MissingSubmoduleMapping { path }
+            | Self::Uninitialized { path, .. }
+            | Self::Conflicted { path }
+            | Self::Revision { path, .. } => path,
+        }
+    }
+}
+
+impl std::fmt::Display for LockfileMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingLockEntry { path, actual: Some(actual) } => {
+                write!(f, "{}: missing from foundry.lock (found {actual})", path.display())
+            }
+            Self::MissingLockEntry { path, actual: None } => {
+                write!(f, "{}: missing from foundry.lock", path.display())
+            }
+            Self::MissingSubmodule { path, expected } => write!(
+                f,
+                "{}: dependency submodule is missing (expected {expected})",
+                path.display()
+            ),
+            Self::MissingSubmoduleMapping { path } => {
+                write!(f, "{}: dependency submodule is missing from .gitmodules", path.display())
+            }
+            Self::Uninitialized { path, expected: Some(expected) } => write!(
+                f,
+                "{}: dependency submodule is not initialized (expected {expected})",
+                path.display()
+            ),
+            Self::Uninitialized { path, expected: None } => {
+                write!(f, "{}: dependency submodule is not initialized", path.display())
+            }
+            Self::Conflicted { path } => {
+                write!(f, "{}: dependency submodule has merge conflicts", path.display())
+            }
+            Self::Revision { path, expected, actual } => {
+                write!(f, "{}: expected {expected}, found {actual}", path.display())
+            }
+        }
+    }
+}
 
 /// A lockfile handler that keeps track of the dependencies and their current state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,7 +105,7 @@ impl<'a> Lockfile<'a> {
     }
 
     /// Set the git instance to be used for submodule operations.
-    pub fn with_git(mut self, git: &'a Git<'_>) -> Self {
+    pub const fn with_git(mut self, git: &'a Git<'_>) -> Self {
         self.git = Some(git);
         self
     }
@@ -55,11 +121,10 @@ impl<'a> Lockfile<'a> {
     pub fn sync(&mut self, lib: &Path) -> Result<Option<DepMap>> {
         match self.read() {
             Ok(_) => {}
-            Err(e) => {
-                if !e.to_string().contains("Lockfile not found") {
-                    return Err(e);
-                }
+            Err(e) if !e.to_string().contains("Lockfile not found") => {
+                return Err(e);
             }
+            _ => {}
         }
 
         if let Some(git) = &self.git {
@@ -78,18 +143,16 @@ impl<'a> Lockfile<'a> {
                 let rel_path = sub.path();
                 let rev = sub.rev();
 
-                let entry = self.deps.entry(rel_path.to_path_buf());
+                let entry = self.deps.entry(rel_path.clone());
 
                 match entry {
-                    Entry::Occupied(e) => {
-                        if e.get().rev() != rev {
-                            out_of_sync.insert(rel_path.to_path_buf(), e.get().clone());
-                        }
+                    Entry::Occupied(e) if e.get().rev() != rev => {
+                        out_of_sync.insert(rel_path.clone(), e.get().clone());
                     }
                     Entry::Vacant(e) => {
                         // Check if there is branch specified for the submodule at rel_path in
                         // .gitmodules
-                        let maybe_branch = modules_with_branch.get(rel_path).map(|b| b.to_string());
+                        let maybe_branch = modules_with_branch.get(rel_path).cloned();
 
                         trace!(?maybe_branch, submodule = ?rel_path, "submodule branch");
                         if let Some(branch) = maybe_branch {
@@ -99,15 +162,16 @@ impl<'a> Lockfile<'a> {
                                 r#override: false,
                             };
                             e.insert(dep_id.clone());
-                            out_of_sync.insert(rel_path.to_path_buf(), dep_id);
+                            out_of_sync.insert(rel_path.clone(), dep_id);
                             continue;
                         }
 
                         let dep_id = DepIdentifier::Rev { rev: rev.to_string(), r#override: false };
                         trace!(submodule=?rel_path, ?dep_id, "submodule dep_id");
                         e.insert(dep_id.clone());
-                        out_of_sync.insert(rel_path.to_path_buf(), dep_id);
+                        out_of_sync.insert(rel_path.clone(), dep_id);
                     }
+                    _ => {}
                 }
             }
 
@@ -115,6 +179,107 @@ impl<'a> Lockfile<'a> {
         }
 
         Ok(None)
+    }
+
+    /// Checks whether the lockfile matches dependency submodules without modifying either.
+    pub(crate) fn check(&mut self) -> Result<Vec<LockfileMismatch>> {
+        let lockfile_exists = self.exists();
+        if lockfile_exists {
+            self.read().wrap_err("Failed to read foundry.lock")?;
+        } else {
+            self.deps.clear();
+        }
+
+        let git = self.git.ok_or_eyre("Git is required to check foundry.lock")?;
+        let project_root =
+            dunce::canonicalize(self.lockfile_path.parent().expect("lockfile path has a parent"))?;
+        let git_root = match Git::root_of(git.root) {
+            Ok(root) => root,
+            Err(_)
+                if !lockfile_exists
+                    && !project_root.ancestors().any(|root| root.join(".git").exists()) =>
+            {
+                return Ok(Vec::new());
+            }
+            Err(err) => return Err(err),
+        };
+        let project_prefix = project_root.strip_prefix(&git_root).map_err(|_| {
+            eyre::eyre!("Project root is not contained in Git root {}", git_root.display())
+        })?;
+
+        let repository_path = relative_path(&git_root, &project_root);
+        let git_submodules =
+            git.submodules_in_worktree(&repository_path, &git_root, project_prefix)?;
+        let mut submodules = BTreeMap::new();
+        for submodule in &git_submodules {
+            submodules.insert(submodule.path().clone(), submodule);
+        }
+
+        let mut mismatches = Vec::new();
+        for (path, dep) in &self.deps {
+            let expected = dep.rev();
+            let Some(submodule) = submodules.remove(path) else {
+                mismatches.push(LockfileMismatch::MissingSubmodule {
+                    path: path.clone(),
+                    expected: expected.to_string(),
+                });
+                continue;
+            };
+            match submodule.status() {
+                SubmoduleCheckoutStatus::Uninitialized => {
+                    mismatches.push(LockfileMismatch::Uninitialized {
+                        path: path.clone(),
+                        expected: Some(expected.to_string()),
+                    });
+                }
+                SubmoduleCheckoutStatus::Conflicted => {
+                    mismatches.push(LockfileMismatch::Conflicted { path: path.clone() });
+                }
+                SubmoduleCheckoutStatus::MissingMapping => {
+                    mismatches
+                        .push(LockfileMismatch::MissingSubmoduleMapping { path: path.clone() });
+                }
+                SubmoduleCheckoutStatus::Current | SubmoduleCheckoutStatus::Modified
+                    if submodule.rev() != expected =>
+                {
+                    mismatches.push(LockfileMismatch::Revision {
+                        path: path.clone(),
+                        expected: expected.to_string(),
+                        actual: submodule.rev().to_string(),
+                    });
+                }
+                SubmoduleCheckoutStatus::Current | SubmoduleCheckoutStatus::Modified => {}
+            }
+        }
+        for (path, submodule) in submodules {
+            match submodule.status() {
+                SubmoduleCheckoutStatus::MissingMapping => {
+                    mismatches.push(LockfileMismatch::MissingSubmoduleMapping { path });
+                }
+                SubmoduleCheckoutStatus::Uninitialized => {
+                    mismatches.push(LockfileMismatch::MissingLockEntry {
+                        path: path.clone(),
+                        actual: None,
+                    });
+                    mismatches.push(LockfileMismatch::Uninitialized { path, expected: None });
+                }
+                SubmoduleCheckoutStatus::Conflicted => {
+                    mismatches.push(LockfileMismatch::MissingLockEntry {
+                        path: path.clone(),
+                        actual: None,
+                    });
+                    mismatches.push(LockfileMismatch::Conflicted { path });
+                }
+                SubmoduleCheckoutStatus::Current | SubmoduleCheckoutStatus::Modified => {
+                    mismatches.push(LockfileMismatch::MissingLockEntry {
+                        path,
+                        actual: Some(submodule.rev().to_string()),
+                    });
+                }
+            }
+        }
+        mismatches.sort_by(|a, b| a.path().cmp(b.path()));
+        Ok(mismatches)
     }
 
     /// Loads the lockfile from the project root.
@@ -211,6 +376,17 @@ impl<'a> Lockfile<'a> {
     }
 }
 
+fn relative_path(path: &Path, base: &Path) -> PathBuf {
+    let common =
+        path.components().zip(base.components()).take_while(|(path, base)| path == base).count();
+    let mut relative = PathBuf::new();
+    for _ in common..base.components().count() {
+        relative.push("..");
+    }
+    relative.extend(path.components().skip(common));
+    relative
+}
+
 // Implement .iter() for &LockFile
 
 /// Identifies whether a dependency (submodule) is referenced by a branch,
@@ -304,7 +480,7 @@ impl DepIdentifier {
     }
 
     /// Marks as dependency as overridden.
-    pub fn mark_override(&mut self) {
+    pub const fn mark_override(&mut self) {
         match self {
             Self::Branch { r#override, .. } => *r#override = true,
             Self::Tag { r#override, .. } => *r#override = true,
@@ -313,7 +489,7 @@ impl DepIdentifier {
     }
 
     /// Returns whether the dependency has been overridden.
-    pub fn overridden(&self) -> bool {
+    pub const fn overridden(&self) -> bool {
         match self {
             Self::Branch { r#override, .. } => *r#override,
             Self::Tag { r#override, .. } => *r#override,
@@ -322,7 +498,7 @@ impl DepIdentifier {
     }
 
     /// Returns whether the dependency is a branch.
-    pub fn is_branch(&self) -> bool {
+    pub const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
     }
 }

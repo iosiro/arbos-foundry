@@ -5,7 +5,6 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{Address, U256};
 use foundry_evm::backend::DatabaseResult;
 use revm::{bytecode::Bytecode, primitives::KECCAK_EMPTY, state::AccountInfo};
-use tokio::sync::RwLockWriteGuard;
 
 /// Genesis settings
 #[derive(Clone, Debug, Default)]
@@ -32,16 +31,14 @@ impl GenesisConfig {
                 // we set this to empty so `Database::code_by_hash` doesn't get called
                 code: Some(Default::default()),
                 nonce: 0,
+                account_id: None,
             };
             (address, info)
         })
     }
 
     /// If an initial `genesis.json` was provided, this applies the account alloc to the db
-    pub fn apply_genesis_json_alloc(
-        &self,
-        mut db: RwLockWriteGuard<'_, Box<dyn Db>>,
-    ) -> DatabaseResult<()> {
+    pub fn apply_genesis_json_alloc(&self, db: &mut dyn Db) -> DatabaseResult<()> {
         if let Some(ref genesis) = self.genesis_init {
             for (addr, mut acc) in genesis.alloc.clone() {
                 let storage = std::mem::take(&mut acc.storage);
@@ -65,6 +62,7 @@ impl GenesisConfig {
             nonce: nonce.unwrap_or_default(),
             code_hash: code.as_ref().map(|code| code.hash_slow()).unwrap_or(KECCAK_EMPTY),
             code,
+            account_id: None,
         }
     }
 }

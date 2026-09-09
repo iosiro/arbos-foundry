@@ -20,16 +20,9 @@ impl FromStr for VerificationType {
         match s {
             "full" => Ok(Self::Full),
             "partial" => Ok(Self::Partial),
-            _ => eyre::bail!("Invalid verification type"),
-        }
-    }
-}
-
-impl From<VerificationType> for String {
-    fn from(v: VerificationType) -> Self {
-        match v {
-            VerificationType::Full => "full".to_string(),
-            VerificationType::Partial => "partial".to_string(),
+            _ => {
+                eyre::bail!("Invalid verification type");
+            }
         }
     }
 }

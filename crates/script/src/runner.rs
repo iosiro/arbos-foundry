@@ -1,13 +1,19 @@
 use super::{ScriptConfig, ScriptResult};
 use crate::build::ScriptPredeployLibraries;
 use alloy_eips::eip7702::SignedAuthorization;
-use alloy_primitives::{Address, Bytes, TxKind, U256};
-use alloy_rpc_types::TransactionRequest;
+use alloy_evm::revm::context::Transaction;
+use alloy_network::TransactionBuilder;
+use alloy_primitives::{Address, Bytes, U256, map::AddressHashMap};
 use eyre::Result;
 use foundry_cheatcodes::BroadcastableTransaction;
+use foundry_common::{LIBRARY_DEPLOYER, TransactionMaybeSigned};
 use foundry_config::Config;
 use foundry_evm::{
     constants::CALLER,
+    core::{
+        FoundryTransaction,
+        evm::{FoundryEvmNetwork, TransactionRequestFor},
+    },
     executors::{DeployResult, EvmError, ExecutionErr, Executor, RawCallResult},
     opts::EvmOpts,
     revm::interpreter::{InstructionResult, return_ok},
@@ -17,14 +23,65 @@ use std::collections::VecDeque;
 
 /// Drives script execution
 #[derive(Debug)]
-pub struct ScriptRunner {
-    pub executor: Executor,
+pub struct ScriptRunner<FEN: FoundryEvmNetwork> {
+    pub executor: Executor<FEN>,
     pub evm_opts: EvmOpts,
+    collect_debug_bytecodes: bool,
 }
 
-impl ScriptRunner {
-    pub fn new(executor: Executor, evm_opts: EvmOpts) -> Self {
-        Self { executor, evm_opts }
+impl<FEN: FoundryEvmNetwork> ScriptRunner<FEN> {
+    pub const fn new(executor: Executor<FEN>, evm_opts: EvmOpts) -> Self {
+        Self { executor, evm_opts, collect_debug_bytecodes: false }
+    }
+
+    pub const fn with_debug_bytecodes(mut self, collect_debug_bytecodes: bool) -> Self {
+        self.collect_debug_bytecodes = collect_debug_bytecodes;
+        self
+    }
+
+    fn maybe_debug_bytecodes(
+        &self,
+        debug_bytecodes: AddressHashMap<Bytes>,
+    ) -> AddressHashMap<Bytes> {
+        if self.collect_debug_bytecodes { debug_bytecodes } else { Default::default() }
+    }
+
+    fn extend_debug_bytecodes(
+        &self,
+        target: &mut AddressHashMap<Bytes>,
+        debug_bytecodes: AddressHashMap<Bytes>,
+    ) {
+        if self.collect_debug_bytecodes {
+            target.extend(debug_bytecodes);
+        }
+    }
+
+    fn deploy_local_libraries(
+        &mut self,
+        libraries: &[foundry_linking::LinkedLibrary],
+        debug_bytecodes: &mut AddressHashMap<Bytes>,
+    ) -> Result<()> {
+        if libraries.is_empty() {
+            return Ok(());
+        }
+        let balance = self.executor.get_balance(LIBRARY_DEPLOYER)?;
+        let nonce = self.executor.get_nonce(LIBRARY_DEPLOYER)?;
+        self.executor.set_balance(LIBRARY_DEPLOYER, U256::MAX)?;
+        self.executor.set_nonce(LIBRARY_DEPLOYER, 0)?;
+        for library in libraries {
+            let DeployResult { address, raw } = self
+                .executor
+                .deploy(LIBRARY_DEPLOYER, library.bytecode.clone(), U256::ZERO, None)
+                .map_err(|err| eyre::eyre!("couldn't deploy local library: {err}"))?;
+            eyre::ensure!(
+                library.address == address,
+                "local library deployed at an unexpected address"
+            );
+            self.extend_debug_bytecodes(debug_bytecodes, raw.debug_bytecodes);
+        }
+        self.executor.set_balance(LIBRARY_DEPLOYER, balance)?;
+        self.executor.set_nonce(LIBRARY_DEPLOYER, nonce)?;
+        Ok(())
     }
 
     /// Deploys the libraries and broadcast contract. Calls setUp method if requested.
@@ -33,9 +90,9 @@ impl ScriptRunner {
         libraries: &ScriptPredeployLibraries,
         code: Bytes,
         setup: bool,
-        script_config: &ScriptConfig,
+        script_config: &ScriptConfig<FEN>,
         is_broadcast: bool,
-    ) -> Result<(Address, ScriptResult)> {
+    ) -> Result<(Address, ScriptResult<FEN::Network>)> {
         trace!(target: "script", "executing setUP()");
 
         if !is_broadcast {
@@ -44,7 +101,9 @@ impl ScriptRunner {
                 self.executor.set_balance(self.evm_opts.sender, U256::MAX)?;
             }
 
-            if script_config.evm_opts.fork_url.is_none() {
+            if script_config.evm_opts.fork_url.is_none()
+                && !script_config.evm_opts.networks.is_tempo()
+            {
                 self.executor.deploy_create2_deployer()?;
             }
         }
@@ -57,41 +116,59 @@ impl ScriptRunner {
 
         let mut library_transactions = VecDeque::new();
         let mut traces = Traces::default();
+        let mut debug_bytecodes: AddressHashMap<Bytes> = Default::default();
 
         // Deploy libraries
         match libraries {
-            ScriptPredeployLibraries::Default(libraries) => libraries.iter().for_each(|code| {
-                let result = self
-                    .executor
-                    .deploy(self.evm_opts.sender, code.clone(), U256::ZERO, None)
-                    .expect("couldn't deploy library")
-                    .raw;
+            ScriptPredeployLibraries::Default { onchain, local } => {
+                self.deploy_local_libraries(local, &mut debug_bytecodes)?;
+                for library in onchain {
+                    let code = &library.bytecode;
+                    let RawCallResult {
+                        traces: deploy_traces,
+                        debug_bytecodes: deploy_debug_bytecodes,
+                        ..
+                    } = self
+                        .executor
+                        .deploy(self.evm_opts.sender, code.clone(), U256::ZERO, None)
+                        .map_err(|err| eyre::eyre!("couldn't deploy library: {err}"))?
+                        .raw;
 
-                if let Some(deploy_traces) = result.traces {
-                    traces.push((TraceKind::Deployment, deploy_traces));
-                }
+                    self.extend_debug_bytecodes(&mut debug_bytecodes, deploy_debug_bytecodes);
 
-                library_transactions.push_back(BroadcastableTransaction {
-                    rpc: self.evm_opts.fork_url.clone(),
-                    transaction: TransactionRequest {
-                        from: Some(self.evm_opts.sender),
-                        input: code.clone().into(),
-                        nonce: Some(sender_nonce + library_transactions.len() as u64),
-                        ..Default::default()
+                    if let Some(deploy_traces) = deploy_traces {
+                        traces.push((TraceKind::Deployment, deploy_traces));
                     }
-                    .into(),
-                })
-            }),
-            ScriptPredeployLibraries::Create2(libraries, salt) => {
+
+                    let mut tx_req = TransactionRequestFor::<FEN>::default()
+                        .with_from(self.evm_opts.sender)
+                        .with_input(code.clone())
+                        .with_nonce(sender_nonce + library_transactions.len() as u64);
+
+                    script_config.tempo.apply::<FEN::Network>(&mut tx_req, None);
+
+                    library_transactions.push_back(BroadcastableTransaction {
+                        rpc: self.evm_opts.fork_url.clone(),
+                        transaction: TransactionMaybeSigned::new(tx_req),
+                    })
+                }
+            }
+            ScriptPredeployLibraries::Create2 { onchain, salt, local } => {
+                self.deploy_local_libraries(local, &mut debug_bytecodes)?;
                 let create2_deployer = self.executor.create2_deployer();
-                for library in libraries {
-                    let address = create2_deployer.create2_from_code(salt, library.as_ref());
+                for library in onchain {
+                    let address =
+                        create2_deployer.create2_from_code(salt, library.bytecode.as_ref());
                     // Skip if already deployed
                     if !self.executor.is_empty_code(address)? {
                         continue;
                     }
-                    let calldata = [salt.as_ref(), library.as_ref()].concat();
-                    let result = self
+                    let calldata = [salt.as_ref(), library.bytecode.as_ref()].concat();
+                    let RawCallResult {
+                        traces: deploy_traces,
+                        debug_bytecodes: deploy_debug_bytecodes,
+                        ..
+                    } = self
                         .executor
                         .transact_raw(
                             self.evm_opts.sender,
@@ -99,22 +176,25 @@ impl ScriptRunner {
                             calldata.clone().into(),
                             U256::from(0),
                         )
-                        .expect("couldn't deploy library");
+                        .map_err(|err| eyre::eyre!("couldn't deploy library: {err}"))?;
 
-                    if let Some(deploy_traces) = result.traces {
+                    self.extend_debug_bytecodes(&mut debug_bytecodes, deploy_debug_bytecodes);
+
+                    if let Some(deploy_traces) = deploy_traces {
                         traces.push((TraceKind::Deployment, deploy_traces));
                     }
 
+                    let mut tx_req = TransactionRequestFor::<FEN>::default()
+                        .with_from(self.evm_opts.sender)
+                        .with_input(calldata)
+                        .with_nonce(sender_nonce + library_transactions.len() as u64)
+                        .with_to(create2_deployer);
+
+                    script_config.tempo.apply::<FEN::Network>(&mut tx_req, None);
+
                     library_transactions.push_back(BroadcastableTransaction {
                         rpc: self.evm_opts.fork_url.clone(),
-                        transaction: TransactionRequest {
-                            from: Some(self.evm_opts.sender),
-                            input: calldata.into(),
-                            nonce: Some(sender_nonce + library_transactions.len() as u64),
-                            to: Some(TxKind::Call(create2_deployer)),
-                            ..Default::default()
-                        }
-                        .into(),
+                        transaction: TransactionMaybeSigned::new(tx_req),
                     });
                 }
 
@@ -147,7 +227,13 @@ impl ScriptRunner {
         // Deploy an instance of the contract
         let DeployResult {
             address,
-            raw: RawCallResult { mut logs, traces: constructor_traces, .. },
+            raw:
+                RawCallResult {
+                    mut logs,
+                    traces: constructor_traces,
+                    debug_bytecodes: constructor_debug_bytecodes,
+                    ..
+                },
         } = self
             .executor
             .deploy(CALLER, code, U256::ZERO, None)
@@ -163,12 +249,10 @@ impl ScriptRunner {
         }
 
         traces.extend(constructor_traces.map(|traces| (TraceKind::Deployment, traces)));
+        self.extend_debug_bytecodes(&mut debug_bytecodes, constructor_debug_bytecodes);
 
         // Optionally call the `setUp` function
-        let (success, gas_used, labeled_addresses, transactions) = if !setup {
-            self.executor.backend_mut().set_test_contract(address);
-            (true, 0, Default::default(), Some(library_transactions))
-        } else {
+        let (success, gas_used, labeled_addresses, transactions) = if setup {
             match self.executor.setup(Some(self.evm_opts.sender), address, None) {
                 Ok(RawCallResult {
                     reverted,
@@ -176,11 +260,13 @@ impl ScriptRunner {
                     labels,
                     logs: setup_logs,
                     gas_used,
+                    debug_bytecodes: setup_debug_bytecodes,
                     transactions: setup_transactions,
                     ..
                 }) => {
                     traces.extend(setup_traces.map(|traces| (TraceKind::Setup, traces)));
                     logs.extend_from_slice(&setup_logs);
+                    self.extend_debug_bytecodes(&mut debug_bytecodes, setup_debug_bytecodes);
 
                     if let Some(txs) = setup_transactions {
                         library_transactions.extend(txs);
@@ -195,11 +281,13 @@ impl ScriptRunner {
                         labels,
                         logs: setup_logs,
                         gas_used,
+                        debug_bytecodes: setup_debug_bytecodes,
                         transactions,
                         ..
                     } = err.raw;
                     traces.extend(setup_traces.map(|traces| (TraceKind::Setup, traces)));
                     logs.extend_from_slice(&setup_logs);
+                    self.extend_debug_bytecodes(&mut debug_bytecodes, setup_debug_bytecodes);
 
                     if let Some(txs) = transactions {
                         library_transactions.extend(txs);
@@ -209,6 +297,9 @@ impl ScriptRunner {
                 }
                 Err(e) => return Err(e.into()),
             }
+        } else {
+            self.executor.backend_mut().set_test_contract(address);
+            (true, 0, Default::default(), Some(library_transactions))
         };
 
         Ok((
@@ -218,6 +309,7 @@ impl ScriptRunner {
                 success,
                 gas_used,
                 labeled_addresses,
+                debug_bytecodes: self.maybe_debug_bytecodes(debug_bytecodes),
                 transactions,
                 logs,
                 traces,
@@ -228,7 +320,11 @@ impl ScriptRunner {
     }
 
     /// Executes the method that will collect all broadcastable transactions.
-    pub fn script(&mut self, address: Address, calldata: Bytes) -> Result<ScriptResult> {
+    pub fn script(
+        &mut self,
+        address: Address,
+        calldata: Bytes,
+    ) -> Result<ScriptResult<FEN::Network>> {
         self.call(self.evm_opts.sender, address, calldata, U256::ZERO, None, false)
     }
 
@@ -240,7 +336,7 @@ impl ScriptRunner {
         calldata: Option<Bytes>,
         value: Option<U256>,
         authorization_list: Option<Vec<SignedAuthorization>>,
-    ) -> Result<ScriptResult> {
+    ) -> Result<ScriptResult<FEN::Network>> {
         if let Some(to) = to {
             self.call(
                 from,
@@ -250,21 +346,26 @@ impl ScriptRunner {
                 authorization_list,
                 true,
             )
-        } else if to.is_none() {
+        } else {
             let res = self.executor.deploy(
                 from,
                 calldata.expect("No data for create transaction"),
                 value.unwrap_or(U256::ZERO),
                 None,
             );
-            let (address, RawCallResult { gas_used, logs, traces, .. }) = match res {
+            let (
+                address,
+                RawCallResult { gas_used, logs, traces, debug_bytecodes, exit_reason, .. },
+            ) = match res {
                 Ok(DeployResult { address, raw }) => (address, raw),
                 Err(EvmError::Execution(err)) => {
                     let ExecutionErr { raw, reason } = *err;
                     sh_err!("Failed with `{reason}`:\n")?;
                     (Address::ZERO, raw)
                 }
-                Err(e) => eyre::bail!("Failed deploying contract: {e:?}"),
+                Err(e) => {
+                    eyre::bail!("Failed deploying contract: {e:?}");
+                }
             };
 
             Ok(ScriptResult {
@@ -272,15 +373,15 @@ impl ScriptRunner {
                 success: address != Address::ZERO,
                 gas_used,
                 logs,
+                debug_bytecodes: self.maybe_debug_bytecodes(debug_bytecodes),
                 // Manually adjust gas for the trace to add back the stipend/real used gas
                 traces: traces
                     .map(|traces| vec![(TraceKind::Execution, traces)])
                     .unwrap_or_default(),
+                exit_reason,
                 address: Some(address),
                 ..Default::default()
             })
-        } else {
-            eyre::bail!("ENS not supported.");
         }
     }
 
@@ -298,7 +399,7 @@ impl ScriptRunner {
         value: U256,
         authorization_list: Option<Vec<SignedAuthorization>>,
         commit: bool,
-    ) -> Result<ScriptResult> {
+    ) -> Result<ScriptResult<FEN::Network>> {
         let mut res = if let Some(authorization_list) = &authorization_list {
             self.executor.call_raw_with_authorization(
                 from,
@@ -332,14 +433,26 @@ impl ScriptRunner {
             }
         }
 
-        let RawCallResult { result, reverted, logs, traces, labels, transactions, .. } = res;
-        let breakpoints = res.cheatcodes.map(|cheats| cheats.breakpoints).unwrap_or_default();
+        let RawCallResult {
+            result,
+            reverted,
+            logs,
+            traces,
+            labels,
+            transactions,
+            debug_bytecodes,
+            exit_reason,
+            cheatcodes,
+            ..
+        } = res;
+        let breakpoints = cheatcodes.map(|cheats| cheats.breakpoints).unwrap_or_default();
 
         Ok(ScriptResult {
             returned: result,
             success: !reverted,
             gas_used,
             logs,
+            debug_bytecodes: self.maybe_debug_bytecodes(debug_bytecodes),
             traces: traces
                 .map(|traces| {
                     // Manually adjust gas for the trace to add back the stipend/real used gas
@@ -349,6 +462,7 @@ impl ScriptRunner {
                 .unwrap_or_default(),
             labeled_addresses: labels,
             transactions,
+            exit_reason,
             address: None,
             breakpoints,
         })
@@ -362,7 +476,7 @@ impl ScriptRunner {
     /// it might be problematic when using `ffi`.
     fn search_optimal_gas_usage(
         &mut self,
-        res: &RawCallResult,
+        res: &RawCallResult<FEN>,
         from: Address,
         to: Address,
         calldata: &Bytes,
@@ -371,19 +485,21 @@ impl ScriptRunner {
         let mut gas_used = res.gas_used;
         if matches!(res.exit_reason, Some(return_ok!())) {
             // Store the current gas limit and reset it later.
-            let init_gas_limit = self.executor.env().tx.gas_limit;
+            let init_gas_limit = self.executor.tx_env().gas_limit();
 
             let mut highest_gas_limit = gas_used * 3;
             let mut lowest_gas_limit = gas_used;
             let mut last_highest_gas_limit = highest_gas_limit;
             while (highest_gas_limit - lowest_gas_limit) > 1 {
                 let mid_gas_limit = (highest_gas_limit + lowest_gas_limit) / 2;
-                self.executor.env_mut().tx.gas_limit = mid_gas_limit;
+                self.executor.tx_env_mut().set_gas_limit(mid_gas_limit);
                 let res = self.executor.call_raw(from, to, calldata.0.clone().into(), value)?;
                 match res.exit_reason {
-                    Some(InstructionResult::Revert)
-                    | Some(InstructionResult::OutOfGas)
-                    | Some(InstructionResult::OutOfFunds) => {
+                    Some(
+                        InstructionResult::Revert
+                        | InstructionResult::OutOfGas
+                        | InstructionResult::OutOfFunds,
+                    ) => {
                         lowest_gas_limit = mid_gas_limit;
                     }
                     _ => {
@@ -404,7 +520,7 @@ impl ScriptRunner {
                 }
             }
             // Reset gas limit in the executor.
-            self.executor.env_mut().tx.gas_limit = init_gas_limit;
+            self.executor.tx_env_mut().set_gas_limit(init_gas_limit);
         }
         Ok(gas_used)
     }
