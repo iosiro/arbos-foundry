@@ -2267,6 +2267,7 @@ forgetest_async!(arbitrum_fork_refreshes_cached_source_state, |prj, cmd| {
     let remote = alloy_primitives::address!("0000000000000000000000000000000000123456");
     // Update slot zero from calldata so the next value is committed in a mined transaction.
     api.anvil_set_code(remote, alloy_primitives::hex!("60003560005500").into()).await.unwrap();
+    api.anvil_set_balance(remote, alloy_primitives::U256::from(100)).await.unwrap();
     api.anvil_set_storage_at(
         remote,
         alloy_primitives::U256::ZERO,
@@ -2289,6 +2290,7 @@ forgetest_async!(arbitrum_fork_refreshes_cached_source_state, |prj, cmd| {
                 .with_from(provider.get_accounts().await.unwrap()[0])
                 .with_to(remote)
                 .with_input(alloy_primitives::U256::from(43).to_be_bytes::<32>().to_vec())
+                .with_value(alloy_primitives::U256::from(100))
                 .with_gas_limit(1_000_000),
         )
         .await
@@ -2364,6 +2366,72 @@ contract EthereumForkStorageControlTest is Test {
         vm.selectFork(first);
         assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)), "inactive roll retained stale read cache");
     }
+
+    function checkRoll(bool inactive) internal {
+        // Read caches and explicit setup storage must be distinguished on every roll.
+        assertEq(REMOTE.balance, 0);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(0));
+        vm.store(REMOTE, bytes32(uint256(1)), bytes32(uint256(7)));
+        address persistent = address(0x234567);
+        vm.makePersistent(persistent);
+        CreatedStorageControl created = new CreatedStorageControl();
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(REMOTE.balance, 100);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(42)));
+        vm.store(REMOTE, bytes32(0), bytes32(uint256(123)));
+        vm.store(REMOTE, bytes32(uint256(1)), bytes32(uint256(456)));
+        vm.deal(REMOTE, 777);
+        vm.setNonce(REMOTE, 42);
+        vm.etch(REMOTE, hex"00");
+        vm.store(persistent, bytes32(0), bytes32(uint256(8)));
+        vm.store(address(created), bytes32(0), bytes32(uint256(10)));
+        if (inactive) {
+            uint256 second = vm.createSelectFork("<rpc>", uint256(1));
+            vm.rollFork(first, uint256(2));
+            assertEq(vm.activeFork(), second);
+            vm.selectFork(first);
+        } else {
+            vm.rollFork(uint256(2));
+        }
+        assertEq(REMOTE.balance, 200, "roll retained stale balance");
+        assertEq(vm.getNonce(REMOTE), 0, "roll retained stale nonce");
+        assertEq(REMOTE.code, hex"60003560005500", "roll retained stale code");
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)), "fork-local write survived roll");
+        assertEq(vm.load(REMOTE, bytes32(uint256(1))), bytes32(uint256(7)), "setup write lost");
+        assertEq(vm.load(persistent, bytes32(0)), bytes32(uint256(8)), "persistent write lost");
+        assertEq(created.value(), 10, "created account lost");
+    }
+
+    function test_active_roll_discards_fork_local_changes() public { checkRoll(false); }
+    function test_inactive_roll_discards_fork_local_changes() public { checkRoll(true); }
+
+    function test_roll_refreshes_read_only_account_info() public {
+        assertEq(REMOTE.balance, 0);
+        uint256 first = vm.createSelectFork("<rpc>", uint256(1));
+        assertEq(REMOTE.balance, 100);
+        vm.rollFork(uint256(2));
+        assertEq(REMOTE.balance, 200);
+        vm.rollFork(uint256(1));
+        assertEq(REMOTE.balance, 100);
+        vm.createSelectFork("<rpc>", uint256(2));
+        assertEq(REMOTE.balance, 200);
+        vm.rollFork(first, uint256(2));
+        vm.selectFork(first);
+        assertEq(REMOTE.balance, 200);
+    }
+
+    function selectAndRollThenRevert() external {
+        checkRoll(true);
+        revert("intentional");
+    }
+
+    function test_fork_roll_inside_reverting_call() public {
+        try this.selectAndRollThenRevert() { fail(); } catch Error(string memory reason) {
+            assertEq(reason, "intentional");
+        }
+        assertEq(REMOTE.balance, 200);
+        assertEq(vm.load(REMOTE, bytes32(0)), bytes32(uint256(43)));
+    }
 }
 "#
         .replace("<rpc>", &handle.http_endpoint()),
@@ -2373,16 +2441,18 @@ contract EthereumForkStorageControlTest is Test {
         cmd.forge_fuse()
             .args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkVersionTest", "-vvvv"])
             .assert_success();
-        cmd.forge_fuse()
-            .args([
-                "test",
-                "--network",
-                "ethereum",
-                "--mc",
-                "EthereumForkStorageControlTest",
-                "-vvvv",
-            ])
-            .assert_success();
+        for network in ["ethereum", "arbitrum"] {
+            cmd.forge_fuse()
+                .args([
+                    "test",
+                    "--network",
+                    network,
+                    "--mc",
+                    "EthereumForkStorageControlTest",
+                    "-vvvv",
+                ])
+                .assert_success();
+        }
     }
 });
 
@@ -2761,6 +2831,79 @@ contract StylusUtilitiesTest is Test {
     );
 
     cmd.args(["test", "--network", "arbitrum", "--mc", "StylusUtilitiesTest"]).assert_success();
+});
+
+forgetest_init!(test_stylus_block_cache_gas, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/fixtures/Stylus");
+    for name in ["foundry_stylus_program.wasm", "foundry_stylus_debug.wasm"] {
+        std::fs::copy(fixtures.join(name), prj.root().join(name)).unwrap();
+    }
+    prj.add_test(
+        "BlockCache.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+interface StylusCode { function getStylusCode(string calldata) external view returns (bytes memory); }
+
+contract BlockCacheTest is Test {
+    address constant A = address(0xaaa);
+    address constant B = address(0xbbb);
+
+    function callGas(address target) internal returns (uint256 used) {
+        uint256 beforeGas = gasleft();
+        (bool ok, bytes memory output) = target.call(hex"deadbeef");
+        used = beforeGas - gasleft();
+        assertTrue(ok);
+        assertEq(output, hex"deadbeef");
+    }
+
+    function test_eviction_and_block_lifetime() public {
+        vm.etch(A, StylusCode(address(vm)).getStylusCode("foundry_stylus_program.wasm"));
+        vm.etch(B, StylusCode(address(vm)).getStylusCode("foundry_stylus_debug.wasm"));
+        // Activate both programs before measuring their initialization gas.
+        callGas(A);
+        callGas(B);
+        vm.roll(block.number + 1);
+        uint256 cold = callGas(A);
+        callGas(B);
+        uint256 evicted = callGas(A);
+        uint256 warm = callGas(A);
+        assertApproxEqAbs(cold, evicted, 64, "size zero and one must evict A after B");
+        assertGt(evicted, warm + 1000, "same-block calls must share the recent cache");
+        vm.roll(block.number + 1);
+        uint256 nextBlock = callGas(A);
+        assertApproxEqAbs(nextBlock, cold, 64, "new block must clear the cache");
+    }
+}
+"#,
+    );
+    for isolated in [false, true] {
+        prj.update_config(|config| config.isolate = isolated);
+        for capacity in ["0", "1"] {
+            cmd.forge_fuse()
+                .args([
+                    "test",
+                    "--network",
+                    "arbitrum",
+                    "--arbos-version",
+                    "61",
+                    "--stylus-disable-auto-cache",
+                    "--stylus-debug",
+                    "--stylus-block-cache-size",
+                    capacity,
+                    "--mc",
+                    "BlockCacheTest",
+                    "-vvvv",
+                ])
+                .assert_success();
+        }
+    }
 });
 
 forgetest_init!(test_deploy_stylus_code_executes_program, |prj, cmd| {

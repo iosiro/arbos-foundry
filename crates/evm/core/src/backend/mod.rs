@@ -1074,43 +1074,11 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
     /// So when the first fork is initialized we replace these accounts with the actual account as
     /// it exists on the fork.
     fn prepare_init_journal_state(&mut self) -> Result<(), BackendError> {
-        let loaded_accounts = self
-            .fork_init_journaled_state
-            .state
-            .iter()
-            .filter(|(addr, _)| {
-                !self.is_existing_precompile(addr)
-                    && !self.inner.persistent_accounts.contains(*addr)
-            })
-            .map(|(addr, _)| addr)
-            .copied()
-            .collect::<Vec<_>>();
-
         let precompiles = self.inner.precompile_addresses();
         let persistent_accounts = self.inner.persistent_accounts.clone();
         for fork in self.inner.forks_iter_mut() {
             let mut journaled_state = self.fork_init_journaled_state.clone();
-            for loaded_account in loaded_accounts.iter().copied() {
-                trace!(?loaded_account, "replacing account on init");
-                let init_account =
-                    journaled_state.state.get_mut(&loaded_account).expect("exists; qed");
-
-                // here's an edge case where we need to check if this account has been created, in
-                // which case we don't need to replace it with the account from the fork because the
-                // created account takes precedence: for example contract creation in setups
-                if init_account.is_created() {
-                    trace!(?loaded_account, "skipping created account");
-                    continue;
-                }
-
-                // otherwise we need to replace the account's info with the one from the fork's
-                // database
-                let fork_account = Database::basic(&mut fork.db, loaded_account)?
-                    .ok_or(BackendError::MissingAccount(loaded_account))?;
-                init_account.info = fork_account;
-                init_account.status.remove(revm::state::AccountStatus::LoadedAsNotExisting);
-            }
-            refresh_read_only_fork_storage(
+            refresh_fork_journal(
                 &mut journaled_state,
                 &mut fork.db,
                 &persistent_accounts,
@@ -1380,8 +1348,8 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         Ok(())
     }
 
-    /// Populates a rolled active fork and the outer journal at the new block state.
-    fn populate_rolled_active_fork(
+    /// Populates a rolled fork and its journal at the new block state.
+    fn populate_rolled_fork(
         fork: &mut Fork<AnyNetwork, BlockEnvFor<FEN>>,
         persistent_accounts: &AddressSet,
         caller: Option<Address>,
@@ -1407,8 +1375,8 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         *journaled_state = fork.journaled_state.clone();
     }
 
-    /// Reinitializes a rolled active fork before populating its journal at the new block state.
-    fn reset_rolled_active_fork(
+    /// Reinitializes a rolled fork before populating its journal at the new block state.
+    fn reset_rolled_fork(
         fork: &mut Fork<AnyNetwork, BlockEnvFor<FEN>>,
         fork_init_journaled_state: &JournaledState,
         persistent_accounts: &AddressSet,
@@ -1416,7 +1384,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         journaled_state: &mut JournaledState,
     ) {
         fork.journaled_state = fork_init_journaled_state.clone();
-        Self::populate_rolled_active_fork(fork, persistent_accounts, caller, journaled_state);
+        Self::populate_rolled_fork(fork, persistent_accounts, caller, journaled_state);
     }
 
     /// Rolls a fork while preparing active transaction context before publishing the new fork.
@@ -1482,12 +1450,9 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         // Update the local mapping only after all context fetches and decoding have succeeded.
         let mut fork_db = ForkDB::new(backend);
         self.factory.initialize_backend(&mut fork_db, &fork_env)?;
-        let mut fork_init_journaled_state = if _affects_active {
-            self.fork_init_journaled_state.clone()
-        } else {
-            self.inner.get_fork_by_id(id)?.journaled_state.clone()
-        };
-        refresh_read_only_fork_storage(
+        // Both active and inactive rolls start from pre-fork setup, not fork-local writes.
+        let mut fork_init_journaled_state = self.fork_init_journaled_state.clone();
+        refresh_fork_journal(
             &mut fork_init_journaled_state,
             &mut fork_db,
             &self.inner.persistent_accounts,
@@ -1506,7 +1471,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
             let persistent_accounts = self.inner.persistent_accounts.clone();
             let caller = self.inner.caller;
             let active = self.inner.get_fork_mut(active_idx);
-            Self::reset_rolled_active_fork(
+            Self::reset_rolled_fork(
                 active,
                 &fork_init_journaled_state,
                 &persistent_accounts,
@@ -1514,7 +1479,17 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                 journaled_state,
             );
         } else {
-            self.inner.get_fork_mut(rolled_idx).journaled_state = fork_init_journaled_state;
+            let persistent_accounts = self.inner.persistent_accounts.clone();
+            let caller = self.inner.caller;
+            let fork = self.inner.get_fork_mut(rolled_idx);
+            let mut previous_journal = fork.journaled_state.clone();
+            Self::reset_rolled_fork(
+                fork,
+                &fork_init_journaled_state,
+                &persistent_accounts,
+                caller,
+                &mut previous_journal,
+            );
         }
 
         Ok(context_update)
@@ -1591,7 +1566,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                 let preserved_spec = staged_evm_env.cfg_env.spec;
                 staged_evm_env = fork_env;
                 staged_evm_env.cfg_env.set_spec_and_mainnet_gas_params(preserved_spec);
-                Self::populate_rolled_active_fork(
+                Self::populate_rolled_fork(
                     &mut staged_fork.fork,
                     &self.inner.persistent_accounts,
                     self.inner.caller,
@@ -1991,7 +1966,7 @@ impl<FEN: FoundryEvmNetwork> DatabaseExt<FEN::EvmFactory> for Backend<FEN> {
         let mut fork_db = ForkDB::new(fork);
         self.factory.initialize_backend(&mut fork_db, &env)?;
         let mut journaled_state = self.fork_init_journaled_state.clone();
-        refresh_read_only_fork_storage(
+        refresh_fork_journal(
             &mut journaled_state,
             &mut fork_db,
             &self.inner.persistent_accounts,
@@ -3270,10 +3245,10 @@ fn commit_transaction<FEN: FoundryEvmNetwork>(
     Ok(())
 }
 
-/// Refreshes read-only storage caches when a journal moves to another fork database.
-/// Explicit setup writes, created accounts, and persistent accounts retain their local state.
+/// Refreshes account information and read-only storage when setup moves to a fork database.
+/// Explicit setup storage writes, created accounts, and persistent accounts retain their state.
 /// Slots remain present because existing journal entries reference them when reverting calls.
-fn refresh_read_only_fork_storage<DB: Database>(
+fn refresh_fork_journal<DB: Database>(
     journal: &mut JournaledState,
     db: &mut DB,
     persistent_accounts: &AddressSet,
@@ -3286,11 +3261,12 @@ fn refresh_read_only_fork_storage<DB: Database>(
         {
             continue;
         }
-        if account.status.contains(revm::state::AccountStatus::LoadedAsNotExisting)
-            && db.basic(*address)?.is_some()
-        {
-            // A locally absent account must not mask storage of an existing remote account.
+        if let Some(info) = db.basic(*address)? {
+            account.info = info;
             account.status.remove(revm::state::AccountStatus::LoadedAsNotExisting);
+        } else {
+            account.info = AccountInfo::default();
+            account.status.insert(revm::state::AccountStatus::LoadedAsNotExisting);
         }
         for (key, slot) in &mut account.storage {
             if !slot.is_changed() {
