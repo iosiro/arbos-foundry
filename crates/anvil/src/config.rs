@@ -996,7 +996,8 @@ impl NodeConfig {
         }
         let chain_id = self.get_chain_id();
 
-        Config::foundry_block_cache_file(chain_id, block)
+        Config::foundry_block_cache_dir(chain_id, block)
+            .map(|path| foundry_evm::core::fork::fork_cache_file(path, "storage.json"))
     }
 
     /// Sets whether to disable the default create2 deployer
@@ -1173,7 +1174,7 @@ impl NodeConfig {
         // Apply Arbitrum state overrides from stylus config.
         let stylus_config = self.stylus_config.clone();
         backend
-            .apply_arbitrum_state_overrides(|params| {
+            .apply_arbitrum_state_overrides(stylus_config.arbos_version.is_some(), |params| {
                 apply_stylus_config(params, &stylus_config);
             })
             .await;

@@ -1,5 +1,8 @@
 //! RPC API keys utilities.
 
+mod arbitrum;
+pub use arbitrum::spawn_rpc_proxy_with_l1_block_number;
+
 use foundry_config::{
     NamedChain::{
         self, Arbitrum, Base, BinanceSmartChainTestnet, Celo, Mainnet, Optimism, Polygon, Sepolia,

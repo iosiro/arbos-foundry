@@ -37,6 +37,7 @@ pub fn apply_chain_and_block_specific_env_changes<N: Network>(
 
     if let Ok(chain) = NamedChain::try_from(env.cfg.chain_id) {
         let block_number = block.header().number();
+        env.chain.rpc_block_number = chain.is_arbitrum().then_some(block_number);
 
         match chain {
             Mainnet => {

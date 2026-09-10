@@ -15,6 +15,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+axum.workspace = true
+tokio.workspace = true
 foundry-common.workspace = true
 foundry-compilers = { workspace = true, features = ["project-util"] }
 foundry-config.workspace = true
@@ -41,5 +43,4 @@ svm.workspace = true
 idna_adapter.workspace = true
 
 [dev-dependencies]
-tokio.workspace = true
 foundry-block-explorers.workspace = true

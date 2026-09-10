@@ -194,6 +194,7 @@ impl EvmOpts {
 
         crate::Env {
             evm_env: EvmEnv {
+                chain: Default::default(),
                 cfg_env: cfg,
                 block_env: FoundryBlockEnv {
                     number: self.env.block_number,

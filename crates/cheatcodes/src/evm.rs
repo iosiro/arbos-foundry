@@ -540,6 +540,7 @@ impl Cheatcode for rollCall {
     fn apply_stateful(&self, ccx: &mut CheatsCtxt) -> Result {
         let Self { newHeight } = self;
         ccx.ecx.block.number = *newHeight;
+        ccx.ecx.chain.synthetic_block_hashes = true;
         Ok(Default::default())
     }
 }
@@ -1046,7 +1047,11 @@ impl Cheatcode for setBlockhashCall {
             "block number must be less than or equal to the current block number"
         );
 
-        ccx.ecx.journaled_state.database.set_blockhash(blockNumber, blockHash);
+        if ccx.ecx.chain.arbos_initialized {
+            ccx.ecx.chain.block_hash_overrides.insert(blockNumber.saturating_to(), blockHash);
+        } else {
+            ccx.ecx.journaled_state.database.set_blockhash(blockNumber, blockHash);
+        }
 
         Ok(Default::default())
     }

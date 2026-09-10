@@ -1189,7 +1189,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-revm?rev=6f22c1ffe99b9dcce61a5f85e304981d608ff12c#6f22c1ffe99b9dcce61a5f85e304981d608ff12c"
+source = "git+https://github.com/iosiro/arbos-revm?rev=5fd7c46f78fae79e7f9f194828bf312d370068b7#5fd7c46f78fae79e7f9f194828bf312d370068b7"
 dependencies = [
  "alloy-rlp",
  "alloy-sol-types",
@@ -4574,6 +4574,7 @@ dependencies = [
  "alloy-signer-local",
  "alloy-transport",
  "anvil",
+ "arbos-revm",
  "axum",
  "chrono",
  "clap 4.5.51",
@@ -5281,6 +5282,7 @@ dependencies = [
  "revm-inspectors",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -5436,6 +5438,7 @@ version = "0.1.1"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
+ "axum",
  "eyre",
  "fd-lock",
  "foundry-block-explorers",

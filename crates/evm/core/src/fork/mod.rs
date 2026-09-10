@@ -1,6 +1,9 @@
 use super::opts::EvmOpts;
 use crate::Env;
 
+mod cache;
+pub use cache::fork_cache_file;
+
 mod init;
 pub use init::{configure_env, environment};
 

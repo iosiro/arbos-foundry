@@ -182,6 +182,15 @@ impl BlockRequest {
     }
 }
 
+/// State and execution metadata saved by `evm_snapshot`.
+#[derive(Clone, Debug)]
+struct StateSnapshot {
+    number: u64,
+    hash: B256,
+    evm_number: U256,
+    chain: arbos_revm::chain::ArbitrumChain,
+}
+
 /// Gives access to the [revm::Database]
 #[derive(Clone, Debug)]
 pub struct Backend {
@@ -224,7 +233,7 @@ pub struct Backend {
     /// Listeners for new blocks that get notified when a new block was imported.
     new_block_listeners: Arc<Mutex<Vec<UnboundedSender<NewBlockNotification>>>>,
     /// Keeps track of active state snapshots at a specific block.
-    active_state_snapshots: Arc<Mutex<HashMap<U256, (u64, B256)>>>,
+    active_state_snapshots: Arc<Mutex<HashMap<U256, StateSnapshot>>>,
     enable_steps_tracing: bool,
     print_logs: bool,
     print_traces: bool,
@@ -455,8 +464,13 @@ impl Backend {
     ///
     /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
     /// populated from context if state is empty), applies the closure to modify them,
-    /// and only initializes/commits if the params were actually changed.
-    pub async fn apply_arbitrum_state_overrides(&self, mut f: impl FnMut(&mut ArbosStateParams)) {
+    /// and commits only when initialization or a parameter change was requested.
+    /// `initialize_if_missing` preserves an explicit request for the default ArbOS version.
+    pub async fn apply_arbitrum_state_overrides(
+        &self,
+        initialize_if_missing: bool,
+        mut f: impl FnMut(&mut ArbosStateParams),
+    ) {
         // First, check if the closure would make any changes using default params.
         // This avoids touching the database/journal if nothing would change.
         let default_params = ArbosStateParams::default();
@@ -465,7 +479,7 @@ impl Backend {
 
         // Avoid loading or modifying ArbOS state unless an override was requested. In
         // particular, ordinary Ethereum forks do not have ArbOS state to initialize.
-        if test_params == default_params {
+        if !initialize_if_missing && test_params == default_params {
             return;
         }
 
@@ -478,7 +492,7 @@ impl Backend {
                 tx: FoundryTxEnv::default(),
                 cfg: env.evm_env.cfg_env.clone(),
                 journaled_state: Journal::new(&mut **db),
-                chain: (),
+                chain: Default::default(),
                 local: ArbitrumLocalContext::default(),
                 error: Ok(()),
             };
@@ -619,6 +633,7 @@ impl Backend {
                     let mut env = self.env.write();
 
                     env.evm_env.cfg_env.chain_id = fork.chain_id();
+                    env.evm_env.chain = Default::default();
                     env.evm_env.block_env = BlockEnv {
                         number: U256::from(fork_block_number),
                         timestamp: U256::from(fork_block.header.timestamp),
@@ -630,6 +645,13 @@ impl Backend {
                         basefee: env.evm_env.block_env.basefee,
                         ..env.evm_env.block_env.clone()
                     };
+
+                    let networks = env.networks;
+                    foundry_evm::utils::apply_chain_and_block_specific_env_changes::<
+                        alloy_network::AnyNetwork,
+                    >(
+                        foundry_evm::core::AsEnvMut::as_env_mut(&mut *env), &fork_block, networks
+                    );
 
                     // this is the base fee of the current block, but we need the base fee of
                     // the next block
@@ -682,6 +704,7 @@ impl Backend {
         {
             let mut env = self.env.write();
             env.evm_env.block_env.number = U256::from(genesis_number);
+            env.evm_env.chain = Default::default();
             env.evm_env.block_env.timestamp = U256::from(genesis_timestamp);
             // Reset other block env fields to their defaults
             env.evm_env.block_env.basefee = self.fees.base_fee();
@@ -1005,14 +1028,21 @@ impl Backend {
         let hash = self.best_hash();
         let id = self.db.write().await.snapshot_state();
         trace!(target: "backend", "creating snapshot {} at {}", id, num);
-        self.active_state_snapshots.lock().insert(id, (num, hash));
+        let env = self.env.read();
+        let snapshot = StateSnapshot {
+            number: num,
+            hash,
+            evm_number: env.evm_env.block_env.number,
+            chain: env.evm_env.chain.clone(),
+        };
+        self.active_state_snapshots.lock().insert(id, snapshot);
         id
     }
 
     /// Reverts the state to the state snapshot identified by the given `id`.
     pub async fn revert_state_snapshot(&self, id: U256) -> Result<bool, BlockchainError> {
         let block = { self.active_state_snapshots.lock().remove(&id) };
-        if let Some((num, hash)) = block {
+        if let Some(StateSnapshot { number: num, hash, evm_number, chain }) = block {
             let best_block_hash = {
                 // revert the storage that's newer than the snapshot
                 let current_height = self.best_number();
@@ -1040,8 +1070,9 @@ impl Backend {
             self.time.reset(reset_time);
 
             let mut env = self.env.write();
+            env.evm_env.chain = chain;
             env.evm_env.block_env = BlockEnv {
-                number: U256::from(num),
+                number: evm_number,
                 timestamp: U256::from(block.header.timestamp),
                 difficulty: block.header.difficulty,
                 // ensures prevrandao is set
@@ -1057,7 +1088,11 @@ impl Backend {
     }
 
     pub fn list_state_snapshots(&self) -> BTreeMap<U256, (u64, B256)> {
-        self.active_state_snapshots.lock().clone().into_iter().collect()
+        self.active_state_snapshots
+            .lock()
+            .iter()
+            .map(|(id, snapshot)| (*id, (snapshot.number, snapshot.hash)))
+            .collect()
     }
 
     /// Get the current state.
@@ -1216,7 +1251,13 @@ impl Backend {
     fn next_env(&self) -> Env {
         let mut env = self.env.read().clone();
         // increase block number for this block
-        env.evm_env.block_env.number = env.evm_env.block_env.number.saturating_add(U256::from(1));
+        let rpc_number = self.best_number().saturating_add(1);
+        env.evm_env.block_env.number = if is_arbitrum(env.evm_env.cfg_env.chain_id) {
+            U256::from(rpc_number)
+        } else {
+            env.evm_env.block_env.number.saturating_add(U256::from(1))
+        };
+        env.evm_env.chain.rpc_block_number = Some(rpc_number);
         env.evm_env.block_env.basefee = self.base_fee();
         env.evm_env.block_env.blob_excess_gas_and_price = self.excess_blob_gas_and_price();
         env.evm_env.block_env.timestamp = U256::from(self.time.current_call_timestamp());
@@ -1324,6 +1365,7 @@ impl Backend {
         let storage = self.blockchain.storage.read();
 
         let executor = TransactionExecutor {
+            chain: env.evm_env.chain.clone(),
             db: &mut cache_db,
             validator: self,
             pending: pool_transactions.into_iter(),
@@ -1378,6 +1420,7 @@ impl Backend {
             }
 
             let block_number = self.blockchain.storage.read().best_number.saturating_add(1);
+            env.evm_env.chain.rpc_block_number = Some(block_number);
 
             // increase block number for this block
             if is_arbitrum(env.evm_env.cfg_env.chain_id) {
@@ -1413,6 +1456,7 @@ impl Backend {
                 env.evm_env.block_env.timestamp = U256::from(self.time.next_timestamp());
 
                 let executor = TransactionExecutor {
+                    chain: env.evm_env.chain.clone(),
                     db: &mut **db,
                     validator: self,
                     pending: pool_transactions.into_iter(),
@@ -1554,7 +1598,7 @@ impl Backend {
         block_request: Option<BlockRequest>,
         overrides: EvmOverrides,
     ) -> Result<(InstructionResult, Option<Output>, u128, State), BlockchainError> {
-        self.with_database_at(block_request, |state, mut block| {
+        self.with_database_at(block_request, |state, mut block, rpc_block_number| {
             let block_number = block.number;
             let (exit, out, gas, state) = {
                 let mut cache_db = CacheDB::new(state);
@@ -1564,7 +1608,7 @@ impl Backend {
                 if let Some(block_overrides) = overrides.block {
                     cache_db.apply_block_overrides(*block_overrides, &mut block);
                 }
-                self.call_with_state(&cache_db, request, fee_details, block)
+                self.call_with_state(&cache_db, request, fee_details, block, rpc_block_number)
             }?;
             trace!(target: "backend", "call return {:?} out: {:?} gas {} on block {}", exit, out, gas, block_number);
             Ok((exit, out, gas, state))
@@ -1584,6 +1628,7 @@ impl Backend {
         request: WithOtherFields<TransactionRequest>,
         fee_details: FeeDetails,
         block_env: BlockEnv,
+        rpc_block_number: u64,
     ) -> Env {
         let tx_type = request.minimal_tx_type() as u8;
 
@@ -1615,6 +1660,7 @@ impl Backend {
 
         let gas_limit = gas.unwrap_or(block_env.gas_limit);
         let mut env = self.env.read().clone();
+        env.evm_env.chain.rpc_block_number = Some(rpc_block_number);
         env.evm_env.block_env = block_env;
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
@@ -1702,7 +1748,7 @@ impl Backend {
         request: SimulatePayload,
         block_request: Option<BlockRequest>,
     ) -> Result<Vec<SimulatedBlock<AnyRpcBlock>>, BlockchainError> {
-        self.with_database_at(block_request, |state, mut block_env| {
+        self.with_database_at(block_request, |state, mut block_env, mut rpc_block_number| {
             let SimulatePayload {
                 block_state_calls,
                 trace_transfers,
@@ -1743,6 +1789,7 @@ impl Backend {
                         WithOtherFields::new(request.clone()),
                         fee_details,
                         block_env.clone(),
+                        rpc_block_number,
                     );
 
                     // Always disable EIP-3607
@@ -1823,7 +1870,7 @@ impl Backend {
                             .enumerate()
                             .map(|(idx, log)| Log {
                                 inner: log,
-                                block_number: Some(block_env.number.saturating_to()),
+                                block_number: Some(rpc_block_number),
                                 block_timestamp: Some(block_env.timestamp.saturating_to()),
                                 transaction_index: Some(req_idx as u64),
                                 log_index: Some((idx + log_index) as u64),
@@ -1851,7 +1898,7 @@ impl Backend {
                     beneficiary: block_env.beneficiary,
                     state_root: Default::default(),
                     difficulty: Default::default(),
-                    number: block_env.number.saturating_to(),
+                    number: rpc_block_number,
                     gas_limit: block_env.gas_limit,
                     gas_used,
                     timestamp: block_env.timestamp.saturating_to(),
@@ -1895,6 +1942,7 @@ impl Backend {
 
                 // update block env
                 block_env.number += U256::from(1);
+                rpc_block_number = rpc_block_number.saturating_add(1);
                 block_env.timestamp += U256::from(12);
                 block_env.basefee = simulated_block
                     .inner
@@ -1916,10 +1964,11 @@ impl Backend {
         request: WithOtherFields<TransactionRequest>,
         fee_details: FeeDetails,
         block_env: BlockEnv,
+        rpc_block_number: u64,
     ) -> Result<(InstructionResult, Option<Output>, u128, State), BlockchainError> {
         let mut inspector = self.build_inspector();
 
-        let env = self.build_call_env(request, fee_details, block_env);
+        let env = self.build_call_env(request, fee_details, block_env, rpc_block_number);
         let mut evm = self.new_evm_with_inspector_ref(state, &env, &mut inspector);
         let ResultAndState { result, state } = evm.inspect_tx(env.tx)?;
         let (exit_reason, gas_used, out) = match result {
@@ -1953,7 +2002,7 @@ impl Backend {
         } = opts;
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
 
-        self.with_database_at(block_request, |state, mut block| {
+        self.with_database_at(block_request, |state, mut block, rpc_block_number| {
             let block_number = block.number;
 
             let mut cache_db = CacheDB::new(state);
@@ -1976,7 +2025,8 @@ impl Backend {
                                 TracingInspectorConfig::from_geth_call_config(&call_config),
                             );
 
-                            let env = self.build_call_env(request, fee_details, block);
+                            let env =
+                                self.build_call_env(request, fee_details, block, rpc_block_number);
                             let mut evm =
                                 self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
                             let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
@@ -2006,7 +2056,8 @@ impl Backend {
                                 ),
                             );
 
-                            let env = self.build_call_env(request, fee_details, block);
+                            let env =
+                                self.build_call_env(request, fee_details, block, rpc_block_number);
                             let mut evm =
                                 self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
                             let result = evm.inspect_tx(env.tx)?;
@@ -2037,7 +2088,12 @@ impl Backend {
                             revm_inspectors::tracing::js::JsInspector::new(code, config)
                                 .map_err(|err| BlockchainError::Message(err.to_string()))?;
 
-                        let env = self.build_call_env(request, fee_details, block.clone());
+                        let env = self.build_call_env(
+                            request,
+                            fee_details,
+                            block.clone(),
+                            rpc_block_number,
+                        );
                         let mut evm =
                             self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
                         let result = evm.inspect_tx(env.tx.clone())?;
@@ -2056,7 +2112,7 @@ impl Backend {
                 .build_inspector()
                 .with_tracing_config(TracingInspectorConfig::from_geth_config(&config));
 
-            let env = self.build_call_env(request, fee_details, block);
+            let env = self.build_call_env(request, fee_details, block, rpc_block_number);
             let mut evm = self.new_evm_with_inspector_ref(&cache_db, &env, &mut inspector);
             let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
 
@@ -2092,11 +2148,12 @@ impl Backend {
         request: WithOtherFields<TransactionRequest>,
         fee_details: FeeDetails,
         block_env: BlockEnv,
+        rpc_block_number: u64,
     ) -> Result<(InstructionResult, Option<Output>, u64, AccessList), BlockchainError> {
         let mut inspector =
             AccessListInspector::new(request.access_list.clone().unwrap_or_default());
 
-        let env = self.build_call_env(request, fee_details, block_env);
+        let env = self.build_call_env(request, fee_details, block_env, rpc_block_number);
         let mut evm = self.new_evm_with_inspector_ref(state, &env, &mut inspector);
         let ResultAndState { result, state: _ } = evm.inspect_tx(env.tx)?;
         let (exit_reason, gas_used, out) = match result {
@@ -2485,13 +2542,14 @@ impl Backend {
         f: F,
     ) -> Result<T, BlockchainError>
     where
-        F: FnOnce(Box<dyn MaybeFullDatabase + '_>, BlockEnv) -> T,
+        F: FnOnce(Box<dyn MaybeFullDatabase + '_>, BlockEnv, u64) -> T,
     {
         let block_number = match block_request {
             Some(BlockRequest::Pending(pool_transactions)) => {
                 let result = self
                     .with_pending_block(pool_transactions, |state, block| {
                         let block = block.block;
+                        let block_number = block.header.number;
                         let block = BlockEnv {
                             number: U256::from(block.header.number),
                             beneficiary: block.header.beneficiary,
@@ -2502,7 +2560,7 @@ impl Backend {
                             gas_limit: block.header.gas_limit,
                             ..Default::default()
                         };
-                        f(state, block)
+                        f(state, block, block_number)
                     })
                     .await;
                 return Ok(result);
@@ -2512,7 +2570,7 @@ impl Backend {
         };
         let block_number = self.convert_block_number(block_number);
 
-        if block_number < self.env.read().evm_env.block_env.number.saturating_to() {
+        if block_number < self.best_number() {
             if let Some((block_hash, block)) = self
                 .block_by_number(BlockNumber::Number(block_number))
                 .await?
@@ -2530,15 +2588,12 @@ impl Backend {
             }
 
             warn!(target: "backend", "Not historic state found for block={}", block_number);
-            return Err(BlockchainError::BlockOutOfRange(
-                self.env.read().evm_env.block_env.number.saturating_to(),
-                block_number,
-            ));
+            return Err(BlockchainError::BlockOutOfRange(self.best_number(), block_number));
         }
 
         let db = self.db.read().await;
         let block = self.env.read().evm_env.block_env.clone();
-        Ok(f(Box::new(&**db), block))
+        Ok(f(Box::new(&**db), block, block_number))
     }
 
     pub async fn storage_at(
@@ -2547,7 +2602,7 @@ impl Backend {
         index: U256,
         block_request: Option<BlockRequest>,
     ) -> Result<B256, BlockchainError> {
-        self.with_database_at(block_request, |db, _| {
+        self.with_database_at(block_request, |db, _, _| {
             trace!(target: "backend", "get storage for {:?} at {:?}", address, index);
             let val = db.storage_ref(address, index)?;
             Ok(val.into())
@@ -2564,7 +2619,8 @@ impl Backend {
         address: Address,
         block_request: Option<BlockRequest>,
     ) -> Result<Bytes, BlockchainError> {
-        self.with_database_at(block_request, |db, _| self.get_code_with_state(&db, address)).await?
+        self.with_database_at(block_request, |db, _, _| self.get_code_with_state(&db, address))
+            .await?
     }
 
     pub fn get_code_with_state(
@@ -2594,7 +2650,7 @@ impl Backend {
         address: Address,
         block_request: Option<BlockRequest>,
     ) -> Result<U256, BlockchainError> {
-        self.with_database_at(block_request, |db, _| self.get_balance_with_state(db, address))
+        self.with_database_at(block_request, |db, _, _| self.get_balance_with_state(db, address))
             .await?
     }
 
@@ -2603,7 +2659,7 @@ impl Backend {
         address: Address,
         block_request: Option<BlockRequest>,
     ) -> Result<Account, BlockchainError> {
-        self.with_database_at(block_request, |block_db, _| {
+        self.with_database_at(block_request, |block_db, _, _| {
             let db = block_db.maybe_as_full_db().ok_or(BlockchainError::DataUnavailable)?;
             let account = db.get(&address).cloned().unwrap_or_default();
             let storage_root = storage_root(&account.storage);
@@ -2645,7 +2701,7 @@ impl Backend {
             BlockRequest::Number(bn) => BlockRequest::Number(bn),
         };
 
-        self.with_database_at(Some(final_block_request), |db, _| {
+        self.with_database_at(Some(final_block_request), |db, _, _| {
             trace!(target: "backend", "get nonce for {:?}", address);
             Ok(db.basic_ref(address)?.unwrap_or_default().nonce)
         })
@@ -2781,7 +2837,9 @@ impl Backend {
                 ..Default::default()
             };
 
+            env.evm_env.chain.rpc_block_number = Some(block.header.number);
             let executor = TransactionExecutor {
+                chain: env.evm_env.chain.clone(),
                 db: &mut cache_db,
                 validator: self,
                 pending: pool_txs.into_iter(),
@@ -3444,7 +3502,7 @@ impl Backend {
     ) -> Result<AccountProof, BlockchainError> {
         let block_number = block_request.as_ref().map(|r| r.block_number());
 
-        self.with_database_at(block_request, |block_db, _| {
+        self.with_database_at(block_request, |block_db, _, _| {
             trace!(target: "backend", "get proof for {:?} at {:?}", address, block_number);
             let db = block_db.maybe_as_full_db().ok_or(BlockchainError::DataUnavailable)?;
             let account = db.get(&address).cloned().unwrap_or_default();
@@ -3597,10 +3655,14 @@ impl Backend {
 
 fn get_block_env<F, T>(state: &StateDb, block_number: u64, block: AnyRpcBlock, f: F) -> T
 where
-    F: FnOnce(Box<dyn MaybeFullDatabase + '_>, BlockEnv) -> T,
+    F: FnOnce(Box<dyn MaybeFullDatabase + '_>, BlockEnv, u64) -> T,
 {
+    let l1_number = block
+        .other
+        .get("l1BlockNumber")
+        .and_then(|number| serde_json::from_value::<U256>(number.clone()).ok());
     let block = BlockEnv {
-        number: U256::from(block_number),
+        number: l1_number.unwrap_or_else(|| U256::from(block_number)),
         beneficiary: block.header.beneficiary,
         timestamp: U256::from(block.header.timestamp),
         difficulty: block.header.difficulty,
@@ -3609,7 +3671,7 @@ where
         gas_limit: block.header.gas_limit,
         ..Default::default()
     };
-    f(Box::new(state), block)
+    f(Box::new(state), block, block_number)
 }
 
 /// Get max nonce from transaction pool by address.
@@ -3955,11 +4017,11 @@ mod tests {
         let mut config = NodeConfig::test();
         let backend = config.setup().await.unwrap();
         let chain_id = U256::from(421_614_u64);
-        backend.apply_arbitrum_state_overrides(|params| params.chain_id = chain_id).await;
+        backend.apply_arbitrum_state_overrides(false, |params| params.chain_id = chain_id).await;
 
         let calls = Cell::new(0);
         backend
-            .apply_arbitrum_state_overrides(|params| {
+            .apply_arbitrum_state_overrides(false, |params| {
                 if calls.replace(calls.get() + 1) == 1 {
                     assert_eq!(params.chain_id, chain_id);
                 }

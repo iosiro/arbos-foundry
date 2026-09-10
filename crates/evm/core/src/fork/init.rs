@@ -73,6 +73,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
 
     let mut env = Env {
         evm_env: EvmEnv {
+            chain: Default::default(),
             cfg_env: cfg,
             block_env: FoundryBlockEnv {
                 number: U256::from(block.header().number()),
