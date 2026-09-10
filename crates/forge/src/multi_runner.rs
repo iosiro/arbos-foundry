@@ -358,9 +358,12 @@ impl TestRunnerConfig {
         executor.set_legacy_assertions(self.config.legacy_assertions);
 
         // Re-apply stylus config from inline config
-        executor.apply_arbitrum_state_overrides(|params| {
-            apply_stylus_config(params, &self.evm_opts.stylus_config);
-        });
+        executor.apply_arbitrum_state_overrides(
+            self.evm_opts.stylus_config.arbos_version.is_some(),
+            |params| {
+                apply_stylus_config(params, &self.evm_opts.stylus_config);
+            },
+        );
     }
 
     /// Creates a new executor with this configuration.
@@ -393,9 +396,12 @@ impl TestRunnerConfig {
             .legacy_assertions(self.config.legacy_assertions)
             .build(self.env.clone(), db);
 
-        executor.apply_arbitrum_state_overrides(|params| {
-            apply_stylus_config(params, &self.evm_opts.stylus_config);
-        });
+        executor.apply_arbitrum_state_overrides(
+            self.evm_opts.stylus_config.arbos_version.is_some(),
+            |params| {
+                apply_stylus_config(params, &self.evm_opts.stylus_config);
+            },
+        );
 
         executor
     }

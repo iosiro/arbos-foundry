@@ -22,7 +22,7 @@ use alloy_sol_types::{SolCall, sol};
 use arbos_revm::{
     ArbitrumContext,
     local_context::ArbitrumLocalContext,
-    state::{ArbState, ArbosStateParams},
+    state::{ArbState, ArbStateGetter, ArbosStateParams},
 };
 use foundry_evm_core::{
     EvmEnv, FoundryTxEnv,
@@ -333,21 +333,21 @@ impl Executor {
     ///
     /// This creates a temporary journal context, loads `ArbosStateParams` (with defaults
     /// populated from context if state is empty), applies the closure to modify them,
-    /// and only initializes/commits if the params were actually changed.
+    /// and commits only when initialization or a parameter change was requested.
+    /// `initialize_if_missing` preserves an explicit request for the default ArbOS version.
     #[inline]
-    pub fn apply_arbitrum_state_overrides(&mut self, f: impl FnOnce(&mut ArbosStateParams)) {
-        let is_fork = self.backend.is_in_forking_mode();
-
+    pub fn apply_arbitrum_state_overrides(
+        &mut self,
+        initialize_if_missing: bool,
+        mut f: impl FnMut(&mut ArbosStateParams),
+    ) {
         // First, check if the closure would make any changes using default params.
         // This avoids touching the database/journal if nothing would change.
-        // For non-fork mode, we can safely skip if defaults are unchanged.
         let default_params = ArbosStateParams::default();
         let mut test_params = default_params.clone();
         f(&mut test_params);
 
-        // If no changes would be made and we're not in fork mode, skip journal operations
-        // In fork mode, we need to read actual state to compare
-        if test_params == default_params && !is_fork {
+        if !initialize_if_missing && test_params == default_params {
             return;
         }
 
@@ -358,25 +358,25 @@ impl Executor {
                 tx: FoundryTxEnv::default(),
                 cfg: env.evm_env.cfg_env.clone(),
                 journaled_state: { Journal::new(self.backend.db_mut()) },
-                chain: (),
+                chain: env.evm_env.chain.clone(),
                 local: ArbitrumLocalContext::default(),
                 error: Ok(()),
             };
 
             let mut state = context.arb_state(None, false);
 
-            // Get current state (with defaults populated from context if empty)
             let original_params = state.get().unwrap();
+            let mut updated_params = original_params.clone();
+            f(&mut updated_params);
 
-            // In non-fork mode, use the pre-computed test_params
-            // In fork mode, we already checked that test_params != default_params,
-            // so we should initialize
-            if is_fork {
-                // For fork mode, always initialize with the modified params
-                state.initialize(&test_params).unwrap();
+            if original_params.arbos_version == 0 {
+                state.initialize(&updated_params).unwrap();
                 context.journaled_state.finalize()
-            } else if test_params != original_params {
-                state.initialize(&test_params).unwrap();
+            } else if updated_params.stylus_params != original_params.stylus_params {
+                let mut non_stylus_params = updated_params.clone();
+                non_stylus_params.stylus_params = original_params.stylus_params.clone();
+                debug_assert_eq!(non_stylus_params, original_params);
+                state.programs().stylus_params().set(&updated_params.stylus_params).unwrap();
                 context.journaled_state.finalize()
             } else {
                 Default::default()
@@ -468,6 +468,7 @@ impl Executor {
 
         // record any changes made to the block's environment during setup
         self.env_mut().evm_env.block_env = res.env.evm_env.block_env.clone();
+        self.env_mut().evm_env.chain = res.env.evm_env.chain.clone();
         // and also the chainid, which can be set manually
         self.env_mut().evm_env.cfg_env.chain_id = res.env.evm_env.cfg_env.chain_id;
 
@@ -629,6 +630,7 @@ impl Executor {
 
         // Persist the changed environment.
         self.inspector_mut().set_env(&result.env);
+        self.env.evm_env.chain = result.env.evm_env.chain.clone();
     }
 
     /// Returns `true` if a test can be considered successful.
@@ -773,6 +775,7 @@ impl Executor {
     fn build_test_env(&self, caller: Address, kind: TxKind, data: Bytes, value: U256) -> Env {
         Env {
             evm_env: EvmEnv {
+                chain: self.env().evm_env.chain.clone(),
                 cfg_env: {
                     let mut cfg = self.env().evm_env.cfg_env.clone();
                     cfg.spec = self.spec_id();

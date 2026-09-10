@@ -21,9 +21,7 @@ use revm::{
         ContextTr, CreateScheme, JournalTr, LocalContextTr,
         result::{EVMError, ExecResultAndState, ExecutionResult, HaltReason, ResultAndState},
     },
-    handler::{
-        EthFrame, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult, instructions::EthInstructions,
-    },
+    handler::{EthFrame, EvmTr, FrameResult, FrameTr, Handler, ItemOrResult},
     inspector::{InspectorEvmTr, InspectorHandler},
     interpreter::{
         CallInput, CallInputs, CallOutcome, CallScheme, CallValue, CreateInputs, CreateOutcome,
@@ -42,7 +40,7 @@ pub type InnerEvm<'db, I> = ArbitrumEvm<
     FoundryContext<&'db mut dyn DatabaseExt>,
     I,
     FoundryPrecompilesMap<&'db mut dyn DatabaseExt>,
-    EthInstructions<EthInterpreter, FoundryContext<&'db mut dyn DatabaseExt>>,
+    arbos_revm::ArbitrumInstructions<FoundryContext<&'db mut dyn DatabaseExt>>,
     EthFrame<EthInterpreter>,
 >;
 
@@ -60,7 +58,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         block: env.evm_env.block_env,
         cfg: env.evm_env.cfg_env,
         tx: env.tx,
-        chain: (),
+        chain: env.evm_env.chain,
         local: FoundryLocalContext::default(),
         error: Ok(()),
     };
@@ -71,7 +69,7 @@ pub fn new_evm_with_inspector<'db, I: InspectorExt>(
         inner: ArbitrumEvm::new_with_inspector(
             ctx,
             inspector,
-            EthInstructions::default(),
+            arbos_revm::ArbitrumInstructions::default(),
             get_precompiles(spec),
         ),
     };
@@ -90,7 +88,7 @@ pub fn new_evm_with_existing_context<'a>(
         inner: ArbitrumEvm::new_with_inspector(
             ctx,
             inspector,
-            EthInstructions::default(),
+            arbos_revm::ArbitrumInstructions::default(),
             get_precompiles(spec),
         ),
     };
@@ -224,6 +222,8 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         self.inner.0.ctx.tx = tx;
 
+        self.inner.sync_execution_spec()?;
+
         let mut handler = FoundryHandler::<I>::default();
         let result = handler.inspect_run(&mut self.inner)?;
 
@@ -243,10 +243,10 @@ impl<'db, I: InspectorExt> Evm for FoundryEvm<'db, I> {
     where
         Self: Sized,
     {
-        let FoundryContext { block: block_env, cfg: cfg_env, journaled_state, .. } =
+        let FoundryContext { block: block_env, cfg: cfg_env, journaled_state, chain, .. } =
             self.inner.0.ctx;
 
-        (journaled_state.database, EvmEnv { block_env, cfg_env })
+        (journaled_state.database, EvmEnv { block_env, cfg_env, chain })
     }
 }
 

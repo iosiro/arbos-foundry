@@ -37,6 +37,7 @@ pub fn apply_chain_and_block_specific_env_changes<N: Network>(
 
     if let Ok(chain) = NamedChain::try_from(env.cfg.chain_id) {
         let block_number = block.header().number();
+        env.chain.rpc_block_number = chain.is_arbitrum().then_some(block_number);
 
         match chain {
             Mainnet => {
@@ -211,4 +212,35 @@ pub fn configure_tx_req_env(
     env.tx.set_signed_authorization(authorization_list.clone().unwrap_or_default());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{AsEnvMut, Env};
+    use alloy_network::{AnyHeader, AnyNetwork, AnyRpcBlock, AnyRpcHeader};
+    use alloy_rpc_types::{Block, BlockTransactions};
+
+    #[test]
+    fn block_normalization_sets_prevrandao_for_moonbeam() {
+        let header = AnyHeader { difficulty: U256::from(1), ..Default::default() };
+        let block = AnyRpcBlock::new(
+            Block::new(
+                AnyRpcHeader::from_sealed(header.seal(B256::ZERO)),
+                BlockTransactions::Full(Vec::new()),
+            )
+            .into(),
+        );
+        let mut env = Env::default();
+        env.evm_env.cfg_env.chain_id = NamedChain::Moonbeam as u64;
+        env.evm_env.block_env.prevrandao = None;
+
+        apply_chain_and_block_specific_env_changes::<AnyNetwork>(
+            env.as_env_mut(),
+            &block,
+            NetworkConfigs::default(),
+        );
+
+        assert!(env.evm_env.block_env.prevrandao.is_some());
+    }
 }

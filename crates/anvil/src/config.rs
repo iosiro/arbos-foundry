@@ -996,7 +996,8 @@ impl NodeConfig {
         }
         let chain_id = self.get_chain_id();
 
-        Config::foundry_block_cache_file(chain_id, block)
+        Config::foundry_block_cache_dir(chain_id, block)
+            .map(|path| foundry_evm::core::fork::fork_cache_file(path, "storage.json"))
     }
 
     /// Sets whether to disable the default create2 deployer
@@ -1068,7 +1069,16 @@ impl NodeConfig {
         // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the
         // caller is a contract. So we disable the check by default.
         cfg.inner.disable_eip3607 = true;
-        cfg.inner.disable_eip3541 = !self.stylus_config.disable_stylus_deployment;
+        // ArbOS performs its own version-aware validation for Stylus 0xEF
+        // prefixes. Disabling EIP-3541 here bypasses that consensus check.
+        cfg.inner.disable_eip3541 = false;
+        cfg.disable_stylus_deployment = self.stylus_config.disable_stylus_deployment;
+        if let Some(arbos_version) = self.stylus_config.arbos_version {
+            cfg.arbos_version = u64::from(arbos_version);
+        }
+        cfg.debug_mode = self.stylus_config.debug_mode_stylus;
+        cfg.disable_auto_cache = self.stylus_config.disable_auto_cache_stylus;
+        cfg.disable_auto_activate = self.stylus_config.disable_auto_activate_stylus;
         cfg.inner.disable_block_gas_limit = self.disable_block_gas_limit;
 
         if !self.enable_tx_gas_limit {
@@ -1164,7 +1174,7 @@ impl NodeConfig {
         // Apply Arbitrum state overrides from stylus config.
         let stylus_config = self.stylus_config.clone();
         backend
-            .apply_arbitrum_state_overrides(|params| {
+            .apply_arbitrum_state_overrides(stylus_config.arbos_version.is_some(), |params| {
                 apply_stylus_config(params, &stylus_config);
             })
             .await;
@@ -1687,5 +1697,27 @@ mod tests {
         assert!(!config.is_state_history_supported());
         let config = PruneStateHistoryConfig::from_args(Some(Some(10)));
         assert!(config.is_state_history_supported());
+    }
+
+    #[tokio::test]
+    async fn stylus_execution_options_are_applied_to_the_evm_config() {
+        let stylus = StylusConfig {
+            arbos_version: Some(59),
+            disable_auto_cache_stylus: true,
+            disable_auto_activate_stylus: true,
+            debug_mode_stylus: true,
+            disable_stylus_deployment: true,
+            ..Default::default()
+        };
+        let mut config = NodeConfig::test().with_stylus_config(stylus);
+        let backend = config.setup().await.unwrap();
+        let env = backend.env().read();
+        let cfg = &env.evm_env.cfg_env;
+
+        assert_eq!(cfg.arbos_version, 59);
+        assert!(cfg.debug_mode);
+        assert!(cfg.disable_auto_cache);
+        assert!(cfg.disable_auto_activate);
+        assert!(cfg.disable_stylus_deployment);
     }
 }

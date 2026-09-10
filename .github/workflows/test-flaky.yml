@@ -1,0 +1,21 @@
+# Manually triggered CI job for tests excluded from the regular suite because they depend on external services.
+
+name: test-flaky
+
+permissions: {}
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+    with:
+      profile: flaky
+    secrets: inherit

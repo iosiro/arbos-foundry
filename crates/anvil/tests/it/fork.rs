@@ -1118,11 +1118,12 @@ async fn can_override_fork_chain_id() {
 
 // <https://github.com/foundry-rs/foundry/issues/6485>
 #[tokio::test(flavor = "multi_thread")]
-async fn test_fork_reset_moonbeam() {
+async fn flaky_test_fork_reset_moonbeam() {
     crate::init_tracing();
+    let moonbeam_rpc = "https://moonbeam.api.onfinality.io/public";
     let (api, handle) = spawn(
         fork_config()
-            .with_eth_rpc_url(Some("https://rpc.api.moonbeam.network".to_string()))
+            .with_eth_rpc_url(Some(moonbeam_rpc.to_string()))
             .with_fork_block_number(None::<u64>),
     )
     .await;
@@ -1141,7 +1142,7 @@ async fn test_fork_reset_moonbeam() {
 
     // reset to check timestamp works after resetting
     api.anvil_reset(Some(Forking {
-        json_rpc_url: Some("https://rpc.api.moonbeam.network".to_string()),
+        json_rpc_url: Some(moonbeam_rpc.to_string()),
         block_number: None,
     }))
     .await
@@ -1198,9 +1199,9 @@ async fn test_arbitrum_fork_dev_balance() {
 
 // <https://github.com/foundry-rs/foundry/issues/9152>
 #[tokio::test(flavor = "multi_thread")]
-async fn test_arb_fork_mining() {
+async fn flaky_test_arb_fork_mining() {
     let fork_block_number = 394274860u64;
-    let fork_rpc = next_rpc_endpoint(NamedChain::Arbitrum);
+    let fork_rpc = foundry_test_utils::rpc::arbitrum_archive_rpc_url();
     let (api, _handle) = spawn(
         fork_config()
             .with_fork_block_number(Some(fork_block_number))
@@ -1219,7 +1220,7 @@ async fn test_arb_fork_mining() {
 
 // <https://github.com/foundry-rs/foundry/issues/6749>
 #[tokio::test(flavor = "multi_thread")]
-async fn test_arbitrum_fork_block_number() {
+async fn flaky_test_arbitrum_fork_block_number() {
     // fork to get initial block for test
     let (_, handle) = spawn(
         fork_config()
