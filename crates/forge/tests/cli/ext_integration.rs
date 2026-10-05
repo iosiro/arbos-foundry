@@ -64,7 +64,8 @@ fn sablier_v2_core() {
 // <https://github.com/Vectorized/solady>
 #[test]
 fn solady() {
-    ExtTester::new("Vectorized", "solady", "fda607f2b8084112cbc0b261c8f6239687b8a15c").run();
+    // Includes the toNibbles memory-allocation fix (Vectorized/solady#1504).
+    ExtTester::new("Vectorized", "solady", "cbcfe0009477aa329574f17e8db0a05703bb8bdd").run();
 }
 
 // <https://github.com/pcaversaccio/snekmate>

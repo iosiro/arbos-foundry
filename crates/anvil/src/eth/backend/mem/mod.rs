@@ -3970,6 +3970,10 @@ mod tests {
         let (api_a, _handle_a) = spawn(config_a).await;
         let (api_b, _handle_b) = spawn(config_b).await;
 
+        // Keep mined timestamps independent of wall-clock time and node startup order.
+        api_a.evm_set_block_timestamp_interval(1).unwrap();
+        api_b.evm_set_block_timestamp_interval(1).unwrap();
+
         // Mine empty blocks (no transactions) on both backends
         let outcome_a_1 = api_a.backend.mine_block(vec![]).await;
         let outcome_b_1 = api_b.backend.mine_block(vec![]).await;
@@ -3982,6 +3986,9 @@ mod tests {
             api_a.block_by_number(outcome_a_1.block_number.into()).await.unwrap().unwrap();
         let block_b_1 =
             api_b.block_by_number(outcome_b_1.block_number.into()).await.unwrap().unwrap();
+
+        assert_eq!(block_a_1.header.timestamp, genesis_timestamp + 1);
+        assert_eq!(block_b_1.header.timestamp, genesis_timestamp + 1);
 
         // The block hashes should be identical
         assert_eq!(
@@ -3998,6 +4005,9 @@ mod tests {
             api_a.block_by_number(outcome_a_2.block_number.into()).await.unwrap().unwrap();
         let block_b_2 =
             api_b.block_by_number(outcome_b_2.block_number.into()).await.unwrap().unwrap();
+
+        assert_eq!(block_a_2.header.timestamp, genesis_timestamp + 2);
+        assert_eq!(block_b_2.header.timestamp, genesis_timestamp + 2);
 
         assert_eq!(
             block_a_2.header.hash, block_b_2.header.hash,

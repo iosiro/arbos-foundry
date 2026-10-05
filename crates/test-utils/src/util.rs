@@ -170,7 +170,7 @@ impl ExtTester {
         // Clone the external repository.
         let repo_url = format!("https://github.com/{}/{}.git", self.org, self.name);
         let root = prj.root().to_str().unwrap();
-        clone_remote(&repo_url, root, recursive);
+        clone_remote(&repo_url, root, false);
 
         // Checkout the revision.
         if self.rev.is_empty() {
@@ -192,6 +192,23 @@ impl ExtTester {
             if !status.success() {
                 panic!("git checkout failed: {status}");
             }
+        }
+
+        if recursive {
+            // Keep branch refs available for fixtures that exercise dependency updates.
+            let mut git = Command::new("git");
+            git.current_dir(root).args([
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "--no-single-branch",
+                "--depth",
+                "1",
+            ]);
+            test_debug!("$ {git:?}");
+            let status = git.status().unwrap();
+            assert!(status.success(), "git submodule update failed: {status}");
         }
 
         (prj, test_cmd)
@@ -290,12 +307,24 @@ pub fn initialize(target: &Path) {
                 ..Default::default()
             });
 
-            // Checkout forge-std.
+            // Pin the checkout, lockfile, and Git index so missing-dependency recovery retains
+            // the fixture revision instead of restoring the latest release selected by init.
+            cmd.forge_fuse()
+                .args(["update", &format!("lib/forge-std@rev={FORGE_STD_REVISION}")])
+                .assert_success();
             let output = Command::new("git")
                 .current_dir(prj.root().join("lib/forge-std"))
-                .args(["checkout", FORGE_STD_REVISION])
+                .args(["rev-parse", "HEAD"])
                 .output()
-                .expect("failed to checkout forge-std");
+                .expect("failed to read forge-std revision");
+            assert!(output.status.success(), "{output:#?}");
+            assert_eq!(String::from_utf8(output.stdout).unwrap().trim(), FORGE_STD_REVISION);
+
+            let output = Command::new("git")
+                .current_dir(prj.root())
+                .args(["add", "lib/forge-std"])
+                .output()
+                .expect("failed to stage pinned forge-std revision");
             assert!(output.status.success(), "{output:#?}");
 
             // Build the project.

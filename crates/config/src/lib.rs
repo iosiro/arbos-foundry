@@ -47,7 +47,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -2087,13 +2087,28 @@ impl Config {
     /// Clears the foundry cache for `chain` and `block`.
     pub fn clean_foundry_block_cache(chain: Chain, block: u64) -> eyre::Result<()> {
         if let Some(cache_dir) = Self::foundry_block_cache_dir(chain, block) {
-            let path = cache_dir.as_path();
-            let _ = fs::remove_dir_all(path);
+            let _ = Self::remove_block_cache(&cache_dir);
         } else {
             eyre::bail!("failed to get foundry_block_cache_dir");
         }
 
         Ok(())
+    }
+
+    /// Removes both the canonical block cache and its legacy-file compatibility directory.
+    fn remove_block_cache(cache_dir: &Path) -> Vec<(PathBuf, io::Error)> {
+        let mut failures = Vec::new();
+        for path in [cache_dir.to_path_buf(), cache_dir.with_extension("cache")] {
+            let result = fs::symlink_metadata(&path).and_then(|metadata| {
+                if metadata.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) }
+            });
+            if let Err(err) = result
+                && err.kind() != io::ErrorKind::NotFound
+            {
+                failures.push((path, err));
+            }
+        }
+        failures
     }
 
     /// Clears the foundry etherscan cache.
@@ -2168,24 +2183,76 @@ impl Config {
     /// The path provided to this function should point to a cached chain folder.
     fn get_cached_blocks(chain_path: &Path) -> eyre::Result<Vec<(String, u64)>> {
         let mut blocks = vec![];
-        if !chain_path.exists() {
+        let Some(entries) = Self::ignore_not_found(chain_path.read_dir())? else {
             return Ok(blocks);
-        }
-        for block in chain_path.read_dir()?.flatten() {
-            let file_type = block.file_type()?;
-            let file_name = block.file_name();
-            let filepath = if file_type.is_dir() {
-                block.path().join("storage.json")
-            } else if file_type.is_file()
-                && file_name.to_string_lossy().chars().all(char::is_numeric)
-            {
-                block.path()
-            } else {
+        };
+        for block in entries {
+            let Some(block) = Self::ignore_not_found(block)? else {
                 continue;
             };
-            blocks.push((file_name.to_string_lossy().into_owned(), fs::metadata(filepath)?.len()));
+            if let Some(block) = Self::get_cached_block(block)? {
+                blocks.push(block);
+            }
         }
         Ok(blocks)
+    }
+
+    fn get_cached_block(block: fs::DirEntry) -> eyre::Result<Option<(String, u64)>> {
+        let file_name = block.file_name();
+        let Some(metadata) = Self::ignore_not_found(fs::symlink_metadata(block.path()))? else {
+            return Ok(None);
+        };
+        let size = if metadata.is_dir() {
+            let Some(cache_files) = Self::ignore_not_found(block.path().read_dir())? else {
+                return Ok(None);
+            };
+            let mut size = 0;
+            for cache_file in cache_files {
+                let Some(cache_file) = Self::ignore_not_found(cache_file)? else {
+                    continue;
+                };
+                size += Self::get_cache_file_size(cache_file)?.unwrap_or_default();
+            }
+            if size == 0 {
+                return Ok(None);
+            }
+            size
+        } else if metadata.is_file() && file_name.to_string_lossy().chars().all(char::is_numeric) {
+            metadata.len()
+        } else {
+            return Ok(None);
+        };
+        Ok(Some((file_name.to_string_lossy().into_owned(), size)))
+    }
+
+    fn get_cache_file_size(cache_file: fs::DirEntry) -> eyre::Result<Option<u64>> {
+        let Some(metadata) = Self::ignore_not_found(fs::symlink_metadata(cache_file.path()))?
+        else {
+            return Ok(None);
+        };
+        let cache_file_name = cache_file.file_name();
+        let cache_file_name = cache_file_name.to_string_lossy();
+        let cache_file_name = cache_file_name.strip_prefix("rpc-").unwrap_or(&cache_file_name);
+        if !metadata.is_file()
+            || (cache_file_name != "storage.json"
+                && !cache_file_name
+                    .strip_prefix("storage-")
+                    .and_then(|name| name.strip_suffix(".json"))
+                    .is_some_and(|hash| {
+                        hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit())
+                    }))
+        {
+            return Ok(None);
+        }
+        Ok(Some(metadata.len()))
+    }
+
+    fn ignore_not_found<T>(result: io::Result<T>) -> eyre::Result<Option<T>> {
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// The path provided to this function should point to the etherscan cache for a chain.
@@ -4928,6 +4995,50 @@ mod tests {
     }
 
     #[test]
+    fn fork_cache_clean_removes_both_block_layouts() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let unrelated = chain_dir.path().join("99");
+        fs::write(&unrelated, b"keep")?;
+        for legacy in [false, true] {
+            let block = chain_dir.path().join(if legacy { "42" } else { "43" });
+            if legacy {
+                fs::write(&block, b"legacy cache")?;
+            } else {
+                fs::create_dir(&block)?;
+                fs::write(block.join("storage.json"), b"evm cache")?;
+                fs::write(block.join("rpc-storage.json"), b"rpc cache")?;
+            }
+            let compatibility_dir = block.with_extension("cache");
+            fs::create_dir(&compatibility_dir)?;
+            fs::write(compatibility_dir.join("rpc-storage.json"), b"new cache")?;
+
+            assert!(Config::remove_block_cache(&block).is_empty());
+            assert!(!block.try_exists()?);
+            assert!(!compatibility_dir.try_exists()?);
+            assert!(Config::remove_block_cache(&block).is_empty());
+            assert_eq!(fs::read(&unrelated)?, b"keep");
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fork_cache_clean_does_not_follow_symlinks() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let target = tempdir()?;
+        let block = chain_dir.path().join("42");
+        fs::write(target.path().join("storage.json"), b"keep")?;
+        std::os::unix::fs::symlink(target.path(), &block)?;
+        std::os::unix::fs::symlink(target.path(), block.with_extension("cache"))?;
+
+        assert!(Config::remove_block_cache(&block).is_empty());
+        assert!(fs::symlink_metadata(&block).is_err());
+        assert!(fs::symlink_metadata(block.with_extension("cache")).is_err());
+        assert_eq!(fs::read(target.path().join("storage.json"))?, b"keep");
+        Ok(())
+    }
+
+    #[test]
     fn list_cached_blocks() -> eyre::Result<()> {
         fn fake_block_cache(chain_path: &Path, block_number: &str, size_bytes: usize) {
             let block_path = chain_path.join(block_number);
@@ -4971,6 +5082,84 @@ mod tests {
         assert_eq!(block3.1, 900);
 
         chain_dir.close()?;
+        Ok(())
+    }
+
+    #[test]
+    fn fork_cache_listing_supports_cache_layouts() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        fs::write(chain_dir.path().join("1"), [0; 11])?;
+        for directory in ["1.cache", "2", "3", "4"] {
+            fs::create_dir(chain_dir.path().join(directory))?;
+        }
+        let endpoint = "0".repeat(64);
+        fs::write(chain_dir.path().join("1.cache/rpc-storage.json"), [0; 20])?;
+        fs::write(chain_dir.path().join(format!("1.cache/storage-{endpoint}.json")), [0; 30])?;
+        fs::write(chain_dir.path().join(format!("2/storage-{endpoint}.json")), [0; 40])?;
+        fs::write(chain_dir.path().join(format!("2/rpc-storage-{endpoint}.json")), [0; 50])?;
+        fs::write(chain_dir.path().join("4/rpc-storage.json"), [0; 60])?;
+        fs::write(chain_dir.path().join("4/rpc-storage-backup.json"), [0; 100])?;
+
+        let mut blocks = Config::get_cached_blocks(chain_dir.path())?;
+        blocks.sort();
+        assert_eq!(
+            blocks,
+            vec![
+                ("1".to_string(), 11),
+                ("1.cache".to_string(), 50),
+                ("2".to_string(), 90),
+                ("4".to_string(), 60),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn list_cached_blocks_ignores_removed_entries() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let block_path = chain_dir.path().join("1");
+        fs::create_dir(&block_path)?;
+        File::create(block_path.join("storage.json"))?;
+
+        let block = fs::read_dir(chain_dir.path())?.next().unwrap()?;
+        let cache_file = fs::read_dir(&block_path)?.next().unwrap()?;
+        fs::remove_dir_all(block_path)?;
+
+        assert!(Config::get_cached_block(block)?.is_none());
+        assert!(Config::get_cache_file_size(cache_file)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn cache_listing_propagates_other_errors() -> eyre::Result<()> {
+        let cache_file = tempfile::NamedTempFile::new()?;
+        let err = Config::get_cached_blocks(cache_file.path()).unwrap_err();
+        assert_eq!(err.downcast_ref::<io::Error>().unwrap().kind(), io::ErrorKind::NotADirectory);
+        let err =
+            Config::ignore_not_found::<()>(Err(io::Error::from(io::ErrorKind::PermissionDenied)))
+                .unwrap_err();
+        assert_eq!(
+            err.downcast_ref::<io::Error>().unwrap().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_cached_blocks_ignores_symlinks() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let target_dir = tempdir()?;
+        fs::write(target_dir.path().join("storage.json"), [0; 10])?;
+        std::os::unix::fs::symlink(target_dir.path(), chain_dir.path().join("1"))?;
+
+        let block_path = chain_dir.path().join("2");
+        fs::create_dir(&block_path)?;
+        let target_file = tempfile::NamedTempFile::new()?;
+        fs::write(target_file.path(), [0; 10])?;
+        std::os::unix::fs::symlink(target_file.path(), block_path.join("storage.json"))?;
+
+        assert!(Config::get_cached_blocks(chain_dir.path())?.is_empty());
         Ok(())
     }
 

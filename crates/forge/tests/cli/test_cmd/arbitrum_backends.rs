@@ -121,7 +121,7 @@ forgetest_init!(test_stylus_block_cache_gas, |prj, cmd| {
     for (name, wat) in [
         ("foundry_stylus_program.wasm", wat.clone()),
         ("foundry_stylus_debug.wasm", {
-            let mut distinct = wat.clone();
+            let mut distinct = wat;
             distinct.insert_str(distinct.rfind(')').unwrap(), "(func (export \"distinct\"))");
             distinct
         }),

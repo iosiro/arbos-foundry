@@ -351,6 +351,7 @@ impl Executor {
             return;
         }
 
+        self.env.evm_env.chain.arbos_initialized = true;
         let changes = {
             let env = &self.env;
             let mut context = ArbitrumContext {
