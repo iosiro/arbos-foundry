@@ -16,6 +16,10 @@ forge-script: minor
 forge-verify: minor
 ---
 
+Release arbos-foundry 0.3.0 on the updated upstream backend architecture, following
+the 0.2.0 ArbOS compatibility release. Use the arbos-foundry project version for
+workspace packages and CLI version output independently of the upstream base.
+
 Integrate ArbOS execution with the EVM factory architecture, retaining Stylus
 deployment, configuration, tracing, and nested-call support on the updated
 Foundry and REVM stack. Preserve existing ArbOS state when applying local Stylus
