@@ -3,7 +3,7 @@
 //! The design is similar to the single `SharedBackend`, `BackendHandler` but supports multiple
 //! concurrently active pairs at once.
 
-use super::{CreateFork, ResolvedFork};
+use super::{CreateFork, ResolvedFork, fork_cache_file};
 use crate::{FoundryBlock, opts::ForkContext};
 use alloy_eips::BlockNumHash;
 use alloy_evm::EvmEnv;
@@ -11,7 +11,8 @@ use alloy_network::{AnyNetwork, Network};
 use alloy_primitives::{U256, map::HashMap};
 use foundry_config::Config;
 use foundry_fork_db::{
-    BackendHandler, BlockchainDb, ForkBlock, ForkBlockEnv, SharedBackend, cache::BlockchainDbMeta,
+    BackendHandler, BlockchainDb, ForkBlock, ForkBlockEnv, SharedBackend,
+    cache::{BlockHashMode, BlockchainDbMeta},
 };
 use futures::{
     FutureExt, StreamExt,
@@ -76,6 +77,13 @@ impl ForkId {
         let mut id = Self::new_with_context(url, Some(fork.number()), Some(&fork.context())).0;
         write!(id, "#{}:{}", fork.hash(), fork.source_id()).unwrap();
         Self(id)
+    }
+
+    fn with_hash_mode(mut self, mode: BlockHashMode) -> Self {
+        if mode == BlockHashMode::Rpc {
+            self.0.push_str("#hash=rpc");
+        }
+        self
     }
 
     /// Returns the identifier of the fork.
@@ -176,9 +184,18 @@ impl<
     ///
     /// If no matching fork backend exists it will be created.
     pub fn create_fork(&self, fork: CreateFork) -> eyre::Result<ForkResult<N, SPEC, BLOCK>> {
+        self.create_fork_with_hash_mode(fork, BlockHashMode::default())
+    }
+
+    /// Creates a fork in the requested database hash domain, retained across subsequent rolls.
+    pub fn create_fork_with_hash_mode(
+        &self,
+        fork: CreateFork,
+        mode: BlockHashMode,
+    ) -> eyre::Result<ForkResult<N, SPEC, BLOCK>> {
         trace!("Creating new fork, url={}, block={:?}", fork.url, fork.evm_opts.fork_block_number);
         let (sender, rx) = oneshot_channel();
-        let req = Request::CreateFork(Box::new(fork), sender);
+        let req = Request::CreateFork(Box::new(fork), mode, sender);
         self.handler.clone().try_send(req).map_err(|e| eyre::eyre!("{:?}", e))?;
         rx.recv()?
     }
@@ -281,7 +298,7 @@ type GetEvmEnvSender<SPEC, BLOCK> = OneshotSender<Option<EvmEnv<SPEC, BLOCK>>>;
 #[derive(Debug)]
 enum Request<N: Network, SPEC, BLOCK: ForkBlockEnv> {
     /// Creates a new ForkBackend.
-    CreateFork(Box<CreateFork>, CreateSender<N, SPEC, BLOCK>),
+    CreateFork(Box<CreateFork>, BlockHashMode, CreateSender<N, SPEC, BLOCK>),
     /// Returns the Fork backend for the `ForkId` if it exists.
     GetFork(ForkId, OneshotSender<Option<SharedBackend<N, BLOCK>>>),
     /// Adjusts the block that's being forked, by creating a new fork at the new block.
@@ -370,18 +387,26 @@ impl<
         None
     }
 
-    fn create_fork(&mut self, fork: CreateFork, sender: CreateSender<N, SPEC, BLOCK>) {
-        self.create_fork_with_identity(fork, None, sender);
+    fn create_fork(
+        &mut self,
+        fork: CreateFork,
+        mode: BlockHashMode,
+        sender: CreateSender<N, SPEC, BLOCK>,
+    ) {
+        self.create_fork_with_identity(fork, mode, None, sender);
     }
 
     fn create_fork_with_identity(
         &mut self,
         fork: CreateFork,
+        mode: BlockHashMode,
         expected_identity: Option<ForkContext>,
         sender: CreateSender<N, SPEC, BLOCK>,
     ) {
-        let resolved_id =
-            fork.resolved.as_ref().map(|resolved| ForkId::resolved(&fork.url, resolved));
+        let resolved_id = fork
+            .resolved
+            .as_ref()
+            .map(|resolved| ForkId::resolved(&fork.url, resolved).with_hash_mode(mode));
         trace!(?resolved_id, "creating fork");
 
         // Only deduplicate requests that already carry an exact identity. Unresolved requests at
@@ -394,9 +419,10 @@ impl<
         }
 
         // Need to create a new fork.
-        let task_id =
-            resolved_id.unwrap_or_else(|| ForkId::new(&fork.url, fork.evm_opts.fork_block_number));
-        let task = Box::pin(create_fork(fork, expected_identity));
+        let task_id = resolved_id.unwrap_or_else(|| {
+            ForkId::new(&fork.url, fork.evm_opts.fork_block_number).with_hash_mode(mode)
+        });
+        let task = Box::pin(create_fork(fork, mode, expected_identity));
         self.pending_tasks.push(ForkTask::Create(task, task_id, sender, Vec::new()));
     }
 
@@ -451,7 +477,7 @@ impl<
 
     fn on_request(&mut self, req: Request<N, SPEC, BLOCK>) {
         match req {
-            Request::CreateFork(fork, sender) => self.create_fork(*fork, sender),
+            Request::CreateFork(fork, mode, sender) => self.create_fork(*fork, mode, sender),
             Request::GetFork(fork_id, sender) => {
                 let fork = self.forks.get(&fork_id).map(|f| f.backend.clone());
                 let _ = sender.send(fork);
@@ -464,7 +490,12 @@ impl<
                     opts.evm_opts.fork_block_number = Some(block);
                     opts.evm_opts.fork_block_number_is_inferred = false;
                     opts.resolved = None;
-                    self.create_fork_with_identity(opts, expected_identity, sender)
+                    self.create_fork_with_identity(
+                        opts,
+                        fork.block_hash_mode,
+                        expected_identity,
+                        sender,
+                    )
                 } else {
                     let _ =
                         sender.send(Err(eyre::eyre!("No matching fork exists for {}", fork_id)));
@@ -482,7 +513,7 @@ impl<
                             .expect("an exact roll requires an existing resolved fork")
                             .at_block(block),
                     );
-                    self.create_fork(opts, sender)
+                    self.create_fork(opts, fork.block_hash_mode, sender)
                 } else {
                     let _ =
                         sender.send(Err(eyre::eyre!("No matching fork exists for {}", fork_id)));
@@ -623,6 +654,8 @@ impl<
 /// Tracks the created Fork
 #[derive(Debug, Clone)]
 struct CreatedFork<N: Network, SPEC, BLOCK: ForkBlockEnv> {
+    /// Database hash domain retained when this fork advances.
+    block_hash_mode: BlockHashMode,
     /// How the fork was initially created.
     opts: CreateFork,
     /// The resolved EVM environment (fetched from the provider).
@@ -639,8 +672,9 @@ impl<N: Network, SPEC, BLOCK: ForkBlockEnv> CreatedFork<N, SPEC, BLOCK> {
         opts: CreateFork,
         evm_env: EvmEnv<SPEC, BLOCK>,
         backend: SharedBackend<N, BLOCK>,
+        block_hash_mode: BlockHashMode,
     ) -> Self {
-        Self { opts, evm_env, backend, num_senders: Arc::new(AtomicUsize::new(1)) }
+        Self { opts, evm_env, backend, block_hash_mode, num_senders: Arc::new(AtomicUsize::new(1)) }
     }
 
     /// Increment senders and return unique identifier of the fork.
@@ -688,6 +722,7 @@ async fn create_fork<
     BLOCK: FoundryBlock + ForkBlockEnv + Default,
 >(
     mut fork: CreateFork,
+    mode: BlockHashMode,
     expected_identity: Option<ForkContext>,
 ) -> eyre::Result<(ForkId, CreatedFork<N, SPEC, BLOCK>, BackendHandler<N, BLOCK>)> {
     // Ensure evm_opts reflects the fork URL (may differ from the resolved CreateFork url when
@@ -753,11 +788,13 @@ async fn create_fork<
     }
     let number = resolved.number();
     let meta = BlockchainDbMeta::new(evm_env.block_env.clone(), fork.url.clone())
-        .with_fork_identity(resolved.hash(), resolved.source_id());
+        .with_fork_identity(resolved.hash(), resolved.source_id())
+        .with_block_hash_mode(mode);
 
     // Determine the cache path if caching is enabled.
     let cache_path = if fork.enable_caching {
         Config::foundry_block_cache_dir(fork_context.source_chain_id, number)
+            .map(|path| fork_cache_file(path, "storage.json", mode))
     } else {
         None
     };
@@ -770,9 +807,9 @@ async fn create_fork<
         resolved.hash(),
     );
     let (backend, handler) = SharedBackend::new_with_anchor(provider, db, anchor)?;
-    let fork_id = ForkId::resolved(&fork.url, &resolved);
+    let fork_id = ForkId::resolved(&fork.url, &resolved).with_hash_mode(mode);
     fork.resolved = Some(resolved);
-    let fork = CreatedFork::new(fork, evm_env, backend);
+    let fork = CreatedFork::new(fork, evm_env, backend, mode);
 
     Ok((fork_id, fork, handler))
 }
@@ -827,5 +864,25 @@ mod tests {
 
         assert_ne!(ForkId::resolved(url, &first), ForkId::resolved(url, &replacement));
         assert_ne!(ForkId::resolved(url, &first), ForkId::resolved(url, &authenticated));
+    }
+
+    #[test]
+    fn fork_ids_separate_database_hash_domains() {
+        let url = "http://localhost:8545";
+        let fork = ResolvedFork::new(
+            url,
+            None,
+            None,
+            Some(1),
+            BlockNumHash::new(1, B256::with_last_byte(1)),
+            context(1),
+        );
+        for id in [ForkId::new(url, Some(1)), ForkId::resolved(url, &fork)] {
+            assert_eq!(id.clone().with_hash_mode(BlockHashMode::Evm), id);
+            assert_ne!(
+                id.clone().with_hash_mode(BlockHashMode::Rpc),
+                id.with_hash_mode(BlockHashMode::Evm)
+            );
+        }
     }
 }

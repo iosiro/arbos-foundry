@@ -43,8 +43,9 @@ use foundry_common::{
 };
 use foundry_config::{Config, stylus::StylusConfig};
 use foundry_evm::{
-    backend::{BlockchainDb, BlockchainDbMeta, ForkBlock, SharedBackend},
+    backend::{BlockHashMode, BlockchainDb, BlockchainDbMeta, ForkBlock, SharedBackend},
     constants::DEFAULT_CREATE2_DEPLOYER,
+    fork::fork_cache_file,
     hardfork::FoundryHardfork,
     utils::{apply_chain_and_block_specific_env_changes_for_chain, block_env_from_header},
 };
@@ -1195,7 +1196,14 @@ impl NodeConfig {
     ///
     /// See also [`Config::foundry_block_cache_file`].
     pub fn block_cache_path(&self, block: u64) -> Option<PathBuf> {
-        self.block_cache_path_for_rpc(self.protocol_chain_id(), block, self.fork_urls.first()?)
+        let mode =
+            if self.networks.is_arbitrum() { BlockHashMode::Rpc } else { BlockHashMode::Evm };
+        self.block_cache_path_for_rpc(
+            self.protocol_chain_id(),
+            block,
+            self.fork_urls.first()?,
+            mode,
+        )
     }
 
     fn block_cache_path_for_rpc(
@@ -1203,16 +1211,18 @@ impl NodeConfig {
         source_chain_id: u64,
         block: u64,
         rpc_url: &str,
+        mode: BlockHashMode,
     ) -> Option<PathBuf> {
         if self.no_storage_caching || self.fork_urls.is_empty() {
             return None;
         }
 
         let rpc_url_hash = hex::encode(keccak256(rpc_url));
-        Some(
-            Config::foundry_block_cache_file(source_chain_id, block)?
-                .with_file_name(format!("storage-{rpc_url_hash}.json")),
-        )
+        Some(fork_cache_file(
+            Config::foundry_block_cache_dir(source_chain_id, block)?,
+            &format!("storage-{rpc_url_hash}.json"),
+            mode,
+        ))
     }
 
     /// Sets whether to disable the default create2 deployer
@@ -1245,7 +1255,7 @@ impl NodeConfig {
         self
     }
 
-    pub fn with_stylus_config(mut self, stylus: StylusConfig) -> Self {
+    pub const fn with_stylus_config(mut self, stylus: StylusConfig) -> Self {
         self.stylus = stylus;
         self
     }
@@ -2012,9 +2022,8 @@ latest block number: {latest_block}"
         let blob_excess_gas = block.header.excess_blob_gas().or_else(|| {
             // Pre-Cancun headers, Polygon Bor headers, and Arbitrum Nitro headers omit the blob
             // fields. REVM still requires a valid blob environment when executing with the Cancun
-            // spec; zero is the neutral excess-gas value. On Nitro this makes `BLOBBASEFEE` return
-            // `1`, although Nitro rejects the opcode; matching that requires Arbitrum-specific EVM
-            // handling.
+            // spec; zero is the neutral excess-gas value. The Arbitrum instruction provider
+            // independently rejects BLOBBASEFEE, matching Nitro.
             (effective_spec >= SpecId::CANCUN
                 && ((source_may_omit_blob_fields && block.header.blob_gas_used().is_none())
                     || Chain::from_id(source_chain_id).is_polygon()
@@ -2071,10 +2080,19 @@ latest block number: {latest_block}"
         }
 
         let source_id = fork_source_id(&self.fork_urls, &self.fork_headers);
+        // Resolve the database hash domain before constructing the node's execution backend.
+        // Arbitrum execution reads L1 BLOCKHASH from ArbOS storage and L2 ArbSys hashes from DB.
+        let hash_mode =
+            if self.networks.is_arbitrum() { BlockHashMode::Rpc } else { BlockHashMode::Evm };
         let meta = BlockchainDbMeta::new(cache_block_env, eth_rpc_url.clone())
-            .with_fork_identity(block_hash, source_id);
-        let cache_path =
-            self.block_cache_path_for_rpc(source_chain_id, fork_block_number, &eth_rpc_url);
+            .with_fork_identity(block_hash, source_id)
+            .with_block_hash_mode(hash_mode);
+        let cache_path = self.block_cache_path_for_rpc(
+            source_chain_id,
+            fork_block_number,
+            &eth_rpc_url,
+            hash_mode,
+        );
         let block_chain_db = BlockchainDb::new(meta, cache_path);
 
         // After bootstrap, rebuild the provider with round-robin if multiple URLs are
@@ -2549,9 +2567,41 @@ mod tests {
 
         assert_eq!(config.block_cache_path(block), expected);
         assert_ne!(
-            config.block_cache_path_for_rpc(143, block, rpc_url),
-            config.block_cache_path_for_rpc(143, block, "http://localhost:8546")
+            config.block_cache_path_for_rpc(143, block, rpc_url, BlockHashMode::Evm),
+            config.block_cache_path_for_rpc(
+                143,
+                block,
+                "http://localhost:8546",
+                BlockHashMode::Evm
+            )
         );
+    }
+
+    #[test]
+    fn fork_cache_paths_separate_hash_domains() {
+        let rpc_url = "http://localhost:8545";
+        let mut config = NodeConfig::test().with_eth_rpc_url(Some(rpc_url.to_string()));
+        let block = 42;
+        let evm = config.block_cache_path(block).unwrap();
+        config.networks = NetworkConfigs::with_arbitrum();
+        let rpc = config.block_cache_path(block).unwrap();
+        assert_ne!(evm, rpc);
+        assert_eq!(evm.parent(), rpc.parent());
+        assert_eq!(
+            rpc.file_name().unwrap().to_str().unwrap(),
+            format!("rpc-storage-{}.json", hex::encode(keccak256(rpc_url)))
+        );
+        assert_eq!(
+            Some(rpc),
+            config.block_cache_path_for_rpc(
+                config.protocol_chain_id(),
+                block,
+                rpc_url,
+                BlockHashMode::Rpc
+            )
+        );
+        config.no_storage_caching = true;
+        assert!(config.block_cache_path(block).is_none());
     }
 
     #[test]

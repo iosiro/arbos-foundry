@@ -83,6 +83,15 @@ pub fn is_known_system_sender(sender: Address) -> bool {
     .contains(&sender)
 }
 
+/// Identifies system transactions handled by the legacy L2 replay heuristic.
+///
+/// The sender heuristic applies only to Ethereum-shaped envelopes. Native transaction types
+/// must reach the selected network's decoder and executor, or fail explicitly if unsupported;
+/// skipping them based on their sender can silently omit protocol state transitions.
+pub fn is_legacy_system_transaction(sender: Address, tx_type: u8) -> bool {
+    tx_type == SYSTEM_TRANSACTION_TYPE || (tx_type <= 4 && is_known_system_sender(sender))
+}
+
 pub fn is_impersonated_tx(tx: &AnyTxEnvelope) -> bool {
     if let AnyTxEnvelope::Ethereum(tx) = tx {
         return is_impersonated_sig(tx.signature(), tx.ty());
@@ -99,6 +108,19 @@ pub fn is_impersonated_sig(sig: &Signature, ty: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_envelopes_are_not_skipped_by_the_sender_heuristic() {
+        for sender in [ARBITRUM_SENDER, Address::ZERO, MONAD_SYSTEM_ADDRESS] {
+            assert!(is_legacy_system_transaction(sender, 0));
+            assert!(is_legacy_system_transaction(sender, 2));
+            assert!(is_legacy_system_transaction(sender, SYSTEM_TRANSACTION_TYPE));
+            for ty in [0x64, 0x65, 0x66, 0x68, 0x69, 0x6a, 0x78, 0xff] {
+                assert!(!is_legacy_system_transaction(sender, ty));
+            }
+        }
+        assert!(!is_legacy_system_transaction(Address::repeat_byte(0x42), 2));
+    }
 
     #[test]
     fn test_constant_sender() {

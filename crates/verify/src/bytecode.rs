@@ -8,7 +8,7 @@ use crate::{
     },
     verify::VerifierArgs,
 };
-use alloy_consensus::Transaction as ConsensusTransaction;
+use alloy_consensus::{BlockHeader, Transaction as ConsensusTransaction};
 use alloy_network::{AnyNetwork, AnyRpcBlock};
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, hex};
 use alloy_provider::{
@@ -21,18 +21,16 @@ use alloy_rpc_types::{
     trace::parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use clap::{Parser, ValueHint};
-use eyre::{Context, OptionExt, Result};
+#[cfg(feature = "monad")]
+use eyre::Context;
+use eyre::{OptionExt, Result};
 use foundry_cli::{
     opts::EtherscanOpts,
     utils::{self, LoadConfig, read_constructor_args_file},
 };
-use foundry_common::{
-    SYSTEM_TRANSACTION_TYPE, is_known_system_sender, provider::ProviderBuilder, shell,
-};
+use foundry_common::{is_legacy_system_transaction, provider::ProviderBuilder, shell};
 use foundry_compilers::info::ContractInfo;
 use foundry_config::{Chain, Config, figment, impl_figment_convert};
-#[cfg(feature = "monad")]
-use foundry_evm::core::evm::MonadEvmNetwork;
 #[cfg(feature = "optimism")]
 use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
@@ -45,10 +43,12 @@ use foundry_evm::{
             FoundryEvmNetwork, TempoEvmNetwork, TxEnvFor,
         },
     },
-    executors::{EvmError, ExecutorBuilder, TracingExecutor},
+    executors::{Executor, ExecutorBuilder},
     opts::{EvmOpts, ForkEndpointIdentity},
     utils::apply_chain_specific_tx_replay_env_changes_for_chain,
 };
+#[cfg(feature = "monad")]
+use foundry_evm::{core::evm::MonadEvmNetwork, executors::EvmError};
 use foundry_evm_networks::NetworkVariant;
 use revm::{context::Block as _, state::AccountInfo};
 use std::{path::PathBuf, pin::Pin};
@@ -934,7 +934,7 @@ type ReplayBlockFn<FEN> = for<'a> fn(
     Option<&'a AnyRpcBlock>,
     u64,
     B256,
-    &'a mut TracingExecutor<FEN>,
+    &'a mut Executor<FEN>,
     &'a EvmEnvFor<FEN>,
 ) -> ReplayBlockFuture<'a, FEN>;
 
@@ -944,7 +944,7 @@ fn replay_block_transactions<'a, FEN: FoundryEvmNetwork>(
     block: Option<&'a AnyRpcBlock>,
     _block_number: u64,
     target_hash: B256,
-    executor: &'a mut TracingExecutor<FEN>,
+    executor: &'a mut Executor<FEN>,
     evm_env: &'a EvmEnvFor<FEN>,
 ) -> ReplayBlockFuture<'a, FEN> {
     Box::pin(async move {
@@ -957,24 +957,26 @@ fn replay_block_transactions<'a, FEN: FoundryEvmNetwork>(
             .find(|tx| tx.tx_hash() == target_hash)
             .ok_or_else(|| eyre::eyre!("transaction {target_hash:?} is missing from its block"))?;
         let target_tx_env = TxEnvFor::<FEN>::from_any_rpc_transaction(target_tx)?;
-
+        let mut replay = Vec::new();
         for tx in txs {
             trace!("replay tx::: {}", tx.tx_hash());
             if tx.tx_hash() == target_hash {
                 break;
             }
-            if is_known_system_sender(tx.from())
-                || tx.transaction_type() == Some(SYSTEM_TRANSACTION_TYPE)
-            {
+            if is_legacy_system_transaction(tx.from(), tx.transaction_type().unwrap_or_default()) {
                 continue;
             }
 
             let tx_env = TxEnvFor::<FEN>::from_any_rpc_transaction(tx)?;
-            let chain_context = ChainFor::<FEN>::for_transaction(&tx_env);
-            execute_replay_transaction(executor, evm_env, tx, tx_env, chain_context)?;
+            replay.push((tx.tx_hash(), tx_env));
         }
 
-        Ok(Some(ChainFor::<FEN>::for_transaction(&target_tx_env)))
+        let chain_context = ChainFor::<FEN>::for_rpc_block(
+            &target_tx_env,
+            block.header().number(),
+            block.header().parent_hash(),
+        );
+        executor.replay_ordinary_block_prefix(evm_env.clone(), replay, chain_context).map(Some)
     })
 }
 
@@ -985,7 +987,7 @@ fn replay_monad_block_transactions<'a>(
     block: Option<&'a AnyRpcBlock>,
     block_number: u64,
     target_hash: B256,
-    executor: &'a mut TracingExecutor<MonadEvmNetwork>,
+    executor: &'a mut Executor<MonadEvmNetwork>,
     evm_env: &'a EvmEnvFor<MonadEvmNetwork>,
 ) -> ReplayBlockFuture<'a, MonadEvmNetwork> {
     Box::pin(async move {
@@ -1009,9 +1011,7 @@ fn replay_monad_block_transactions<'a>(
 
             let tx_env = TxEnvFor::<MonadEvmNetwork>::from_any_rpc_transaction(tx)?;
             let chain_context = block_context.transaction(index);
-            if is_known_system_sender(tx.from())
-                || tx.transaction_type() == Some(SYSTEM_TRANSACTION_TYPE)
-            {
+            if is_legacy_system_transaction(tx.from(), tx.transaction_type().unwrap_or_default()) {
                 let _ = executor
                     .try_transact_system_replay_with_env_and_context(
                         evm_env.clone(),
@@ -1035,8 +1035,9 @@ fn replay_monad_block_transactions<'a>(
     })
 }
 
+#[cfg(feature = "monad")]
 fn execute_replay_transaction<FEN: FoundryEvmNetwork>(
-    executor: &mut TracingExecutor<FEN>,
+    executor: &mut Executor<FEN>,
     evm_env: &EvmEnvFor<FEN>,
     tx: &alloy_network::AnyRpcTransaction,
     tx_env: TxEnvFor<FEN>,
@@ -1087,6 +1088,75 @@ async fn monad_block_context<FEN: FoundryEvmNetwork>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_network::{AnyHeader, AnyRpcHeader, AnyRpcTransaction};
+    use alloy_rpc_types::Block;
+    use foundry_evm::backend::Backend;
+    use foundry_evm_networks::NetworkConfigs;
+    use revm::Database;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn arbitrum_bytecode_replay_preserves_rpc_block_context() {
+        let vectors: Vec<AnyRpcTransaction> = serde_json::from_str(include_str!(
+            "../../evm/core/testdata/arbitrum-native-transactions.json"
+        ))
+        .unwrap();
+        let parent_hash = B256::repeat_byte(0x42);
+        let history = alloy_primitives::address!("0000F90827F1C53a10cb7A02335B175320002935");
+
+        // Exercise the start-block transaction both in the replay prefix and as the target.
+        for internal_is_target in [false, true] {
+            let mut env = EvmEnvFor::<ArbitrumEvmNetwork>::default();
+            env.cfg_env.chain_id = 421_614;
+            env.block_env.number = U256::from(999);
+            env.block_env.basefee = 0;
+            let mut executor =
+                ExecutorBuilder::<ArbitrumEvmNetwork>::default().gas_limit(1 << 20).build(
+                    env.clone(),
+                    TxEnvFor::<ArbitrumEvmNetwork>::default(),
+                    Backend::spawn(None).unwrap(),
+                    NetworkConfigs::with_arbitrum(),
+                );
+            let unrelated_history =
+                executor.backend_mut().storage(history, U256::from(998)).unwrap();
+            let target = &vectors[usize::from(internal_is_target)];
+            let transactions = if internal_is_target {
+                vec![target.clone()]
+            } else {
+                vec![vectors[1].clone(), target.clone()]
+            };
+            let header = AnyHeader { number: 1, parent_hash, ..Default::default() };
+            let block = AnyRpcBlock::new(
+                Block::new(
+                    AnyRpcHeader::from_sealed(header.seal(B256::repeat_byte(0x43))),
+                    BlockTransactions::Full(transactions),
+                )
+                .into(),
+            );
+            let context = replay_block_transactions::<ArbitrumEvmNetwork>(
+                &Config::default(),
+                Some(&block),
+                1,
+                target.tx_hash(),
+                &mut executor,
+                &env,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let tx = TxEnvFor::<ArbitrumEvmNetwork>::from_any_rpc_transaction(target).unwrap();
+            let result = executor.transact_with_env_and_context(env, tx, context).unwrap();
+            assert!(!result.reverted);
+            assert_eq!(
+                executor.backend_mut().storage(history, U256::ZERO).unwrap(),
+                U256::from_be_bytes(parent_hash.0),
+                "incorrect RPC parent history with internal_is_target={internal_is_target}",
+            );
+            assert_eq!(
+                executor.backend_mut().storage(history, U256::from(998)).unwrap(),
+                unrelated_history,
+            );
+        }
+    }
 
     #[test]
     fn can_parse_tempo_network() {

@@ -2,6 +2,7 @@ use super::{fuzz::FuzzRunArgs, install, watch::WatchArgs};
 use crate::{
     MultiContractRunner, MultiContractRunnerBuilder, brutalizer,
     decode::decode_console_logs,
+    execution_config::TestExecutorBuilder,
     gas_report::GasReport,
     multi_runner::{
         FuzzFailureReplayConfig, FuzzMinimizeConfig, FuzzMinimizeEdgeIndices, FuzzMinimizeMode,
@@ -2626,7 +2627,7 @@ impl TestArgs {
         filter: &mut ProjectPathsAwareFilter,
         execution: TestExecutionOptions,
         resolved_fork: Option<&ResolvedFork>,
-        executor_builder: ExecutorBuilder<FEN>,
+        executor_builder: TestExecutorBuilder<FEN>,
     ) -> eyre::Result<(Libraries, TestOutcome)> {
         let verbosity = evm_opts.verbosity;
         let (evm_env, tx_env, fork) = if let Some(fork) = resolved_fork {
@@ -2645,7 +2646,7 @@ impl TestArgs {
 
         let config = Arc::new(config);
         let showmap = self.showmap_config()?;
-        let runner = MultiContractRunnerBuilder::new(config.clone(), execution.inline_config)
+        let mut runner = MultiContractRunnerBuilder::new(config.clone(), execution.inline_config)
             .set_debug(execution.should_debug)
             .set_decode_internal(execution.decode_internal)
             .set_record_all_steps(self.evm_profile.is_some())
@@ -2664,7 +2665,14 @@ impl TestArgs {
             .with_fuzz_input(execution.fuzz_input)
             .with_symbolic_artifact_replay(execution.replay_symbolic_artifact)
             .with_create2_deployer_available(create2_deployer_available)
-            .build::<FEN, MultiCompiler>(output, evm_env, tx_env, evm_opts, executor_builder)?;
+            .build::<FEN, MultiCompiler>(
+                output,
+                evm_env,
+                tx_env,
+                evm_opts,
+                executor_builder.executor,
+            )?;
+        runner.tcfg.execution_factories = executor_builder.inline_factories;
 
         let libraries = runner.libraries.clone();
         let outcome = self.run_tests_inner(runner, config, verbosity, filter, output).await?;
@@ -2677,7 +2685,7 @@ impl TestArgs {
         evm_opts: EvmOpts,
         output: &ProjectCompileOutput,
         options: FuzzMinimizeNetworkPassOptions,
-        executor_builder: ExecutorBuilder<FEN>,
+        executor_builder: TestExecutorBuilder<FEN>,
     ) -> eyre::Result<MultiContractRunner<FEN>> {
         let (evm_env, tx_env, fork) =
             evm_opts.env_resolved::<SpecFor<FEN>, BlockEnvFor<FEN>, TxEnvFor<FEN>>().await?;
@@ -2688,7 +2696,7 @@ impl TestArgs {
             evm_opts.can_use_create2_deployer_resolved(fork.as_ref()).await?;
 
         let config = Arc::new(config);
-        MultiContractRunnerBuilder::new(config.clone(), options.inline_config)
+        let mut runner = MultiContractRunnerBuilder::new(config.clone(), options.inline_config)
             .initial_balance(evm_opts.initial_balance)
             .sender(evm_opts.sender)
             .with_fork(evm_opts.get_fork_resolved(&config, evm_env.cfg_env.chain_id, fork.as_ref()))
@@ -2700,7 +2708,15 @@ impl TestArgs {
             .with_fuzz_only(self.fuzz_only.is_enabled())
             .with_fuzz_failure_replay(self.fuzz_failure_replay)
             .with_create2_deployer_available(create2_deployer_available)
-            .build::<FEN, MultiCompiler>(output, evm_env, tx_env, evm_opts, executor_builder)
+            .build::<FEN, MultiCompiler>(
+                output,
+                evm_env,
+                tx_env,
+                evm_opts,
+                executor_builder.executor,
+            )?;
+        runner.tcfg.execution_factories = executor_builder.inline_factories;
+        Ok(runner)
     }
 
     /// Dispatches `build_and_run_tests` to the correct network type based on `evm_opts.networks`.
@@ -2719,6 +2735,12 @@ impl TestArgs {
             NetworkDispatchKind::Arbitrum => {
                 let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
                     .stylus_config(evm_opts.stylus_config.clone());
+                let builder = TestExecutorBuilder::arbitrum(
+                    &config,
+                    &execution.inline_config,
+                    output,
+                    builder,
+                )?;
                 self.build_and_run_tests::<ArbitrumEvmNetwork>(
                     config,
                     evm_opts,
@@ -2738,7 +2760,7 @@ impl TestArgs {
                     filter,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<TempoEvmNetwork>::new(),
+                    ExecutorBuilder::<TempoEvmNetwork>::new().into(),
                 )
                 .await
             }
@@ -2751,7 +2773,7 @@ impl TestArgs {
                     filter,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<MonadEvmNetwork>::new(),
+                    ExecutorBuilder::<MonadEvmNetwork>::new().into(),
                 )
                 .await
             }
@@ -2764,7 +2786,7 @@ impl TestArgs {
                     filter,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<OpEvmNetwork>::new(),
+                    ExecutorBuilder::<OpEvmNetwork>::new().into(),
                 )
                 .await
             }
@@ -2776,7 +2798,7 @@ impl TestArgs {
                     filter,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<EthEvmNetwork>::new(),
+                    ExecutorBuilder::<EthEvmNetwork>::new().into(),
                 )
                 .await
             }
@@ -2796,6 +2818,12 @@ impl TestArgs {
             NetworkDispatchKind::Arbitrum => {
                 let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
                     .stylus_config(evm_opts.stylus_config.clone());
+                let builder = TestExecutorBuilder::arbitrum(
+                    &config,
+                    &options.inline_config,
+                    output,
+                    builder,
+                )?;
                 self.build_fuzz_minimize_runner::<ArbitrumEvmNetwork>(
                     config, evm_opts, output, options, builder,
                 )
@@ -2808,7 +2836,7 @@ impl TestArgs {
                     evm_opts,
                     output,
                     options,
-                    ExecutorBuilder::<TempoEvmNetwork>::new(),
+                    ExecutorBuilder::<TempoEvmNetwork>::new().into(),
                 )
                 .await
                 .map(|runner| fuzz_minimize_replay(runner, filter)),
@@ -2819,7 +2847,7 @@ impl TestArgs {
                     evm_opts,
                     output,
                     options,
-                    ExecutorBuilder::<MonadEvmNetwork>::new(),
+                    ExecutorBuilder::<MonadEvmNetwork>::new().into(),
                 )
                 .await
                 .map(|runner| fuzz_minimize_replay(runner, filter)),
@@ -2830,7 +2858,7 @@ impl TestArgs {
                     evm_opts,
                     output,
                     options,
-                    ExecutorBuilder::<OpEvmNetwork>::new(),
+                    ExecutorBuilder::<OpEvmNetwork>::new().into(),
                 )
                 .await
                 .map(|runner| fuzz_minimize_replay(runner, filter)),
@@ -2840,7 +2868,7 @@ impl TestArgs {
                     evm_opts,
                     output,
                     options,
-                    ExecutorBuilder::<EthEvmNetwork>::new(),
+                    ExecutorBuilder::<EthEvmNetwork>::new().into(),
                 )
                 .await
                 .map(|runner| fuzz_minimize_replay(runner, filter)),

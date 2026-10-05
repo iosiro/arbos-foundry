@@ -7,7 +7,7 @@ use foundry_cli::json::{JsonEnvelope, JsonError, JsonMessage, print_json};
 #[global_allocator]
 static ALLOC: foundry_cli::utils::Allocator = foundry_cli::utils::new_allocator();
 
-fn main() {
+pub(crate) fn main() {
     if let Err(err) = run() {
         if foundry_common::shell::is_json() {
             if let Some(err) = err.downcast_ref::<JsonError>() {

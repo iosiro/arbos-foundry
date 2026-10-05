@@ -1409,7 +1409,7 @@ dependencies = [
 [[package]]
 name = "arbos-revm"
 version = "0.1.0"
-source = "git+https://github.com/iosiro/arbos-revm?rev=dcce99cdb966c26dab09f6727fb3a0628e79c824#dcce99cdb966c26dab09f6727fb3a0628e79c824"
+source = "git+https://github.com/iosiro/arbos-revm?rev=1026cefd8747a3914854b29e4e567b20da795562#1026cefd8747a3914854b29e4e567b20da795562"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -1834,6 +1834,12 @@ dependencies = [
  "serde",
  "zeroize",
 ]
+
+[[package]]
+name = "ascii"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
 name = "async-compression"
@@ -3303,6 +3309,12 @@ dependencies = [
  "wasm-bindgen",
  "windows-link 0.2.1",
 ]
+
+[[package]]
+name = "chunked_transfer"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e4de3bc4ea267985becf712dc6d9eed8b04c953b3fcfb339ebc87acd9804901"
 
 [[package]]
 name = "ciborium"
@@ -6450,9 +6462,11 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-json-abi",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-sol-types",
+ "arbos-revm",
  "eyre",
  "foundry-cheatcodes",
  "foundry-common",
@@ -6541,6 +6555,7 @@ dependencies = [
  "revm-inspectors",
  "serde",
  "serde_json",
+ "tempfile",
  "tempo-alloy",
  "tempo-contracts",
  "tempo-evm",
@@ -6701,12 +6716,12 @@ dependencies = [
 [[package]]
 name = "foundry-fork-db"
 version = "0.27.0"
-source = "git+https://github.com/foundry-rs/foundry-core?rev=6ce81d5c491121c22b3912fb91455d4f2875439e#6ce81d5c491121c22b3912fb91455d4f2875439e"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types",
  "eyre",
  "futures",
@@ -6714,7 +6729,9 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
+ "tiny_http",
  "tokio",
  "tracing",
  "url",
@@ -13946,6 +13963,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
 dependencies = [
  "crunchy",
+]
+
+[[package]]
+name = "tiny_http"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "389915df6413a2e74fb181895f933386023c71110878cd0825588928e64cdc82"
+dependencies = [
+ "ascii",
+ "chunked_transfer",
+ "httpdate",
+ "log",
 ]
 
 [[package]]

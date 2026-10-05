@@ -82,6 +82,14 @@ impl ChiselSession {
         }
     }
 
+    /// Save a session and wait for its acknowledgement, not an earlier buffered prompt.
+    #[track_caller]
+    pub fn save(&mut self, id: &str) {
+        self.sendln_raw(&format!("!save {id}"));
+        self.expect(&format!("Saved session to cache with ID = {id}"));
+        self.expect_prompt();
+    }
+
     /// Send a line to the REPL without expecting the prompt to appear.
     ///
     /// You might want to call `expect_prompt` after this.

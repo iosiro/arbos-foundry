@@ -23,7 +23,7 @@ use crate::{
 use alloy_consensus::BlobTransactionSidecarVariant;
 use alloy_network::{Ethereum, Network, TransactionBuilder};
 use alloy_primitives::{
-    Address, B256, Bytes, Log, TxKind, U256, hex,
+    Address, B256, Bytes, Log, TxKind, U256, hex, keccak256,
     map::{AddressHashMap, HashMap, HashSet},
 };
 use alloy_rpc_types::AccessList;
@@ -59,7 +59,9 @@ use rand::Rng;
 use revm::{
     Inspector, JournalEntry,
     bytecode::opcode as op,
-    context::{Cfg, ContextTr, Host, JournalTr, Transaction, TransactionType, result::EVMError},
+    context::{
+        Block, Cfg, ContextTr, Host, JournalTr, Transaction, TransactionType, result::EVMError,
+    },
     context_interface::{CreateScheme, transaction::SignedAuthorization},
     handler::FrameResult,
     interpreter::{
@@ -374,6 +376,10 @@ pub struct EnvOverrides {
     pub gas_price: Option<u128>,
     /// Override for the `BLOBHASH` opcode (set via `vm.blobhashes`).
     pub blob_hashes: Option<Vec<B256>>,
+    /// Explicit BLOCKHASH results, independent of a database's native hash domain.
+    pub block_hashes: HashMap<u64, B256>,
+    /// Fill missing local history after a synthetic block-number roll.
+    pub synthetic_block_hashes: bool,
     /// `tx.gas_price` captured at snapshot time when no gas_price override was
     /// active. `sync_tx_after_env_override_restore` uses this to restore the
     /// real pre-override value (not hardcoded 0) on revert.
@@ -394,13 +400,19 @@ pub struct EnvOverrides {
     /// the index is still on top of the stack) for use in `step_end` (after
     /// the opcode has consumed it and pushed the looked-up hash).
     pending_blobhash_index: Option<u64>,
+    /// BLOCKHASH operand captured before the opcode replaces it with the result.
+    pending_blockhash_number: Option<U256>,
 }
 
 impl EnvOverrides {
     /// Whether any override is set.
     #[inline]
-    pub const fn is_any_set(&self) -> bool {
-        self.basefee.is_some() || self.gas_price.is_some() || self.blob_hashes.is_some()
+    pub fn is_any_set(&self) -> bool {
+        self.basefee.is_some()
+            || self.gas_price.is_some()
+            || self.blob_hashes.is_some()
+            || !self.block_hashes.is_empty()
+            || self.synthetic_block_hashes
     }
 }
 
@@ -2279,6 +2291,7 @@ impl<FEN: FoundryEvmNetwork> Inspector<FoundryContextFor<'_, FEN>> for Cheatcode
                 // wasn't actually used) cannot leak into the next opcode.
                 env_overrides.pending_opcode = None;
                 env_overrides.pending_blobhash_index = None;
+                env_overrides.pending_blockhash_number = None;
 
                 let opcode = interpreter.bytecode.opcode();
                 match opcode {
@@ -2289,6 +2302,10 @@ impl<FEN: FoundryEvmNetwork> Inspector<FoundryContextFor<'_, FEN>> for Cheatcode
                         env_overrides.pending_opcode = Some(opcode);
                         env_overrides.pending_blobhash_index =
                             interpreter.stack.peek(0).ok().and_then(|index| index.try_into().ok());
+                    }
+                    op::BLOCKHASH => {
+                        env_overrides.pending_opcode = Some(opcode);
+                        env_overrides.pending_blockhash_number = interpreter.stack.peek(0).ok();
                     }
                     _ => {}
                 }
@@ -2370,9 +2387,10 @@ impl<FEN: FoundryEvmNetwork> Inspector<FoundryContextFor<'_, FEN>> for Cheatcode
                     if let Some(env_overrides) = self.env_overrides.get_mut(&fork_id) {
                         env_overrides.pending_opcode = None;
                         env_overrides.pending_blobhash_index = None;
+                        env_overrides.pending_blockhash_number = None;
                     }
                 } else {
-                    self.apply_env_overrides(interpreter, fork_id);
+                    self.apply_env_overrides(interpreter, fork_id, ecx.block().number());
                 }
             }
         }
@@ -3299,7 +3317,7 @@ impl<FEN: FoundryEvmNetwork> Cheatcodes<FEN> {
         }
     }
 
-    /// Applies opcode-level overrides for `BASEFEE`, `GASPRICE` and `BLOBHASH`.
+    /// Applies opcode-level overrides for `BASEFEE`, `GASPRICE`, `BLOBHASH`, and `BLOCKHASH`.
     ///
     /// Called from `step_end` *after* the opcode has executed and only when the
     /// opcode succeeded (the caller checks `instruction_result`). The opcode
@@ -3308,15 +3326,41 @@ impl<FEN: FoundryEvmNetwork> Cheatcodes<FEN> {
     /// `vm.txGasPrice` and `vm.blobhashes` visible to called contracts under
     /// `--isolate` / `--gas-report`, where the inner transaction zeroes the
     /// real fee fields for fee-accounting purposes.
+    /// BLOCKHASH overrides also remain independent of the database's native hash domain.
     ///
     /// We can't read the just-executed opcode from `interpreter.bytecode.opcode()`
     /// here because the PC has already advanced; instead `step` stashes it in
     /// `env_overrides.pending_opcode` for us.
     #[cold]
-    fn apply_env_overrides(&mut self, interpreter: &mut Interpreter, fork_id: Option<U256>) {
+    fn apply_env_overrides(
+        &mut self,
+        interpreter: &mut Interpreter,
+        fork_id: Option<U256>,
+        block_number: U256,
+    ) {
         let Some(env_overrides) = self.env_overrides.get_mut(&fork_id) else { return };
         let Some(opcode) = env_overrides.pending_opcode.take() else { return };
         match opcode {
+            op::BLOCKHASH => {
+                let Some(number) = env_overrides.pending_blockhash_number.take() else { return };
+                if number >= block_number || block_number - number > U256::from(256) {
+                    Self::replace_top_of_stack(interpreter, U256::ZERO);
+                    return;
+                }
+                let Ok(number) = u64::try_from(number) else { return };
+                if let Some(hash) = env_overrides.block_hashes.get(&number) {
+                    Self::replace_top_of_stack(interpreter, (*hash).into());
+                } else if env_overrides.synthetic_block_hashes
+                    && fork_id.is_none()
+                    && interpreter.stack.peek(0).is_ok_and(|hash| hash.is_zero())
+                {
+                    // Match the empty database's deterministic hashes after local vm.roll.
+                    Self::replace_top_of_stack(
+                        interpreter,
+                        keccak256(number.to_string().as_bytes()).into(),
+                    );
+                }
+            }
             op::BASEFEE => {
                 if let Some(basefee) = env_overrides.basefee {
                     // BASEFEE pushed one value; replace it.

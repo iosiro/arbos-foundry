@@ -1974,6 +1974,15 @@ impl<'a, FEN: FoundryEvmNetwork> FunctionRunner<'a, FEN> {
             let new_config = Arc::new(self.cr.inline_config(Some(func))?);
             self.tcfg.to_mut().reconfigure_with(new_config);
             self.tcfg.configure_executor(self.executor.to_mut());
+            if let Some(factory) = self
+                .tcfg
+                .execution_factories
+                .functions
+                .get(self.cr.name)
+                .and_then(|functions| functions.get(&func.name))
+            {
+                self.executor.to_mut().set_evm_factory(factory.clone())?;
+            }
         }
         Ok(())
     }

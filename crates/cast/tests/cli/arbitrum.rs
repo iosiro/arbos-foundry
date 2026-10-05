@@ -44,23 +44,30 @@ casttest!(arbitrum_fork_trace_and_replay_apply_stylus_config, async |prj, cmd| {
     prj.update_config(|config| {
         config.stylus.ink_price = Some(24_680);
     });
+    // Supply the ABI locally so a clean signature cache produces the same decoded trace.
+    prj.add_source(
+        "ArbWasm.sol",
+        "interface ArbWasm { function inkPrice() external view returns (uint32); }",
+    );
     cmd.set_current_dir(prj.root());
 
     cmd.args([
         "call",
         "--trace",
         "--disable-external-identification",
+        "--with-local-artifacts",
         "--rpc-url",
         &handle.http_endpoint(),
         "0x0000000000000000000000000000000000000071",
         "inkPrice()(uint32)",
     ])
     .assert_success()
-    .stderr_eq("")
+    .stderr_eq("Compiling project to generate artifacts\n")
     .stdout_eq(str![[r#"
+...
 Traces:
   [..] 0x0000000000000000000000000000000000000071::inkPrice()
-    └─ ← [Return] 0x0000000000000000000000000000000000000000000000000000000000006068
+    └─ ← [Return] 24680 [2.468e4]
 
 
 Transaction successfully executed.
@@ -73,14 +80,15 @@ Transaction successfully executed.
             "run",
             &receipt.transaction_hash().to_string(),
             "--disable-external-identification",
+            "--with-local-artifacts",
             "--rpc-url",
             &handle.http_endpoint(),
         ])
         .assert_success()
-        .stderr_eq("Executing previous transactions from the block.\n")
+        .stderr_eq("Executing previous transactions from the block.\nCompiling project to generate artifacts\n")
         .stdout_eq(str![[r#"
 ...
-    └─ ← [Return] 0x0000000000000000000000000000000000000000000000000000000000006068
+    └─ ← [Return] 24680 [2.468e4]
 ...
 Transaction successfully executed.
 [GAS]

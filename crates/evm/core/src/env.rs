@@ -22,7 +22,11 @@ use revm::{
 };
 use tempo_revm::{TempoBlockEnv, TempoTxEnv};
 
-use crate::backend::JournaledState;
+use crate::{
+    backend::{DatabaseExt, JournaledState},
+    eip2935,
+    evm::FoundryEvmFactory,
+};
 
 /// Extension of [`Block`] with mutable setters, allowing EVM-agnostic mutation of block fields.
 pub trait FoundryBlock: Block {
@@ -421,8 +425,8 @@ pub trait FoundryChain<Tx>: Clone + Debug + Default + Send + Sync {
         Self::default()
     }
 
-    /// Builds transaction context at a known RPC block height.
-    fn for_rpc_block(tx: &Tx, _block_number: u64) -> Self {
+    /// Builds transaction context from a verified RPC block's height and parent hash.
+    fn for_rpc_block(tx: &Tx, _block_number: u64, _parent_hash: B256) -> Self {
         Self::for_transaction(tx)
     }
 
@@ -537,6 +541,48 @@ pub trait FoundryContextExt:
 
     /// Reference to the journal inner.
     fn journal_inner(&self) -> &JournaledState;
+
+    /// Rolls the execution height and updates the execution family's block history.
+    fn roll_block_number(&mut self, new_height: U256) -> eyre::Result<()>
+    where
+        Self: Sized,
+    {
+        let current_height = self.block().number();
+        if self.cfg().spec().into() >= SpecId::PRAGUE && new_height > current_height {
+            let mut number = eip2935::forward_fill_start(current_height, new_height);
+            while number < new_height {
+                let hash = self.db_mut().block_hash(number.saturating_to()).unwrap_or_default();
+                eip2935::set_blockhash(self, number, hash)?;
+                number += U256::from(1);
+            }
+        }
+        self.block_mut().set_number(new_height);
+        Ok(())
+    }
+
+    /// Records a BLOCKHASH override and updates the family's backing history where appropriate.
+    /// The inspector owns `overrides` and restores it across forks and state snapshots.
+    fn set_blockhash<F: FoundryEvmFactory>(
+        &mut self,
+        number: U256,
+        hash: B256,
+        overrides: &mut alloy_primitives::map::HashMap<u64, B256>,
+    ) -> eyre::Result<()>
+    where
+        Self: Sized,
+        Self::Db: DatabaseExt<F>,
+    {
+        overrides.insert(number.try_into()?, hash);
+        self.db_mut().set_blockhash(number, hash);
+        let current = self.block().number();
+        if self.cfg().spec().into() >= SpecId::PRAGUE
+            && number < current
+            && current - number <= U256::from(eip2935::HISTORY_SERVE_WINDOW)
+        {
+            eip2935::set_blockhash(self, number, hash)?;
+        }
+        Ok(())
+    }
 
     /// Activates deployed Stylus bytecode when supported by the active execution family.
     fn activate_stylus_program(&mut self, _address: Address) -> eyre::Result<()> {

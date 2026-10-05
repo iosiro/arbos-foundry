@@ -11,6 +11,7 @@ use anvil::{NodeConfig, spawn};
 use axum::{Router, body::Bytes as BodyBytes};
 use forge_script_sequence::ScriptSequence;
 use foundry_compilers::artifacts::EvmVersion;
+use foundry_config::{RpcEndpointUrl, RpcEndpoints};
 use foundry_evm::constants::CALLER;
 use foundry_test_utils::{
     ScriptOutcome, ScriptTester,
@@ -4024,10 +4025,16 @@ contract FactoryScript is Script {
 });
 
 // <https://github.com/foundry-rs/foundry/issues/11213>
-forgetest_async!(call_to_non_contract_address_does_not_panic, |prj, cmd| {
+forgetest_async!(call_to_non_contract_address_does_not_panic_on_fork, |prj, cmd| {
     foundry_test_utils::util::initialize(prj.root());
 
-    let endpoint = rpc::next_http_archive_rpc_url();
+    let (_api, handle) = spawn(NodeConfig::test()).await;
+    // Two independent forks of the same local source are sufficient for this regression.
+    // Keep the endpoint out of the compiled script so its trace is stable across port numbers.
+    prj.update_config(|config| {
+        config.rpc_endpoints =
+            RpcEndpoints::new([("source", RpcEndpointUrl::Url(handle.http_endpoint()))]);
+    });
 
     prj.add_source(
         "Counter.sol",
@@ -4048,7 +4055,7 @@ contract Counter {
 
     let deploy_script = prj.add_script(
         "Counter.s.sol",
-        &r#"
+        r#"
 import "forge-std/Script.sol";
 import {Counter} from "../src/Counter.sol";
 
@@ -4056,22 +4063,20 @@ contract CounterScript is Script {
     Counter public counter;
     function setUp() public {}
     function run() public {
-        vm.createSelectFork("<url>");
+        vm.createSelectFork("source");
         vm.startBroadcast();
         counter = new Counter();
         vm.stopBroadcast();
 
-        vm.createSelectFork("<url>");
+        vm.createSelectFork("source");
         vm.startBroadcast();
         counter.increment();
         vm.stopBroadcast();
     }
 }
-   "#
-        .replace("<url>", &endpoint),
+   "#,
     );
 
-    let (_api, handle) = spawn(NodeConfig::test()).await;
     cmd.args([
         "script",
         &deploy_script.display().to_string(),
@@ -4097,7 +4102,7 @@ Traces:
     └─ ← [Stop]
 
   [..] CounterScript::run()
-    ├─ [..] VM::createSelectFork("<rpc url>")
+    ├─ [..] VM::createSelectFork("source")
     │   └─ ← [Return] 1
     ├─ [..] VM::startBroadcast()
     │   └─ ← [Return]
@@ -4105,7 +4110,7 @@ Traces:
     │   └─ ← [Return] 481 bytes of code
     ├─ [..] VM::stopBroadcast()
     │   └─ ← [Return]
-    ├─ [..] VM::createSelectFork("<rpc url>")
+    ├─ [..] VM::createSelectFork("source")
     │   └─ ← [Return] 2
     ├─ [..] VM::startBroadcast()
     │   └─ ← [Return]

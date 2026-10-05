@@ -14,7 +14,7 @@ use alloy_primitives::{Address, ChainId, Signature, U256, map::AddressSet};
 use alloy_rlp::Decodable;
 use foundry_common::{FoundryReceiptResponse, FoundryTransactionBuilder, fmt::UIfmt};
 use foundry_config::ExecutionSpec;
-use foundry_fork_db::{DatabaseError, ForkBlockEnv};
+use foundry_fork_db::{DatabaseError, ForkBlockEnv, cache::BlockHashMode};
 use revm::{
     Database,
     context::{
@@ -177,7 +177,13 @@ pub trait FoundryEvmFactory:
     /// Chain type for EVM's context created by this factory.
     type Chain: FoundryChain<Self::Tx>;
 
-    /// Initializes network-owned state in a newly constructed backend.
+    /// Database hash domain consumed by this factory's context and native precompiles.
+    ///
+    /// This is independent of instance configuration: launch forks are constructed before the
+    /// configured factory is installed, and must use the same domain as later forks.
+    const BLOCK_HASH_MODE: BlockHashMode = BlockHashMode::Evm;
+
+    /// Initializes network-owned state or applies resolved settings to an existing backend.
     ///
     /// Most networks do not require database state outside ordinary transactions. Networks with
     /// system-contract state can override this hook; implementations must preserve already

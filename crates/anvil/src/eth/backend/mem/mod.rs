@@ -906,6 +906,8 @@ impl<T> BlockRequest<T> {
 
 struct StateSnapshot {
     block_number: u64,
+    /// EVM-visible height, which may differ from the RPC height on a fork.
+    evm_block_number: U256,
     block_hash: B256,
     fees: FeeSnapshot,
     time_offset: i128,
@@ -1665,6 +1667,7 @@ impl<N: Network> Backend<N> {
             id,
             StateSnapshot {
                 block_number: num,
+                evm_block_number: self.evm_env.read().block_env.number,
                 block_hash: hash,
                 fees: self.fees.snapshot(),
                 time_offset: self.time.offset(),
@@ -4909,9 +4912,15 @@ impl<N: Network> Backend<N> {
 
     /// Reverts the state to the state snapshot identified by the given `id`.
     pub async fn revert_state_snapshot(&self, id: U256) -> Result<bool, BlockchainError> {
-        let Some((num, hash, fees, time_offset)) =
+        let Some((num, evm_number, hash, fees, time_offset)) =
             self.active_state_snapshots.lock().get(&id).map(|snapshot| {
-                (snapshot.block_number, snapshot.block_hash, snapshot.fees, snapshot.time_offset)
+                (
+                    snapshot.block_number,
+                    snapshot.evm_block_number,
+                    snapshot.block_hash,
+                    snapshot.fees,
+                    snapshot.time_offset,
+                )
             })
         else {
             return Ok(false);
@@ -4936,7 +4945,7 @@ impl<N: Network> Backend<N> {
         {
             let mut env = self.evm_env.write();
             env.block_env = BlockEnv {
-                number: U256::from(num),
+                number: evm_number,
                 timestamp: U256::from(block.header.timestamp()),
                 difficulty: block.header.difficulty(),
                 // ensures prevrandao is set
@@ -9983,6 +9992,10 @@ mod tests {
         let (api_a, _handle_a) = spawn(config_a).await;
         let (api_b, _handle_b) = spawn(config_b).await;
 
+        // Keep mined timestamps independent of wall-clock time and node startup order.
+        api_a.evm_set_block_timestamp_interval(1).unwrap();
+        api_b.evm_set_block_timestamp_interval(1).unwrap();
+
         // Mine empty blocks (no transactions) on both backends
         let outcome_a_1 = api_a.backend.mine_block(vec![]).await.unwrap();
         let outcome_b_1 = api_b.backend.mine_block(vec![]).await.unwrap();
@@ -9995,6 +10008,9 @@ mod tests {
             api_a.block_by_number(outcome_a_1.block_number.into()).await.unwrap().unwrap();
         let block_b_1 =
             api_b.block_by_number(outcome_b_1.block_number.into()).await.unwrap().unwrap();
+
+        assert_eq!(block_a_1.header.timestamp, genesis_timestamp + 1);
+        assert_eq!(block_b_1.header.timestamp, genesis_timestamp + 1);
 
         // The block hashes should be identical
         assert_eq!(
@@ -10011,6 +10027,9 @@ mod tests {
             api_a.block_by_number(outcome_a_2.block_number.into()).await.unwrap().unwrap();
         let block_b_2 =
             api_b.block_by_number(outcome_b_2.block_number.into()).await.unwrap().unwrap();
+
+        assert_eq!(block_a_2.header.timestamp, genesis_timestamp + 2);
+        assert_eq!(block_b_2.header.timestamp, genesis_timestamp + 2);
 
         assert_eq!(
             block_a_2.header.hash, block_b_2.header.hash,

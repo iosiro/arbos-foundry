@@ -12,7 +12,7 @@ use crate::{
 };
 use alloy_chains::Chain;
 use alloy_consensus::{BlockHeader, Transaction, transaction::SignerRecoverable};
-use alloy_eips::BlockNumHash;
+use alloy_eips::{BlockNumHash, Typed2718};
 use alloy_network::{
     AnyNetwork, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope, BlockResponse, Network,
     ReceiptResponse, TransactionResponse, primitives::HeaderResponse,
@@ -33,7 +33,7 @@ use foundry_cli::{
     utils::{TraceResult, init_progress},
 };
 use foundry_common::{
-    SYSTEM_TRANSACTION_TYPE, is_known_system_sender,
+    is_legacy_system_transaction,
     provider::{ProviderBuilder, RetryProvider},
     shell,
 };
@@ -48,14 +48,14 @@ use foundry_config::{
 #[cfg(feature = "optimism")]
 use foundry_evm::core::evm::OpEvmNetwork;
 #[cfg(feature = "monad")]
-use foundry_evm::core::evm::{BlockContext, ChainFor, MonadEvmNetwork};
+use foundry_evm::core::evm::{BlockContext, MonadEvmNetwork};
 use foundry_evm::{
     core::{
-        FoundryBlock as _,
+        FoundryBlock as _, FoundryChain as _,
         env::FromAnyRpcTransaction as _,
         evm::{
-            ArbitrumEvmNetwork, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, TempoEvmNetwork,
-            TxEnvFor,
+            ArbitrumEvmNetwork, ChainFor, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork,
+            TempoEvmNetwork, TxEnvFor,
         },
     },
     executors::{Executor, ExecutorBuilder, TracingExecutor},
@@ -300,8 +300,7 @@ impl RunArgs {
             .await
             .wrap_err_with(|| format!("tx not found: {tx_hash:?}"))?
             .ok_or_else(|| eyre::eyre!("tx not found: {tx_hash:?}"))?;
-        let target_is_system = is_known_system_sender(tx.from())
-            || tx.transaction_type() == Some(SYSTEM_TRANSACTION_TYPE);
+        let target_is_system = is_legacy_system_transaction(tx.from(), tx.ty());
         Ok(TargetFetch { tx, provider, compute_units_per_second, target_is_system })
     }
 
@@ -685,8 +684,7 @@ impl<FEN: FoundryEvmNetwork> PreparedRun<FEN> {
                 };
                 let pb = init_progress(txs.len() as u64, "tx");
                 for (index, tx) in txs.iter().take(target_index).enumerate() {
-                    let is_system = is_known_system_sender(tx.from())
-                        || tx.transaction_type() == Some(SYSTEM_TRANSACTION_TYPE);
+                    let is_system = is_legacy_system_transaction(tx.from(), tx.ty());
                     if !is_system || replay_system_txes {
                         let tx_env =
                             TxEnvFor::<FEN>::from_any_rpc_transaction(tx).wrap_err_with(|| {
@@ -707,10 +705,20 @@ impl<FEN: FoundryEvmNetwork> PreparedRun<FEN> {
                 }
             }
         }
+        let chain_context = if let Some(block) = &self.block {
+            ChainFor::<FEN>::for_rpc_block(
+                &target_tx_env,
+                block.header().number(),
+                block.header().parent_hash(),
+            )
+        } else {
+            ChainFor::<FEN>::for_transaction(&target_tx_env)
+        };
         let result = self.executor.transact_with_ordinary_block_replay(
             self.evm_env.clone(),
             target_tx_env,
             replay,
+            chain_context,
         )?;
         let trace_kind = if let Some(to) = Transaction::to(&self.tx) {
             trace!(tx=?self.tx.tx_hash(), ?to, "executing call transaction");

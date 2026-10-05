@@ -126,13 +126,17 @@ const FLAKY_TESTDATA_CONTRACTS: &str = "Issue4232Test|Issue4640Test|Issue14212Te
 // transaction lookups that are not reliably served by the public Base RPC endpoint used in CI.
 const FLAKY_TESTDATA_RUN_CONTRACTS: &str = "Issue4232Test|Issue4640Test";
 
+/// Contracts whose execution requires Arbitrum precompiles or Stylus bytecode support.
+/// Covered by the required `arbitrum_testdata` run below.
+const ARBITRUM_TESTDATA_CONTRACTS: &str = "ArbosStateTest|StylusTest|StylusConfigTest|StylusConfigInlineTest|StylusConfigFunctionLevelTest|GetStylusCodeTest|GetStylusInitCodeTest";
+
 // Run `forge test` on `/testdata`.
 forgetest!(testdata, |_prj, cmd| {
     setup_testdata_cmd(&mut cmd);
 
     let mut args = vec!["test"];
     let nmc_isolate = format!(
-        "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS})",
+        "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS}|{ARBITRUM_TESTDATA_CONTRACTS})",
     );
     args.push(&nmc_isolate);
 
@@ -159,6 +163,12 @@ forgetest!(testdata, |_prj, cmd| {
     orig_assert.success();
 });
 
+forgetest!(arbitrum_testdata, |_prj, cmd| {
+    setup_testdata_cmd(&mut cmd);
+    let mc = format!("--mc=({ARBITRUM_TESTDATA_CONTRACTS})");
+    cmd.args(["test", "--network", "arbitrum", &mc]).assert_success();
+});
+
 #[cfg(feature = "monad")]
 forgetest!(monad_testdata, |_prj, cmd| {
     setup_testdata_cmd(&mut cmd);
@@ -167,7 +177,7 @@ forgetest!(monad_testdata, |_prj, cmd| {
 });
 
 // Run flaky testdata contracts excluded from the main `testdata` test above.
-// Picked up by the nightly `test-flaky` workflow via `cargo nextest run --profile flaky`.
+// Picked up by the manual `test-flaky` workflow via `cargo nextest run --profile flaky`.
 forgetest!(flaky_testdata, |_prj, cmd| {
     setup_testdata_cmd(&mut cmd);
     let mc = format!("--mc=({FLAKY_TESTDATA_RUN_CONTRACTS})");
@@ -1480,7 +1490,7 @@ contract ArbitrumForkTest is Test {
         .replace("<url>", endpoint),
     );
 
-    cmd.arg("test").assert_success();
+    cmd.args(["test", "--network", "arbitrum"]).assert_success();
 });
 
 // https://github.com/foundry-rs/foundry/issues/6579

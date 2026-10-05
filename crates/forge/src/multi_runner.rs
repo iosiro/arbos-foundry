@@ -2,6 +2,7 @@
 
 use crate::{
     ContractRunner, TestFilter,
+    execution_config::InlineExecutionFactories,
     progress::TestsProgress,
     result::{
         SuiteResult, SymbolicCounterexampleArtifact, SymbolicCounterexampleArtifactKind, TestResult,
@@ -516,6 +517,8 @@ pub struct TestRunnerConfig<FEN: FoundryEvmNetwork> {
     pub evm_opts: EvmOpts,
     /// Executor construction selected by concrete network dispatch.
     pub executor_builder: ExecutorBuilder<FEN>,
+    /// Concrete settings resolved for annotated contracts and functions.
+    pub(crate) execution_factories: Arc<InlineExecutionFactories<FEN::EvmFactory>>,
     /// EVM environment.
     pub evm_env: EvmEnvFor<FEN>,
     /// Transaction environment.
@@ -590,6 +593,7 @@ impl<FEN: FoundryEvmNetwork> TestRunnerConfig<FEN> {
 
         // TODO: self.evm_opts
         self.evm_opts.always_use_create_2_factory = config.always_use_create_2_factory;
+        self.evm_opts.stylus_config.clone_from(&config.stylus);
 
         // TODO: self.env
 
@@ -641,8 +645,11 @@ impl<FEN: FoundryEvmNetwork> TestRunnerConfig<FEN> {
         );
         cheats_config.isolate = self.isolation;
         let cheats_config = Arc::new(cheats_config);
-        self.executor_builder
-            .clone()
+        let mut executor_builder = self.executor_builder.clone();
+        if let Some(factory) = self.execution_factories.contracts.get(&artifact_id.identifier()) {
+            executor_builder = executor_builder.evm_factory(factory.clone());
+        }
+        executor_builder
             .inspectors(|stack| {
                 stack
                     .logs(self.config.live_logs)
@@ -1039,6 +1046,7 @@ impl MultiContractRunnerBuilder {
             tcfg: TestRunnerConfig {
                 evm_opts,
                 executor_builder,
+                execution_factories: Default::default(),
                 evm_env,
                 tx_env,
                 spec_id,

@@ -1,7 +1,7 @@
 use alloy_network::{ReceiptResponse as _, TransactionBuilder as _};
 use alloy_provider::Provider as _;
 use foundry_compilers::artifacts::EvmVersion;
-use foundry_config::fs_permissions::PathPermission;
+use foundry_config::{RpcEndpointUrl, RpcEndpoints, fs_permissions::PathPermission};
 use foundry_evm::hardforks::{FoundryHardfork, TempoHardfork};
 use foundry_evm_networks::NetworkConfigs;
 use foundry_test_utils::{rpc, util::OTHER_SOLC_VERSION};
@@ -2257,6 +2257,268 @@ contract ArbitrumForkPolicyTest is Test {
     .assert_success();
 });
 
+forgetest!(arbitrum_blockhash_cheatcodes_keep_l1_and_l2_separate, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    prj.add_test(
+        "BlockhashDomains.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+interface ArbSysHashes { function arbBlockHash(uint256 number) external view returns (bytes32); }
+
+contract ArbitrumBlockhashDomainsTest is Test {
+    function hash(uint256 number) external view returns (bytes32) { return blockhash(number); }
+
+    function test_roll_and_explicit_hash_preserve_l2_and_snapshot_state() public {
+        vm.roll(300);
+        bytes32 original = keccak256("299");
+        assertEq(this.hash(299), original);
+        vm.setBlockhash(299, bytes32(uint256(42)));
+        assertEq(this.hash(299), bytes32(uint256(42)));
+        assertEq(ArbSysHashes(address(0x64)).arbBlockHash(299), original, "L1 override polluted L2 history");
+        uint256 snapshot = vm.snapshotState();
+        vm.setBlockhash(299, bytes32(uint256(99)));
+        vm.roll(301);
+        assertEq(this.hash(299), bytes32(uint256(99)));
+        assertTrue(vm.revertToState(snapshot));
+        assertEq(block.number, 300);
+        assertEq(this.hash(299), bytes32(uint256(42)));
+        vm.roll(600);
+        assertEq(this.hash(299), bytes32(0), "expired override remained visible");
+        vm.roll(300);
+        assertEq(this.hash(299), bytes32(uint256(42)), "backward roll lost override");
+    }
+
+    function test_current_hash_override_does_not_alias_oldest_block() public {
+        vm.roll(300);
+        vm.setBlockhash(44, bytes32(uint256(44)));
+        vm.setBlockhash(300, bytes32(uint256(300)));
+        assertEq(this.hash(44), bytes32(uint256(44)));
+        assertEq(this.hash(300), bytes32(0));
+        vm.roll(301);
+        assertEq(this.hash(44), bytes32(0));
+        assertEq(this.hash(300), bytes32(uint256(300)));
+    }
+}
+"#,
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumBlockhashDomainsTest", "-vvvv"])
+        .assert_success();
+    cmd.arg("--isolate").assert_success();
+});
+
+forgetest_async!(arbitrum_fork_blockhash_overrides_follow_lifecycle, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let (_api, handle) = anvil::spawn(
+        anvil::NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum()),
+    )
+    .await;
+    prj.update_config(|config| {
+        config.rpc_endpoints =
+            RpcEndpoints::new([("source", RpcEndpointUrl::Url(handle.http_endpoint()))]);
+    });
+    prj.add_test(
+        "ForkHashOverrides.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract ArbitrumForkHashOverridesTest is Test {
+    function hash(uint256 number) external view returns (bytes32) { return blockhash(number); }
+
+    function test_fork_overrides_restore_and_roll_independently() public {
+        uint256 first = vm.createSelectFork("source");
+        vm.roll(300);
+        vm.setBlockhash(299, bytes32(uint256(42)));
+        uint256 second = vm.createSelectFork("source");
+        vm.roll(300);
+        assertEq(this.hash(299), bytes32(0), "first fork override leaked");
+        vm.setBlockhash(299, bytes32(uint256(99)));
+        vm.selectFork(first);
+        assertEq(this.hash(299), bytes32(uint256(42)));
+        uint256 snapshot = vm.snapshotState();
+        vm.selectFork(second);
+        assertEq(this.hash(299), bytes32(uint256(99)));
+        vm.rollFork(first, uint256(0));
+        assertEq(vm.activeFork(), second);
+        assertEq(this.hash(299), bytes32(uint256(99)), "inactive roll changed active override");
+        vm.selectFork(first);
+        vm.roll(300);
+        assertEq(this.hash(299), bytes32(0), "rolled fork retained override");
+        assertTrue(vm.revertToState(snapshot));
+        assertEq(vm.activeFork(), first);
+        assertEq(this.hash(299), bytes32(uint256(42)), "snapshot lost fork-local override");
+        vm.rollFork(uint256(0));
+        vm.roll(300);
+        assertEq(this.hash(299), bytes32(0), "active roll retained override");
+    }
+}
+"#,
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkHashOverridesTest", "-vvvv"])
+        .assert_success();
+    cmd.arg("--isolate").assert_success();
+});
+
+forgetest_async!(
+    arbitrum_fork_arbsys_reads_rpc_hashes_without_changing_l1_blockhash,
+    |prj, cmd| {
+        foundry_test_utils::util::initialize(prj.root());
+        let (api, handle) = anvil::spawn(
+            anvil::NodeConfig::test()
+                .with_chain_id(Some(421_614_u64))
+                .with_networks(NetworkConfigs::with_arbitrum()),
+        )
+        .await;
+        for _ in 0..3 {
+            api.mine_one().await.unwrap();
+        }
+        let block = handle.http_provider().get_block_by_number(2.into()).await.unwrap().unwrap();
+        let parent = block.header.hash;
+        let grandparent = block.header.parent_hash;
+        // L2 is ahead of L1, as on Arbitrum. An L1-keyed fork anchor would reject L2 parent hashes.
+        let endpoint = foundry_test_utils::rpc::spawn_rpc_proxy_with_l1_block_number(
+            handle.http_endpoint(),
+            1,
+        )
+        .await;
+        prj.update_config(|config| {
+            config.rpc_endpoints = RpcEndpoints::new([("source", RpcEndpointUrl::Url(endpoint))]);
+        });
+        prj.add_test(
+            "ForkHashDomains.t.sol",
+            &r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+interface ArbSysHashes {
+    function arbBlockHash(uint256 number) external view returns (bytes32);
+    function arbBlockNumber() external view returns (uint256);
+}
+
+contract ArbitrumForkHashDomainsTest is Test {
+    function hash(uint256 number) external view returns (bytes32) { return blockhash(number); }
+    function number() external view returns (uint256) { return block.number; }
+
+    function test_rpc_hashes_survive_fork_roll_and_l1_overrides() public {
+        vm.createSelectFork("source", uint256(3));
+        assertEq(this.number(), 1, "execution must use the L1 number");
+        assertEq(ArbSysHashes(address(0x64)).arbBlockNumber(), 3, "ArbSys must use the L2 number");
+        assertEq(this.hash(0), bytes32(0), "L1 history is empty");
+        assertEq(this.hash(2), bytes32(0), "L2 hash leaked into L1 BLOCKHASH");
+        assertEq(ArbSysHashes(address(0x64)).arbBlockHash(2), <parent>);
+        vm.roll(300);
+        vm.setBlockhash(299, bytes32(uint256(42)));
+        assertEq(this.hash(299), bytes32(uint256(42)));
+        assertEq(ArbSysHashes(address(0x64)).arbBlockHash(2), <parent>);
+        uint256 snapshot = vm.snapshotState();
+        vm.rollFork(uint256(2));
+        assertEq(this.number(), 1, "fork roll must preserve L1/L2 separation");
+        assertEq(ArbSysHashes(address(0x64)).arbBlockNumber(), 2);
+        assertEq(ArbSysHashes(address(0x64)).arbBlockHash(1), <grandparent>);
+        assertEq(this.hash(1), bytes32(0));
+        assertTrue(vm.revertToState(snapshot));
+        assertEq(ArbSysHashes(address(0x64)).arbBlockHash(2), <parent>);
+        assertEq(this.hash(299), bytes32(uint256(42)));
+    }
+}
+"#
+            .replace("<parent>", &format!("bytes32({parent})"))
+            .replace("<grandparent>", &format!("bytes32({grandparent})")),
+        );
+        cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkHashDomainsTest", "-vvvv"])
+            .assert_success();
+        cmd.arg("--isolate").assert_success();
+    }
+);
+
+forgetest_init!(arbitrum_rejects_blob_basefee, |prj, cmd| {
+    prj.add_test(
+        "BlobBasefee.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract ArbitrumBlobBasefeeTest is Test {
+    function test_blob_basefee_halts_nested_execution() public {
+        address target = address(0x123456);
+        vm.etch(target, hex"4a60005260206000f3");
+        (bool success, bytes memory output) = target.staticcall{gas: 100_000}("");
+        assertFalse(success, "Nitro rejects BLOBBASEFEE even after Cancun");
+        assertEq(output.length, 0, "an exceptional halt must not return a blob fee");
+    }
+}
+"#,
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumBlobBasefeeTest", "-vvvv"])
+        .assert_success();
+    cmd.arg("--isolate").assert_success();
+});
+
+forgetest_async!(arbitrum_fork_selects_opcode_rules_from_source_state, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    let remote = alloy_primitives::address!("0000000000000000000000000000000000123456");
+    let mut handles = Vec::new();
+    for version in [20, 50] {
+        let mut node = anvil::NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum());
+        node.stylus.arbos_version = Some(version);
+        let (api, handle) = anvil::spawn(node).await;
+        // CLZ(0) returns 256 at ArbOS 50 and halts under older opcode rules.
+        api.anvil_set_code(remote, alloy_primitives::hex!("60001e60005260206000f3").into())
+            .await
+            .unwrap();
+        handles.push(handle);
+    }
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.rpc_endpoints = RpcEndpoints::new([
+            ("older", RpcEndpointUrl::Url(handles[0].http_endpoint())),
+            ("newer", RpcEndpointUrl::Url(handles[1].http_endpoint())),
+        ]);
+    });
+    prj.add_test(
+        "ForkOpcodeRules.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+contract ArbitrumForkOpcodeRulesTest is Test {
+    function assertOpcode(bool enabled) external view {
+        (bool ok, bytes memory output) = address(0x123456).staticcall{gas: 100_000}("");
+        assertEq(ok, enabled, "CLZ activation disagrees with persisted ArbOS version");
+        if (enabled) assertEq(abi.decode(output, (uint256)), 256);
+        else assertEq(output.length, 0);
+        // Empty input is invalid for BLS G1ADD, but succeeds at an unassigned address.
+        (ok, output) = address(0x0b).staticcall{gas: 100_000}("");
+        assertEq(ok, !enabled, "BLS precompile activation disagrees with selected fork");
+        assertEq(output.length, 0);
+    }
+
+    function test_opcode_rules_follow_fork_selection_and_snapshot() public {
+        uint256 older = vm.createSelectFork("older");
+        this.assertOpcode(false);
+        uint256 snapshot = vm.snapshotState();
+        uint256 newer = vm.createSelectFork("newer");
+        this.assertOpcode(true);
+        vm.selectFork(older);
+        this.assertOpcode(false);
+        vm.selectFork(newer);
+        this.assertOpcode(true);
+        assertTrue(vm.revertToState(snapshot));
+        assertEq(vm.activeFork(), older);
+        this.assertOpcode(false);
+    }
+}
+"#,
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkOpcodeRulesTest", "-vvvv"])
+        .assert_success();
+});
+
 forgetest_async!(arbitrum_fork_refreshes_cached_source_state, |prj, cmd| {
     foundry_test_utils::util::initialize(prj.root());
     let mut node = anvil::NodeConfig::test()
@@ -2509,12 +2771,48 @@ forgetest_async!(arbitrum_fork_transaction_replay_keeps_l1_and_l2_numbers_distin
     assert_eq!(target.transaction_index(), Some(1));
     assert_eq!(target.block_number(), Some(1));
 
+    let source_block = provider.get_block_by_number(1.into()).await.unwrap().unwrap();
+    let parent_hash = source_block.header.parent_hash;
+    let mut version_key = alloy_primitives::keccak256([0u8; 31]);
+    version_key[31] = 0;
+    let version = provider
+        .get_storage_at(
+            alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
+            alloy_primitives::U256::from_be_bytes(version_key.0),
+        )
+        .block_id(0.into())
+        .await
+        .unwrap();
+    assert_eq!(
+        version,
+        alloy_primitives::U256::from(61),
+        "source parent must contain initialized ArbOS"
+    );
+    let mut native: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+        "../../../../evm/core/testdata/arbitrum-native-transactions.json"
+    ))
+    .unwrap();
+    // Replay a real Nitro-shaped startBlock and deposit before the source node's ordinary
+    // transactions. Their effects do not exist in Anvil's parent state and cannot be obtained
+    // by fetching the source block's post-state instead of executing the prefix.
+    native.truncate(2);
+    native.swap(0, 1);
+    let internal_hash = native[0]["hash"].as_str().unwrap().to_owned();
+    let deposit_hash = native[1]["hash"].as_str().unwrap().to_owned();
+    for (index, tx) in native.iter_mut().enumerate() {
+        tx["blockHash"] = serde_json::json!(source_block.header.hash);
+        tx["blockNumber"] = serde_json::json!("0x1");
+        tx["transactionIndex"] = serde_json::json!(format!("{index:#x}"));
+    }
+
     let upstream = handle.http_endpoint();
     let client = reqwest::Client::new();
     let app = axum::Router::new().fallback(move |body: axum::body::Bytes| {
         let upstream = upstream.clone();
         let client = client.clone();
+        let native = native.clone();
         async move {
+            let requests: serde_json::Value = serde_json::from_slice(&body).unwrap();
             let mut response = client
                 .post(upstream)
                 .header("content-type", "application/json")
@@ -2530,12 +2828,44 @@ forgetest_async!(arbitrum_fork_transaction_replay_keeps_l1_and_l2_numbers_distin
                 single => std::slice::from_mut(single),
             };
             for response in responses {
+                let request = match &requests {
+                    serde_json::Value::Array(items) => {
+                        items.iter().find(|request| request["id"] == response["id"]).unwrap()
+                    }
+                    single => single,
+                };
+                if request["method"] == "eth_getTransactionByHash"
+                    && let Some(tx) = native.iter().find(|tx| tx["hash"] == request["params"][0])
+                {
+                    response["result"] = tx.clone();
+                }
                 if let Some(block) =
                     response.get_mut("result").and_then(serde_json::Value::as_object_mut)
                     && block.contains_key("transactions")
                     && block.contains_key("number")
                 {
                     block.insert("l1BlockNumber".into(), serde_json::json!("0x3e7"));
+                    if block["number"] == "0x1"
+                        && let Some(transactions) =
+                            block.get_mut("transactions").and_then(serde_json::Value::as_array_mut)
+                    {
+                        if transactions.first().is_some_and(serde_json::Value::is_object) {
+                            for (index, tx) in transactions.iter_mut().enumerate() {
+                                tx["transactionIndex"] =
+                                    serde_json::json!(format!("{:#x}", index + 2));
+                            }
+                            transactions.splice(0..0, native.clone());
+                        } else {
+                            transactions.splice(0..0, native.iter().map(|tx| tx["hash"].clone()));
+                        }
+                    }
+                } else if let Some(tx) = response.get_mut("result")
+                    && tx["blockNumber"] == "0x1"
+                    && !native.iter().any(|native| native["hash"] == tx["hash"])
+                    && let Some(index) = tx["transactionIndex"].as_str()
+                {
+                    let index = u64::from_str_radix(index.trim_start_matches("0x"), 16).unwrap();
+                    tx["transactionIndex"] = serde_json::json!(format!("{:#x}", index + 2));
                 }
             }
             axum::Json(response)
@@ -2555,6 +2885,12 @@ contract ArbitrumReplayNumbersTest is Test {
     function assertReplayedNumbers() internal view {
         assertEq(uint256(vm.load(address(0x4242424242424242424242424242424242424242), bytes32(0))), 1);
         assertEq(uint256(vm.load(address(0x4242424242424242424242424242424242424242), bytes32(uint256(1)))), 999);
+        assertEq(address(0x2222222222222222222222222222222222222222).balance, 12345,
+            "native deposit was not replayed");
+        assertEq(uint256(vm.load(<arbos_state>, bytes32(<version_key>))), 61,
+            "replay lost persisted ArbOS version");
+        assertEq(vm.load(0x0000F90827F1C53a10cb7A02335B175320002935, bytes32(0)), bytes32(<parent>),
+            "startBlock did not record the parent hash");
     }
 
     function test_fork_creation_replays_with_distinct_numbers() public {
@@ -2567,10 +2903,28 @@ contract ArbitrumReplayNumbersTest is Test {
         vm.rollFork(bytes32(<target>));
         assertReplayedNumbers();
     }
+
+    function test_fork_native_deposit_target() public {
+        vm.createSelectFork("<rpc>", uint256(0));
+        vm.transact(bytes32(<deposit>));
+        assertEq(address(0x2222222222222222222222222222222222222222).balance, 12345);
+    }
+
+    function test_fork_native_start_block_target() public {
+        vm.createSelectFork("<rpc>", uint256(0));
+        vm.transact(bytes32(<internal>));
+        assertEq(vm.load(0x0000F90827F1C53a10cb7A02335B175320002935, bytes32(0)), bytes32(<parent>),
+            "native target lost its L2 parent hash");
+    }
 }
 "#
         .replace("<rpc>", &endpoint)
-        .replace("<target>", &target_hash.to_string()),
+        .replace("<target>", &target_hash.to_string())
+        .replace("<parent>", &parent_hash.to_string())
+        .replace("<version_key>", &version_key.to_string())
+        .replace("<arbos_state>", &alloy_primitives::address!("0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF").to_string())
+        .replace("<deposit>", &deposit_hash)
+        .replace("<internal>", &internal_hash),
     );
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumReplayNumbersTest", "-vvvv"])
         .assert_success();
@@ -2734,6 +3088,109 @@ contract ArbSysProviderTest is Test {
             "-vvvv",
         ])
         .assert_success();
+});
+
+forgetest_init!(arbitrum_inline_stylus_settings_preserve_setup_and_isolation, |prj, cmd| {
+    prj.update_config(|config| config.solc = Some(OTHER_SOLC_VERSION.into()));
+    prj.add_test(
+        "InlineStylus.t.sol",
+        r#"
+pragma solidity >=0.8.20;
+import {Test} from "forge-std/Test.sol";
+
+interface ArbWasmSettings {
+    function inkPrice() external view returns (uint32);
+    function freePages() external view returns (uint16);
+}
+
+/// forge-config: default.stylus.ink_price = 20000
+/// forge-config: default.stylus.free_pages = 10
+/// forge-config: default.stylus.disable_stylus_deployment = true
+contract InlineStylusTest is Test {
+    ArbWasmSettings constant ARB_WASM = ArbWasmSettings(address(0x71));
+    uint256 marker;
+
+    function setUp() public {
+        assertEq(ARB_WASM.inkPrice(), 20000, "contract override missing in setup");
+        marker = 41;
+    }
+
+    function createStylus() internal returns (address deployed) {
+        bytes memory initCode = hex"6004600c60003960046000f3eff00000";
+        assembly { deployed := create(0, add(initCode, 32), mload(initCode)) }
+    }
+
+    function assertSettings(uint32 ink, bool deploymentAllowed) internal {
+        assertEq(marker, 41, "inline settings discarded setup storage");
+        assertEq(ARB_WASM.inkPrice(), ink);
+        assertEq(ARB_WASM.freePages(), 10, "function override lost contract settings");
+        assertEq(createStylus() != address(0), deploymentAllowed);
+    }
+
+    function testContractDefaults() public { assertSettings(20000, false); }
+
+    /// forge-config: default.stylus.ink_price = 15000
+    /// forge-config: default.stylus.disable_stylus_deployment = false
+    function testFunctionOverrides() public {
+        assertSettings(15000, true);
+        uint256 snapshot = vm.snapshotState();
+        marker = 99;
+        assertTrue(vm.revertToState(snapshot));
+        assertSettings(15000, true);
+    }
+
+    /// forge-config: default.stylus.ink_price = 17000
+    /// forge-config: default.fuzz.runs = 8
+    function testFuzzFunctionOverrides(uint8 value) public {
+        assertSettings(17000, false);
+        marker = uint256(value) + 42;
+    }
+}
+
+contract InlineStylusNeighborTest is Test {
+    function testNoOverrideLeak() public view {
+        assertEq(ArbWasmSettings(address(0x71)).inkPrice(), 10000);
+        assertEq(ArbWasmSettings(address(0x71)).freePages(), 2);
+    }
+}
+
+/// forge-config: default.stylus.arbos_version = 40
+contract InlineStylusVersionTest is Test {
+    function testContractVersionInitializesFreshState() public view {
+        bytes32 versionSlot = bytes32(uint256(keccak256(new bytes(31))) & ~uint256(0xff));
+        assertEq(uint256(vm.load(0xA4b05FffffFffFFFFfFFfffFfffFFfffFfFfFFFf, versionSlot)), 40);
+    }
+}
+"#,
+    );
+    for isolate in [false, true] {
+        prj.update_config(|config| config.isolate = isolate);
+        cmd.forge_fuse()
+            .args(["test", "--network", "arbitrum", "--mc", "InlineStylus", "-vvv"])
+            .assert_success();
+    }
+    cmd.forge_fuse()
+        .args(["coverage", "--network", "arbitrum", "--mc", "InlineStylus", "--report", "summary"])
+        .assert_success();
+});
+
+forgetest_init!(arbitrum_inline_function_version_rejects_reinitialization, |prj, cmd| {
+    prj.add_test(
+        "InlineVersion.t.sol",
+        r#"
+import {Test} from "forge-std/Test.sol";
+contract InlineVersionTest is Test {
+    /// forge-config: default.stylus.arbos_version = 40
+    function testVersionOverride() public {}
+}
+"#,
+    );
+    cmd.args(["test", "--network", "arbitrum"])
+        .assert_failure()
+        .stderr_eq(str![[r#"
+Error: function-level ArbOS version override in test/InlineVersion.t.sol:InlineVersionTest:testVersionOverride cannot change already-initialized state; configure the version at contract or project scope
+
+"#]]);
 });
 
 forgetest_init!(test_network_arbitrum_applies_stylus_cli_config, |prj, cmd| {

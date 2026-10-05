@@ -27,10 +27,7 @@ use foundry_evm_core::{
     FoundryBlock, FoundryTransaction,
     backend::{DatabaseError, DatabaseExt, RevertStateSnapshotAction},
     constants::{CALLER, CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS, TEST_CONTRACT_ADDRESS},
-    eip2935::{
-        HISTORY_SERVE_WINDOW, HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE, forward_fill_start,
-        history_storage_slot, history_storage_value,
-    },
+    eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
     env::FoundryContextExt,
     evm::{FoundryEvmNetwork, TxEnvFor, TxEnvelopeFor},
     refresh_chain_journal,
@@ -685,17 +682,10 @@ impl Cheatcode for getBlobhashesCall {
 impl Cheatcode for rollCall {
     fn apply_stateful<FEN: FoundryEvmNetwork>(&self, ccx: &mut CheatsCtxt<'_, '_, FEN>) -> Result {
         let Self { newHeight } = self;
-        let current_height = ccx.ecx.block().number();
-        if ccx.ecx.cfg().spec().into() >= SpecId::PRAGUE && *newHeight > current_height {
-            let mut block_number = forward_fill_start(current_height, *newHeight);
-            while block_number < *newHeight {
-                let block_hash =
-                    ccx.ecx.db_mut().block_hash(block_number.saturating_to()).unwrap_or_default();
-                set_eip2935_blockhash(ccx.ecx, block_number, block_hash)?;
-                block_number += U256::from(1);
-            }
+        ccx.ecx.roll_block_number(*newHeight).map_err(|error| fmt_err!("{error}"))?;
+        if ccx.ecx.db().active_fork_id().is_none() {
+            ccx.state.env_overrides.entry(None).or_default().synthetic_block_hashes = true;
         }
-        ccx.ecx.block_mut().set_number(*newHeight);
         Ok(Default::default())
     }
 }
@@ -1297,14 +1287,11 @@ impl Cheatcode for setBlockhashCall {
             "block number must be less than or equal to the current block number"
         );
 
-        ccx.ecx.db_mut().set_blockhash(blockNumber, blockHash);
-        let current_block = U256::from(ccx.ecx.block().number());
-        if ccx.ecx.cfg().spec().into() >= SpecId::PRAGUE
-            && blockNumber < current_block
-            && current_block - blockNumber <= U256::from(HISTORY_SERVE_WINDOW)
-        {
-            set_eip2935_blockhash(ccx.ecx, blockNumber, blockHash)?;
-        }
+        let fork_id = ccx.ecx.db().active_fork_id();
+        let overrides = &mut ccx.state.env_overrides.entry(fork_id).or_default().block_hashes;
+        ccx.ecx
+            .set_blockhash::<FEN::EvmFactory>(blockNumber, blockHash, overrides)
+            .map_err(|error| fmt_err!("{error}"))?;
 
         Ok(Default::default())
     }
@@ -1925,52 +1912,6 @@ pub(super) fn ensure_loaded_account<CTX: ContextTr<Db: Database<Error = Database
     ecx.journal_mut().load_account(addr)?;
     ecx.journal_mut().touch_account(addr);
     Ok(())
-}
-
-fn set_eip2935_blockhash<
-    CTX: ContextTr<Db: Database<Error = DatabaseError>, Journal: JournalExt>,
->(
-    ecx: &mut CTX,
-    block_number: U256,
-    block_hash: B256,
-) -> Result<()> {
-    let account_was_cold = ecx.journal_mut().load_account(HISTORY_STORAGE_ADDRESS)?.is_cold;
-    let account =
-        ecx.journal_mut().evm_state().get(&HISTORY_STORAGE_ADDRESS).expect("account is loaded");
-    if account.info.code_hash != keccak256(&HISTORY_STORAGE_CODE) {
-        restore_eip2935_cold_state(ecx, account_was_cold, None);
-        return Ok(());
-    }
-
-    let slot = history_storage_slot(block_number);
-    let slot_was_cold = ecx
-        .journal_mut()
-        .sstore(HISTORY_STORAGE_ADDRESS, slot, history_storage_value(block_hash))
-        .map_err(|e| fmt_err!("failed to store EIP-2935 history slot: {:?}", e))?
-        .is_cold;
-    restore_eip2935_cold_state(ecx, account_was_cold, Some((slot, slot_was_cold)));
-    Ok(())
-}
-
-fn restore_eip2935_cold_state<
-    CTX: ContextTr<Db: Database<Error = DatabaseError>, Journal: JournalExt>,
->(
-    ecx: &mut CTX,
-    account_was_cold: bool,
-    slot_state: Option<(U256, bool)>,
-) {
-    let Some(account) = ecx.journal_mut().evm_state_mut().get_mut(&HISTORY_STORAGE_ADDRESS) else {
-        return;
-    };
-    if account_was_cold {
-        account.mark_cold();
-    }
-    if let Some((slot, slot_was_cold)) = slot_state
-        && slot_was_cold
-        && let Some(storage_slot) = account.storage.get_mut(&slot)
-    {
-        storage_slot.is_cold = true;
-    }
 }
 
 // Tempo TIP-1026 stores logoURI in TIP-20 storage slot 5, reusing the

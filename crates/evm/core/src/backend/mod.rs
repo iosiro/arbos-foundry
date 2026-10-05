@@ -24,10 +24,11 @@ use alloy_network::{
 use alloy_primitives::{Address, B256, ChainId, TxKind, U256, keccak256, map::AddressSet, uint};
 use alloy_rpc_types::{BlockNumberOrTag, BlockTransactions};
 use eyre::Context;
-use foundry_common::{SYSTEM_TRANSACTION_TYPE, is_known_system_sender};
+use foundry_common::is_legacy_system_transaction;
 use foundry_evm_networks::NetworkConfigs;
 pub use foundry_fork_db::{
-    BlockchainDb, ForkBlock, ForkBlockEnv, SharedBackend, cache::BlockchainDbMeta,
+    BlockchainDb, ForkBlock, ForkBlockEnv, SharedBackend,
+    cache::{BlockHashMode, BlockchainDbMeta},
 };
 use revm::{
     Database, DatabaseCommit, JournalEntry,
@@ -716,7 +717,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
 
         if let Some(fork) = fork {
             let ForkResult { id: fork_id, backend: fork, resolved, .. } =
-                backend.forks.create_fork(fork)?;
+                backend.forks.create_fork_with_hash_mode(fork, FEN::EvmFactory::BLOCK_HASH_MODE)?;
             let context = resolved.context();
             let block = resolved.block();
             let fork_db = ForkDB::new(fork);
@@ -1171,7 +1172,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
     /// Converts a replayable transaction while preserving the established behavior of skipping
     /// system envelopes that this build cannot decode.
     fn replay_tx_env(tx: &AnyRpcTransaction) -> eyre::Result<Option<TxEnvFor<FEN>>> {
-        let is_system = is_known_system_sender(tx.from()) || tx.ty() == SYSTEM_TRANSACTION_TYPE;
+        let is_system = is_legacy_system_transaction(tx.from(), tx.ty());
         if is_system {
             #[cfg(not(feature = "monad"))]
             return Ok(None);
@@ -1751,7 +1752,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         let mut txs_to_replay = Vec::with_capacity(target_index);
         for (index, tx) in transactions[..target_index].iter().enumerate() {
             let Some(tx_env) = Self::replay_tx_env(tx)? else { continue };
-            let is_system = is_known_system_sender(tx.from()) || tx.ty() == SYSTEM_TRANSACTION_TYPE;
+            let is_system = is_legacy_system_transaction(tx.from(), tx.ty());
             txs_to_replay.push((index, tx.clone(), tx_env, is_system));
         }
 
@@ -1796,6 +1797,7 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                 let chain_context = ChainFor::<FEN>::for_rpc_block(
                     &txs_to_replay[0].2,
                     full_block.header().number(),
+                    full_block.header().parent_hash(),
                 );
                 let mut evm = factory.create_evm_with_context(replay_db, evm_env, chain_context);
                 evm.precompiles_mut().configure_for_replay(networks, chain_id, timestamp);
@@ -1960,7 +1962,7 @@ impl<FEN: FoundryEvmNetwork> DatabaseExt<FEN::EvmFactory> for Backend<FEN> {
     fn create_fork(&mut self, create_fork: CreateFork) -> eyre::Result<LocalForkId> {
         trace!("create fork");
         let ForkResult { id: fork_id, backend: fork, resolved, env } =
-            self.forks.create_fork(create_fork)?;
+            self.forks.create_fork_with_hash_mode(create_fork, FEN::EvmFactory::BLOCK_HASH_MODE)?;
         let context = resolved.context();
         let block = resolved.block();
         let mut fork_db = ForkDB::new(fork);
@@ -2223,7 +2225,11 @@ impl<FEN: FoundryEvmNetwork> DatabaseExt<FEN::EvmFactory> for Backend<FEN> {
                 position.expect("Monad transaction target includes canonical position").index,
             )
         } else {
-            ChainFor::<FEN>::for_transaction(&tx_env)
+            ChainFor::<FEN>::for_rpc_block(
+                &tx_env,
+                block.header().number(),
+                block.header().parent_hash(),
+            )
         };
 
         let next_position = if block_context.is_some() {
@@ -3212,6 +3218,7 @@ fn update_env_block<N: Network, SPEC: Into<SpecId> + Copy, BLOCK: FoundryBlock>(
 
 /// Executes the given transaction and commits state changes to the database _and_ the journaled
 /// state, with an inspector.
+#[allow(clippy::too_many_arguments)]
 fn commit_transaction<FEN: FoundryEvmNetwork>(
     transaction: TransactionInputs<FEN>,
     journaled_state: &mut JournaledState,
@@ -3358,7 +3365,7 @@ mod tests {
     use foundry_evm_networks::{NetworkConfigs, celo::transfer::CELO_TRANSFER_ADDRESS};
     use foundry_fork_db::{
         SharedBackend,
-        cache::{BlockchainDb, BlockchainDbMeta},
+        cache::{BlockHashMode, BlockchainDb, BlockchainDbMeta},
     };
     use revm::{
         context::{BlockEnv, JournalInner, TxEnv},
@@ -3804,7 +3811,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn can_read_write_cache() {
+    async fn fork_can_read_write_cache() {
         let endpoint = &*foundry_test_utils::rpc::next_http_rpc_endpoint();
         let provider = get_http_provider(endpoint);
 
@@ -3830,9 +3837,9 @@ mod tests {
         let address = address!("0x63091244180ae240c87d1f528f5f269134cb07b3");
 
         let num_slots = 5;
-        let _account = backend.basic_ref(address);
+        let _account = backend.basic_ref(address).unwrap();
         for idx in 0..num_slots {
-            let _ = backend.storage_ref(address, U256::from(idx));
+            let _ = backend.storage_ref(address, U256::from(idx)).unwrap();
         }
         drop(backend);
 
@@ -3841,7 +3848,11 @@ mod tests {
 
         let db = BlockchainDb::new(
             meta,
-            Some(Config::foundry_block_cache_dir(NamedChain::Mainnet, block_num).unwrap()),
+            Some(crate::fork::fork_cache_file(
+                Config::foundry_block_cache_dir(NamedChain::Mainnet, block_num).unwrap(),
+                "storage.json",
+                BlockHashMode::Evm,
+            )),
         );
         assert!(db.accounts().read().contains_key(&address));
         assert!(db.storage().read().contains_key(&address));

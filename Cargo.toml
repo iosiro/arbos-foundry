@@ -32,13 +32,14 @@ members = [
     "crates/test-utils/",
     "crates/cli-markdown/",
     "crates/tui/",
+    "vendor/foundry-fork-db/",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "1.8.1"
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.96"
 authors = ["Foundry Contributors"]
 license = "MIT OR Apache-2.0"
 homepage = "https://getfoundry.sh"
@@ -330,7 +331,7 @@ foundry-wallets = { version = "0.1.0", default-features = false }
 foundry-linking = { path = "crates/linking" }
 
 # Arbitrum execution
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "dcce99cdb966c26dab09f6727fb3a0628e79c824", default-features = false, features = ["alloy"] }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "1026cefd8747a3914854b29e4e567b20da795562", default-features = false, features = ["alloy"] }
 foundry-primitives = { path = "crates/primitives", default-features = false }
 foundry-tui = { path = "crates/tui", default-features = false }
 
@@ -569,7 +570,7 @@ solar-lint = { git = "https://github.com/paradigmxyz/solar", rev = "0b8a4f83b383
 foundry-wallets = { git = "https://github.com/foundry-rs/foundry-core", rev = "6ce81d5c491121c22b3912fb91455d4f2875439e" }
 foundry-compilers = { git = "https://github.com/foundry-rs/foundry-core", rev = "6ce81d5c491121c22b3912fb91455d4f2875439e" }
 foundry-block-explorers = { git = "https://github.com/foundry-rs/foundry-core", rev = "6ce81d5c491121c22b3912fb91455d4f2875439e" }
-foundry-fork-db = { git = "https://github.com/foundry-rs/foundry-core", rev = "6ce81d5c491121c22b3912fb91455d4f2875439e" }
+foundry-fork-db = { path = "vendor/foundry-fork-db" }
 
 ## alloy-core
 # alloy-dyn-abi = { path = "../../alloy-rs/core/crates/dyn-abi" }

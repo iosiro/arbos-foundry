@@ -59,8 +59,8 @@ repl_test!(save_renamed_session_removes_stale_cache, |repl| {
     let new_id = unique_cache_id("rename-new");
     let _cleanup = CacheCleanup(vec![old_id.clone(), new_id.clone()]);
 
-    repl.sendln(&format!("!save {old_id}"));
-    repl.sendln(&format!("!save {new_id}"));
+    repl.save(&old_id);
+    repl.save(&new_id);
     repl.sendln_raw("!list");
     repl.expect(&format!("chisel-{new_id}.json"));
     repl.expect_prompt();
@@ -80,13 +80,13 @@ repl_test!(save_case_only_rename_preserves_destination, |repl| {
     let new_id = old_id.to_ascii_uppercase();
     let _cleanup = CacheCleanup(vec![old_id.clone(), new_id.clone()]);
 
-    repl.sendln(&format!("!save {old_id}"));
+    repl.save(&old_id);
     let old_cache_file = cache_file(&old_id);
     let new_cache_file = cache_file(&new_id);
     let paths_alias =
         std::fs::canonicalize(&old_cache_file).ok() == std::fs::canonicalize(&new_cache_file).ok();
 
-    repl.sendln(&format!("!save {new_id}"));
+    repl.save(&new_id);
 
     // On case-insensitive filesystems, both IDs resolve to the same cache path.
     repl.sendln_raw(&format!("!load {new_id}"));
@@ -106,14 +106,14 @@ repl_test!(failed_save_restores_previous_session_id, |repl| {
     let _cleanup = CacheCleanup(vec![first_id.clone(), second_id.clone()]);
     let invalid_id = format!("{}/id", unique_cache_id("failed-save-invalid"));
 
-    repl.sendln(&format!("!save {first_id}"));
+    repl.save(&first_id);
     // The nested path makes the write fail without touching the existing cache file.
     repl.sendln_raw(&format!("!save {invalid_id}"));
     repl.expect("No such file or directory");
     repl.expect_prompt();
 
     // A failed rename must not lose the ID of the last successfully saved file.
-    repl.sendln(&format!("!save {second_id}"));
+    repl.save(&second_id);
     repl.sendln_raw("!list");
     repl.expect(&format!("chisel-{second_id}.json"));
     repl.expect_prompt();
@@ -127,7 +127,7 @@ repl_test!(load_session_preserves_active_force, "--force", |repl| {
     let id = unique_cache_id("active-force");
     let _cleanup = CacheCleanup(vec![id.clone()]);
 
-    repl.sendln(&format!("!save {id}"));
+    repl.save(&id);
 
     let out_dir = repl.project().root().join("out");
     fs::create_dir_all(&out_dir).unwrap();
@@ -238,7 +238,7 @@ repl_test!(last_result_resets_with_session, |repl| {
     let _cleanup = CacheCleanup(vec![saved_id.clone(), loaded_id.clone()]);
 
     repl.sendln("uint256 persisted = 7");
-    repl.sendln(&format!("!save {saved_id}"));
+    repl.save(&saved_id);
     std::fs::copy(cache_file(&saved_id), cache_file(&loaded_id)).unwrap();
 
     repl.sendln(r#""stale""#);

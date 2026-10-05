@@ -6,7 +6,7 @@ deploy-verify = { max-threads = 1 }
 [profile.default]
 retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
 slow-timeout = { period = "30s", terminate-after = 3 }
-# Exclude flaky tests from regular CI runs - they run in nightly test-flaky workflow.
+# Exclude flaky tests from regular CI runs - they run in the manual test-flaky workflow.
 # Exclude the on-chain deploy+verify tests too - they spend testnet funds and depend on external
 # verifier services, so they run in the nightly test-deploy-verify workflow.
 default-filter = "not test(/flaky_/) and not test(/deploy_verify_/)"
@@ -22,10 +22,16 @@ slow-timeout = { period = "5m", terminate-after = 4 }
 filter = "test(/vaddr_e2e::/)"
 slow-timeout = { period = "5m", terminate-after = 4 }
 
+# This single Rust test runs the aggregate Solidity fixture suite in a child Forge process.
+[[profile.default.overrides]]
+filter = "package(=forge) & test(/^test_cmd::testdata$/)"
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 # Integration-style CLI tests can exceed the default 90s timeout on slower
 # Windows, macOS, and ARM runners while shelling out to forge/solc/git.
+# Binding compilation tests also build Alloy dependencies in fresh Cargo projects.
 [[profile.default.overrides]]
-filter = "test(/(^|::)bind_event_module_name_shadowing$/) | test(/(^|::)bind_event_module_prefix_does_not_shadow_aliases$/) | test(/(^|::)can_bind_e2e$/) | test(/(^|::)test_clone_/) | test(/(^|::)can_deploy_and_simulate_25_txes_concurrently$/) | test(/(^|::)chisel_can_run_with_live_logs_flag$/) | test(/(^|::)session_wrapper_uses_project_config_for_cast_session$/)"
+filter = "test(/(^|::)bind_event_module_name_shadowing$/) | test(/(^|::)bind_event_module_prefix_does_not_shadow_aliases$/) | test(/(^|::)bind_dollar_sign_in_contract_name$/) | test(/(^|::)bind_generates_enum_variants$/) | test(/(^|::)bind_regression_fixtures_compile$/) | test(/(^|::)bind_single_file_crate_and_module_match$/) | test(/(^|::)can_bind_e2e$/) | test(/(^|::)test_clone_/) | test(/(^|::)can_deploy_and_simulate_25_txes_concurrently$/) | test(/(^|::)chisel_can_run_with_live_logs_flag$/) | test(/(^|::)session_wrapper_uses_project_config_for_cast_session$/)"
 slow-timeout = { period = "5m", terminate-after = 4 }
 
 # Do not re-run so that `cargo cheats` is ran locally.
@@ -33,7 +39,7 @@ slow-timeout = { period = "5m", terminate-after = 4 }
 filter = "package(foundry-cheatcodes-spec)"
 retries = 0
 
-# Profile for running flaky tests (used by nightly CI and for local debugging)
+# Profile for running flaky tests (used by manual CI and for local debugging).
 # Run with: cargo nextest run --profile flaky
 [profile.flaky]
 default-filter = "test(/flaky_/)"

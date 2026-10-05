@@ -19,7 +19,7 @@ use std::{
 
 use eyre::Result;
 use foundry_common::{compile::ProjectCompiler, sh_eprintln, sh_println};
-use foundry_compilers::compilers::multi::MultiCompiler;
+use foundry_compilers::{ProjectCompileOutput, compilers::multi::MultiCompiler};
 use foundry_config::{Config, InlineConfig};
 #[cfg(feature = "monad")]
 use foundry_evm::core::evm::MonadEvmNetwork;
@@ -40,6 +40,7 @@ use tempfile::TempDir;
 use crate::{
     MultiContractRunnerBuilder,
     cmd::test::{FilterArgs, RerunFailure},
+    execution_config::TestExecutorBuilder,
     mutation::{
         SurvivedSpans,
         mutant::{Mutant, MutationResult},
@@ -628,76 +629,6 @@ fn compile_and_test(
     selected_sources_relative: &[PathBuf],
     isolate: bool,
 ) -> Result<bool> {
-    if evm.opts.networks.is_arbitrum() {
-        compile_and_test_inner::<ArbitrumEvmNetwork>(
-            config,
-            evm,
-            filter_args,
-            rerun_failures,
-            selected_sources_relative,
-            isolate,
-            ExecutorBuilder::<ArbitrumEvmNetwork>::new()
-                .stylus_config(evm.opts.stylus_config.clone()),
-        )
-    } else if evm.opts.networks.is_tempo() {
-        compile_and_test_inner::<TempoEvmNetwork>(
-            config,
-            evm,
-            filter_args,
-            rerun_failures,
-            selected_sources_relative,
-            isolate,
-            ExecutorBuilder::<TempoEvmNetwork>::new(),
-        )
-    } else {
-        #[cfg(feature = "monad")]
-        if evm.opts.networks.is_monad() {
-            return compile_and_test_inner::<MonadEvmNetwork>(
-                config,
-                evm,
-                filter_args,
-                rerun_failures,
-                selected_sources_relative,
-                isolate,
-                ExecutorBuilder::<MonadEvmNetwork>::new(),
-            );
-        }
-        #[cfg(feature = "optimism")]
-        if evm.opts.networks.is_optimism() {
-            return compile_and_test_inner::<OpEvmNetwork>(
-                config,
-                evm,
-                filter_args,
-                rerun_failures,
-                selected_sources_relative,
-                isolate,
-                ExecutorBuilder::<OpEvmNetwork>::new(),
-            );
-        }
-        compile_and_test_inner::<EthEvmNetwork>(
-            config,
-            evm,
-            filter_args,
-            rerun_failures,
-            selected_sources_relative,
-            isolate,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-    }
-}
-
-fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
-    config: &Arc<Config>,
-    evm: &MutationEvmConfig,
-    filter_args: &FilterArgs,
-    rerun_failures: Option<&[RerunFailure]>,
-    selected_sources_relative: &[PathBuf],
-    isolate: bool,
-    executor_builder: ExecutorBuilder<FEN>,
-) -> Result<bool> {
-    let evm_opts = &evm.opts;
-    let resolved_fork = evm.resolved_fork.as_ref();
-    // Compile
     let files = selected_sources_relative
         .iter()
         .map(|path| config.root.join(path))
@@ -707,9 +638,90 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
         .dynamic_test_linking(config.dynamic_test_linking)
         .quiet(true)
         .files(files);
+    let output = compiler.compile(&config.project()?)?;
+    let inline = Arc::new(InlineConfig::new_parsed(&output, config)?);
+    let compiled = CompiledMutation { output, inline };
 
-    let compile_output = compiler.compile(&config.project()?)?;
-    let inline_config = Arc::new(InlineConfig::new_parsed(&compile_output, config)?);
+    if evm.opts.networks.is_arbitrum() {
+        let builder = TestExecutorBuilder::arbitrum(
+            config,
+            &compiled.inline,
+            &compiled.output,
+            ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                .stylus_config(evm.opts.stylus_config.clone()),
+        )?;
+        compile_and_test_inner::<ArbitrumEvmNetwork>(
+            config,
+            evm,
+            filter_args,
+            rerun_failures,
+            &compiled,
+            isolate,
+            builder,
+        )
+    } else if evm.opts.networks.is_tempo() {
+        compile_and_test_inner::<TempoEvmNetwork>(
+            config,
+            evm,
+            filter_args,
+            rerun_failures,
+            &compiled,
+            isolate,
+            ExecutorBuilder::<TempoEvmNetwork>::new().into(),
+        )
+    } else {
+        #[cfg(feature = "monad")]
+        if evm.opts.networks.is_monad() {
+            return compile_and_test_inner::<MonadEvmNetwork>(
+                config,
+                evm,
+                filter_args,
+                rerun_failures,
+                &compiled,
+                isolate,
+                ExecutorBuilder::<MonadEvmNetwork>::new().into(),
+            );
+        }
+        #[cfg(feature = "optimism")]
+        if evm.opts.networks.is_optimism() {
+            return compile_and_test_inner::<OpEvmNetwork>(
+                config,
+                evm,
+                filter_args,
+                rerun_failures,
+                &compiled,
+                isolate,
+                ExecutorBuilder::<OpEvmNetwork>::new().into(),
+            );
+        }
+        compile_and_test_inner::<EthEvmNetwork>(
+            config,
+            evm,
+            filter_args,
+            rerun_failures,
+            &compiled,
+            isolate,
+            ExecutorBuilder::<EthEvmNetwork>::new().into(),
+        )
+    }
+}
+
+struct CompiledMutation {
+    output: ProjectCompileOutput,
+    inline: Arc<InlineConfig>,
+}
+
+fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
+    config: &Arc<Config>,
+    evm: &MutationEvmConfig,
+    filter_args: &FilterArgs,
+    rerun_failures: Option<&[RerunFailure]>,
+    compiled: &CompiledMutation,
+    isolate: bool,
+    executor_builder: TestExecutorBuilder<FEN>,
+) -> Result<bool> {
+    let evm_opts = &evm.opts;
+    let resolved_fork = evm.resolved_fork.as_ref();
 
     // Rebuild the per-mutant test filter so `--match-test`, `--match-contract`,
     // `--match-path`, ... are honored against the temp workspace's paths
@@ -741,7 +753,7 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
         // isolation flag, same fail-fast semantics for mutation, and same
         // filter so kept/skipped tests stay consistent across baseline and
         // mutant runs.
-        let mut runner = MultiContractRunnerBuilder::new(config.clone(), inline_config)
+        let mut runner = MultiContractRunnerBuilder::new(config.clone(), compiled.inline.clone())
             .set_debug(false)
             .initial_balance(evm_opts.initial_balance)
             .sender(evm_opts.sender)
@@ -752,12 +764,13 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
             .fail_fast(true)
             .with_create2_deployer_available(evm.create2_deployer_available)
             .build::<FEN, MultiCompiler>(
-                &compile_output,
+                &compiled.output,
                 evm_env,
                 tx_env,
                 evm_opts.clone(),
-                executor_builder,
+                executor_builder.executor,
             )?;
+        runner.tcfg.execution_factories = executor_builder.inline_factories;
 
         runner.test_collect(&filter)
     })?;

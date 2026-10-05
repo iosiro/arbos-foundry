@@ -2,6 +2,9 @@ use super::opts::EvmOpts;
 
 pub mod database;
 
+mod cache;
+pub use cache::fork_cache_file;
+
 mod multi;
 pub use multi::{ForkId, ForkResult, MultiFork, MultiForkHandler};
 

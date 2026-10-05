@@ -55,6 +55,12 @@ impl<FEN: FoundryEvmNetwork> Default for ExecutorBuilder<FEN> {
 }
 
 impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
+    /// Replaces the resolved factory before initializing a backend.
+    pub fn evm_factory(mut self, factory: FEN::EvmFactory) -> Self {
+        self.factory = factory;
+        self
+    }
+
     /// Returns additional cheatcode addresses selected for this executor.
     #[inline]
     pub const fn extra_cheatcode_addresses(&self) -> &'static [Address] {
@@ -161,7 +167,7 @@ impl ExecutorBuilder<EthEvmNetwork> {
 
 impl ExecutorBuilder<ArbitrumEvmNetwork> {
     /// Resolves ArbOS initialization and local execution settings for this factory.
-    pub fn stylus_config(mut self, config: StylusConfig) -> Self {
+    pub const fn stylus_config(mut self, config: StylusConfig) -> Self {
         self.factory = foundry_evm_core::evm::ArbitrumEvmFactory::new(config);
         self
     }
