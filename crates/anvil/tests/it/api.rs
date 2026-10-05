@@ -294,6 +294,8 @@ async fn can_resolve_safe_and_finalized_block_tags_to_genesis_before_configured_
 #[tokio::test(flavor = "multi_thread")]
 async fn can_get_pending_block() {
     let (api, handle) = spawn(NodeConfig::test()).await;
+    // Keep separately constructed pending blocks stable across wall-clock seconds.
+    api.evm_set_block_timestamp_interval(1).unwrap();
 
     let accounts: Vec<_> = handle.dev_wallets().collect();
     let signer: EthereumWallet = accounts[0].clone().into();
@@ -304,6 +306,7 @@ async fn can_get_pending_block() {
 
     let block = provider.get_block(BlockId::pending()).await.unwrap().unwrap();
     assert_eq!(block.header.number, 1);
+    let pending_timestamp = block.header.timestamp;
 
     let num = provider.get_block_number().await.unwrap();
     assert_eq!(num, 0);
@@ -325,6 +328,7 @@ async fn can_get_pending_block() {
     let block = provider.get_block(BlockId::pending()).full().await.unwrap().unwrap();
     assert_eq!(block.header.number, 1);
     assert_eq!(block.transactions.len(), 1);
+    assert_eq!(block.header.timestamp, pending_timestamp);
 
     let receipts = provider.get_block_receipts(BlockId::pending()).await.unwrap().unwrap();
     assert_eq!(receipts.len(), 1);
