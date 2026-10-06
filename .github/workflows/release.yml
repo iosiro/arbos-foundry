@@ -15,10 +15,10 @@ env:
   CARGO_TERM_COLOR: always
   IS_NIGHTLY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
-  RUST_PROFILE: maxperf
+  RUST_PROFILE: dist
   RUST_FEATURES: aws-kms,gcp-kms,turnkey,cli,asm-keccak,js-tracer
 
-  LAST_STABLE_VERSION: "v0.1.0"
+  LAST_STABLE_VERSION: "v0.2.0"
 
 jobs:
   prepare:
@@ -80,6 +80,8 @@ jobs:
       attestations: write
     name: release ${{ matrix.target }} (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
+    # Windows and Linux ARM64 artifacts are best-effort.
+    continue-on-error: ${{ matrix.target == 'x86_64-pc-windows-msvc' || startsWith(matrix.target, 'aarch64-unknown-linux-') }}
     timeout-minutes: 240
     needs: prepare
     strategy:
@@ -121,7 +123,7 @@ jobs:
             svm_target_platform: macosx-aarch64
             platform: darwin
             arch: arm64
-          - runner: windows-latest
+          - runner: windows-2022
             target: x86_64-pc-windows-msvc
             svm_target_platform: windows-amd64
             platform: win32
@@ -175,7 +177,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          flags=(--target $TARGET --profile $RUST_PROFILE
+          flags=(--locked --target $TARGET --profile $RUST_PROFILE
             --bin arbos-forge --bin arbos-cast --bin arbos-anvil --bin arbos-chisel
             --no-default-features --features "$RUST_FEATURES")
 

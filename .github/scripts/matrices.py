@@ -74,7 +74,7 @@ t_linux_arm = Target(
     "ubuntu-22.04-arm", "aarch64-unknown-linux-gnu", "linux-aarch64"
 )
 t_macos = Target("macos-latest", "aarch64-apple-darwin", "macosx-aarch64")
-t_windows = Target("windows-latest", "x86_64-pc-windows-msvc", "windows-amd64")
+t_windows = Target("windows-2022", "x86_64-pc-windows-msvc", "windows-amd64")
 targets = (
     [t_linux_x86]
     if is_pr or profile == "flaky"
