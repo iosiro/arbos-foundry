@@ -550,6 +550,7 @@ async fn create_fork(mut fork: CreateFork) -> eyre::Result<(ForkId, CreatedFork,
     // Determine the cache path if caching is enabled.
     let cache_path = if fork.enable_caching {
         Config::foundry_block_cache_dir(fork.env.evm_env.cfg_env.chain_id, number)
+            .map(|path| super::fork_cache_file(path, "storage.json"))
     } else {
         None
     };

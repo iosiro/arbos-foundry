@@ -790,6 +790,13 @@ impl Backend {
     fn set_init_journaled_state(&mut self, journaled_state: JournaledState) {
         trace!("recording fork init journaled_state");
         self.fork_init_journaled_state = journaled_state;
+        // Execution-rule discovery may have loaded local ArbOS storage before the first
+        // fork was selected. It belongs to that chain, not to the template for future forks.
+        if !self.is_persistent(&arbos_revm::constants::ARBOS_STATE_ADDRESS) {
+            self.fork_init_journaled_state
+                .state
+                .remove(&arbos_revm::constants::ARBOS_STATE_ADDRESS);
+        }
     }
 
     /// Cleans up already loaded accounts that would be initialized without the correct data from
@@ -1068,6 +1075,7 @@ impl DatabaseExt for Backend {
         // this ensures the changes performed while the fork was active are recorded
         if let Some(active) = self.active_fork_mut() {
             active.journaled_state = active_journaled_state.clone();
+            active.chain = Some(env.chain.clone());
 
             let caller = env.tx.caller;
             let caller_account = active.journaled_state.state.get(&env.tx.caller).cloned();
@@ -1159,6 +1167,9 @@ impl DatabaseExt for Backend {
         self.active_fork_ids = Some((id, idx));
         // Update current environment with environment of newly selected fork.
         update_current_env_with_fork_env(env, fork_env);
+        if let Some(chain) = &self.inner.get_fork(idx).chain {
+            *env.chain = chain.clone();
+        }
 
         Ok(())
     }
@@ -1593,6 +1604,7 @@ pub enum BackendDatabaseSnapshot {
 pub struct Fork {
     db: ForkDB,
     journaled_state: JournaledState,
+    chain: Option<arbos_revm::chain::ArbitrumChain>,
 }
 
 impl Fork {
@@ -1752,7 +1764,7 @@ impl BackendInner {
         self.issued_local_fork_ids.insert(id, fork_id.clone());
         self.created_forks.insert(fork_id, idx);
 
-        let fork = Fork { db, journaled_state };
+        let fork = Fork { db, journaled_state, chain: None };
         self.forks.push(Some(fork));
         idx
     }
@@ -1773,6 +1785,7 @@ impl BackendInner {
                 merge_db_account_data(addr, &active.db, &mut new_db);
             }
             active.db = new_db;
+            active.chain = None;
         }
         // update mappings
         self.issued_local_fork_ids.insert(id, new_fork_id.clone());
@@ -1793,7 +1806,7 @@ impl BackendInner {
         self.created_forks.insert(fork_id.clone(), idx);
         let id = self.next_id();
         self.issued_local_fork_ids.insert(id, fork_id);
-        let fork = Fork { db, journaled_state };
+        let fork = Fork { db, journaled_state, chain: None };
         self.forks.push(Some(fork));
         (id, idx)
     }
@@ -1860,6 +1873,7 @@ impl Default for BackendInner {
 pub(crate) fn update_current_env_with_fork_env(current: &mut EnvMut<'_>, fork: Env) {
     *current.block = fork.evm_env.block_env;
     *current.cfg = fork.evm_env.cfg_env;
+    *current.chain = fork.evm_env.chain;
     current.tx.chain_id = fork.tx.chain_id;
 }
 
@@ -1950,6 +1964,13 @@ fn update_env_block(env: &mut EnvMut<'_>, block: &AnyRpcBlock) {
     env.block.basefee = block.header.base_fee_per_gas.unwrap_or_default();
     env.block.gas_limit = block.header.gas_limit;
     env.block.number = U256::from(block.header.number);
+    env.chain.rpc_block_number = Some(block.header.number);
+    if alloy_chains::NamedChain::try_from(env.cfg.chain_id).is_ok_and(|chain| chain.is_arbitrum())
+        && let Some(l1_number) = block.other.get("l1BlockNumber")
+        && let Ok(l1_number) = serde_json::from_value::<U256>(l1_number.clone())
+    {
+        env.block.number = l1_number;
+    }
 
     if let Some(excess_blob_gas) = block.header.excess_blob_gas {
         env.block.blob_excess_gas_and_price = Some(BlobExcessGasAndPrice::new(
@@ -2062,9 +2083,9 @@ mod tests {
         let address = address!("0x63091244180ae240c87d1f528f5f269134cb07b3");
 
         let num_slots = 5;
-        let _account = backend.basic_ref(address);
+        let _account = backend.basic_ref(address).unwrap();
         for idx in 0..num_slots {
-            let _ = backend.storage_ref(address, U256::from(idx));
+            let _ = backend.storage_ref(address, U256::from(idx)).unwrap();
         }
         drop(backend);
 
@@ -2076,7 +2097,10 @@ mod tests {
 
         let db = BlockchainDb::new(
             meta,
-            Some(Config::foundry_block_cache_dir(NamedChain::Mainnet, block_num).unwrap()),
+            Some(crate::fork::fork_cache_file(
+                Config::foundry_block_cache_dir(NamedChain::Mainnet, block_num).unwrap(),
+                "storage.json",
+            )),
         );
         assert!(db.accounts().read().contains_key(&address));
         assert!(db.storage().read().contains_key(&address));

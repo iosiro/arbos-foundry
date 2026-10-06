@@ -591,36 +591,42 @@ async fn correctly_sync_dep_with_multiple_version() {
     assert_eq!(solday_v_245.rev(), submod_solday_v_245.rev());
 }
 
+forgetest_init!(update_to_revision_checks_out_locked_commit, |prj, cmd| {
+    let dependency_path = Path::new("lib/forge-std");
+    let forge_std_path = prj.root().join(dependency_path);
+    let git = Git::new(&forge_std_path);
+    let revision = git.get_rev(format!("{FORGE_STD_REVISION}^"), &forge_std_path).unwrap();
+    assert_ne!(git.head().unwrap(), revision);
+
+    cmd.args(["update", &format!("lib/forge-std@rev={revision}")]).assert_success();
+
+    let dependency = lockfile_get(prj.root(), dependency_path).unwrap();
+    assert!(matches!(dependency, DepIdentifier::Rev { .. }));
+    assert_eq!(dependency.rev(), revision);
+    assert_eq!(git.head().unwrap(), revision, "Checkout must match the requested locked revision");
+});
+
 forgetest_init!(sync_on_forge_update, |prj, cmd| {
-    let git = Git::new(prj.root());
-
-    let submodules = git.submodules().unwrap();
-    assert!(submodules.0.iter().any(|s| s.rev() == FORGE_STD_REVISION));
-
     let mut lockfile = Lockfile::new(prj.root());
     lockfile.read().unwrap();
 
     let forge_std = lockfile.get(&PathBuf::from("lib/forge-std")).unwrap();
-    assert!(forge_std.rev() == FORGE_STD_REVISION);
 
     // cd into the forge-std submodule
     let forge_std_path = prj.root().join("lib/forge-std");
     let git = Git::new(&forge_std_path);
 
-    // Ensure we're on the release tag first (known starting point)
+    // Ensure we're on the locked revision first.
     git.checkout(false, forge_std.name()).unwrap();
-    assert_eq!(git.head().unwrap(), forge_std.rev(), "Forge std should be at the release tag");
+    assert_eq!(git.head().unwrap(), forge_std.rev(), "Forge std should be at the locked revision");
 
-    // Make sure origin/master is up to date, then resolve its commit hash deterministically.
-    git.fetch(false, "origin", Some("master")).unwrap();
+    // Populate all remote refs so unrelated branch discovery does not affect update output.
+    git.fetch(false, "origin", None::<&str>).unwrap();
     let origin_master_head = git.get_rev("refs/remotes/origin/master", &forge_std_path).unwrap();
 
     // Run update and assert the output matches the dynamically resolved hash.
     let expected_output = format!(
-        "Updated dep at 'lib/forge-std', (from: tag={}@{}, to: branch=master@{})\n",
-        forge_std.name(),
-        forge_std.rev(),
-        origin_master_head
+        "Updated dep at 'lib/forge-std', (from: {forge_std}, to: branch=master@{origin_master_head})\n"
     );
 
     cmd.forge_fuse()

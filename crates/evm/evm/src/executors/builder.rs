@@ -82,12 +82,14 @@ impl ExecutorBuilder {
             stack.gas_price = Some(env.tx.gas_price);
         }
         let gas_limit = gas_limit.unwrap_or(env.evm_env.block_env.gas_limit);
-        let env = Env::new_with_spec_id(
+        let chain = env.evm_env.chain.clone();
+        let mut env = Env::new_with_spec_id(
             env.evm_env.cfg_env.clone(),
             env.evm_env.block_env.clone(),
             env.tx,
             spec_id,
         );
+        env.evm_env.chain = chain;
         Executor::new(db, env, stack.build(), gas_limit, legacy_assertions)
     }
 }

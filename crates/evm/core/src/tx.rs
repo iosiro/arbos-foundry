@@ -15,12 +15,17 @@ use alloy_eips::{
     eip2718::WithEncoded,
     eip7702::{RecoveredAuthority, RecoveredAuthorization},
 };
-use alloy_primitives::{Address, Bytes, TxKind};
+use alloy_primitives::{Address, Bytes, TxKind, keccak256};
 use arbos_revm::transaction::ArbitrumTransaction;
 use revm::{context::TxEnv, context_interface::either::Either};
 
 /// Type alias for the Foundry transaction environment.
 pub type FoundryTxEnv = ArbitrumTransaction;
+
+fn arbos_tx_with_encoded(base: TxEnv, encoded: Bytes) -> FoundryTxEnv {
+    let hash = keccak256(&encoded);
+    ArbitrumTransaction::new_with_enveloped(base, encoded).with_tx_hash(hash)
+}
 
 /// Converts `self` into [`TxEnv`].
 pub trait IntoTxEnv<TxEnv> {
@@ -429,8 +434,8 @@ impl FromRecoveredTx<Signed<TxLegacy>> for FoundryTxEnv {
 }
 
 impl FromTxWithEncoded<TxLegacy> for FoundryTxEnv {
-    fn from_encoded_tx(tx: &TxLegacy, sender: Address, _encoded: Bytes) -> Self {
-        TxEnv::from_recovered_tx(tx, sender).into()
+    fn from_encoded_tx(tx: &TxLegacy, sender: Address, encoded: Bytes) -> Self {
+        arbos_tx_with_encoded(TxEnv::from_recovered_tx(tx, sender), encoded)
     }
 }
 
@@ -447,8 +452,8 @@ impl FromRecoveredTx<Signed<TxEip2930>> for FoundryTxEnv {
 }
 
 impl FromTxWithEncoded<TxEip2930> for FoundryTxEnv {
-    fn from_encoded_tx(tx: &TxEip2930, sender: Address, _encoded: Bytes) -> Self {
-        TxEnv::from_recovered_tx(tx, sender).into()
+    fn from_encoded_tx(tx: &TxEip2930, sender: Address, encoded: Bytes) -> Self {
+        arbos_tx_with_encoded(TxEnv::from_recovered_tx(tx, sender), encoded)
     }
 }
 
@@ -465,8 +470,8 @@ impl FromRecoveredTx<Signed<TxEip1559>> for FoundryTxEnv {
 }
 
 impl FromTxWithEncoded<TxEip1559> for FoundryTxEnv {
-    fn from_encoded_tx(tx: &TxEip1559, sender: Address, _encoded: Bytes) -> Self {
-        TxEnv::from_recovered_tx(tx, sender).into()
+    fn from_encoded_tx(tx: &TxEip1559, sender: Address, encoded: Bytes) -> Self {
+        arbos_tx_with_encoded(TxEnv::from_recovered_tx(tx, sender), encoded)
     }
 }
 
@@ -483,8 +488,8 @@ impl FromRecoveredTx<Signed<TxEip4844>> for FoundryTxEnv {
 }
 
 impl FromTxWithEncoded<TxEip4844> for FoundryTxEnv {
-    fn from_encoded_tx(tx: &TxEip4844, sender: Address, _encoded: Bytes) -> Self {
-        TxEnv::from_recovered_tx(tx, sender).into()
+    fn from_encoded_tx(tx: &TxEip4844, sender: Address, encoded: Bytes) -> Self {
+        arbos_tx_with_encoded(TxEnv::from_recovered_tx(tx, sender), encoded)
     }
 }
 
@@ -501,14 +506,14 @@ impl FromRecoveredTx<Signed<TxEip7702>> for FoundryTxEnv {
 }
 
 impl FromTxWithEncoded<TxEip7702> for FoundryTxEnv {
-    fn from_encoded_tx(tx: &TxEip7702, sender: Address, _encoded: Bytes) -> Self {
-        TxEnv::from_recovered_tx(tx, sender).into()
+    fn from_encoded_tx(tx: &TxEip7702, sender: Address, encoded: Bytes) -> Self {
+        arbos_tx_with_encoded(TxEnv::from_recovered_tx(tx, sender), encoded)
     }
 }
 
 impl<Eip4844: AsRef<TxEip4844>> FromTxWithEncoded<EthereumTxEnvelope<Eip4844>> for FoundryTxEnv {
     fn from_encoded_tx(tx: &EthereumTxEnvelope<Eip4844>, caller: Address, encoded: Bytes) -> Self {
-        TxEnv::from_encoded_tx(tx, caller, encoded).into()
+        arbos_tx_with_encoded(TxEnv::from_encoded_tx(tx, caller, encoded.clone()), encoded)
     }
 }
 

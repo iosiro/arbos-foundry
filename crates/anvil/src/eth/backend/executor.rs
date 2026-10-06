@@ -43,7 +43,6 @@ use revm::{
     context::{Block as RevmBlock, BlockEnv, Cfg, JournalTr, TxEnv},
     context_interface::result::{EVMError, ExecutionResult, Output},
     database::WrapDatabaseRef,
-    handler::instructions::EthInstructions,
     interpreter::InstructionResult,
     primitives::hardfork::SpecId,
 };
@@ -109,6 +108,8 @@ pub struct TransactionExecutor<'a, Db: ?Sized, V: TransactionValidator> {
     /// all pending transactions
     pub pending: std::vec::IntoIter<Arc<PoolTransaction>>,
     pub block_env: BlockEnv,
+    /// Program cache shared by all transactions in this block.
+    pub chain: arbos_revm::chain::ArbitrumChain,
     /// The configuration environment and spec id
     pub cfg_env: FoundryCfgEnv,
     pub parent_hash: B256,
@@ -295,7 +296,10 @@ impl<DB: Db + ?Sized, V: TransactionValidator> TransactionExecutor<'_, DB, V> {
             tx_env.authorization_list = cheated_auths;
         }
 
-        Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env.into(), self.networks)
+        let mut env =
+            Env::new(self.cfg_env.clone(), self.block_env.clone(), tx_env.into(), self.networks);
+        env.evm_env.chain = self.chain.clone();
+        env
     }
 }
 
@@ -397,7 +401,9 @@ impl<DB: Db + ?Sized, V: TransactionValidator> Iterator for &mut TransactionExec
 
             trace!(target: "backend", "[{:?}] executing", transaction.hash());
             // transact and commit the transaction (using inspect_tx_commit to invoke inspectors)
-            match evm.inspect_tx_commit(env.tx) {
+            let result = evm.inspect_tx_commit(env.tx);
+            self.chain = evm.chain.clone();
+            match result {
                 Ok(exec_result) => exec_result,
                 Err(err) => {
                     warn!(target: "backend", "[{:?}] failed to execute: {:?}", transaction.hash(), err);
@@ -483,7 +489,7 @@ pub type AnvilInnerEvm<DB, I, P> = ArbitrumEvm<
     FoundryContext<DB>,
     I,
     P,
-    EthInstructions<revm::interpreter::interpreter::EthInterpreter, FoundryContext<DB>>,
+    arbos_revm::ArbitrumInstructions<FoundryContext<DB>>,
     revm::handler::EthFrame<revm::interpreter::interpreter::EthInterpreter>,
 >;
 
@@ -509,7 +515,7 @@ where
         block: env.evm_env.block_env.clone(),
         cfg: env.evm_env.cfg_env.clone(),
         tx: env.tx.clone(),
-        chain: (),
+        chain: env.evm_env.chain.clone(),
         local: FoundryLocalContext::default(),
         error: Ok(()),
     };
@@ -518,7 +524,7 @@ where
     let evm = ArbitrumEvm::new_with_inspector(
         context,
         inspector,
-        EthInstructions::default(),
+        arbos_revm::ArbitrumInstructions::default(),
         FoundryPrecompiles::new(arb_precompiles),
     );
 

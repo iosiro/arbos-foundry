@@ -73,6 +73,7 @@ pub async fn environment<N: Network, P: Provider<N>>(
 
     let mut env = Env {
         evm_env: EvmEnv {
+            chain: Default::default(),
             cfg_env: cfg,
             block_env: FoundryBlockEnv {
                 number: U256::from(block.header().number()),
@@ -123,7 +124,10 @@ pub fn configure_env(
     // If EIP-3607 is enabled it can cause issues during fuzz/invariant tests if the caller
     // is a contract. So we disable the check by default.
     cfg.inner.disable_eip3607 = true;
-    cfg.inner.disable_eip3541 = !stylus.disable_stylus_deployment;
+    // Keep EIP-3541 enabled; arbos-revm exempts only the Stylus prefixes valid
+    // for the active ArbOS version.
+    cfg.inner.disable_eip3541 = false;
+    cfg.disable_stylus_deployment = stylus.disable_stylus_deployment;
     cfg.inner.disable_block_gas_limit = disable_block_gas_limit;
     cfg.inner.disable_nonce_check = true;
     // By default do not enforce transaction gas limits imposed by Osaka (EIP-7825).
@@ -134,7 +138,7 @@ pub fn configure_env(
 
     // Apply Stylus configuration options
     if let Some(arbos_version) = stylus.arbos_version {
-        cfg.arbos_version = arbos_version;
+        cfg.arbos_version = u64::from(arbos_version);
     }
     cfg.debug_mode = stylus.debug_mode_stylus;
     cfg.disable_auto_cache = stylus.disable_auto_cache_stylus;

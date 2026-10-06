@@ -1301,12 +1301,13 @@ impl EthApi {
         }
 
         self.backend
-            .with_database_at(Some(block_request), |state, block_env| {
+            .with_database_at(Some(block_request), |state, block_env, rpc_block_number| {
                 let (exit, out, _, access_list) = self.backend.build_access_list_with_state(
                     &state,
                     request.clone(),
                     FeeDetails::zero(),
                     block_env.clone(),
+                    rpc_block_number,
                 )?;
                 ensure_return_ok(exit, &out)?;
 
@@ -1318,6 +1319,7 @@ impl EthApi {
                     request.clone(),
                     FeeDetails::zero(),
                     block_env,
+                    rpc_block_number,
                 )?;
                 ensure_return_ok(exit, &out)?;
 
@@ -3041,7 +3043,7 @@ impl EthApi {
         // <https://github.com/foundry-rs/foundry/issues/6036>
         self.on_blocking_task(|this| async move {
             this.backend
-                .with_database_at(Some(block_request), |state, mut block| {
+                .with_database_at(Some(block_request), |state, mut block, rpc_block_number| {
                     let mut cache_db = CacheDB::new(state);
                     if let Some(state_overrides) = overrides.state {
                         apply_state_overrides(
@@ -3052,7 +3054,7 @@ impl EthApi {
                     if let Some(block_overrides) = overrides.block {
                         cache_db.apply_block_overrides(*block_overrides, &mut block);
                     }
-                    this.do_estimate_gas_with_state(request, &cache_db, block)
+                    this.do_estimate_gas_with_state(request, &cache_db, block, rpc_block_number)
                 })
                 .await?
         })
@@ -3067,6 +3069,7 @@ impl EthApi {
         mut request: WithOtherFields<TransactionRequest>,
         state: &dyn DatabaseRef,
         block_env: BlockEnv,
+        rpc_block_number: u64,
     ) -> Result<u128> {
         // If the request is a simple native token transfer we can optimize
         // We assume it's a transfer if we have no input data.
@@ -3121,8 +3124,13 @@ impl EthApi {
         call_to_estimate.gas = Some(highest_gas_limit as u64);
 
         // execute the call without writing to db
-        let ethres =
-            self.backend.call_with_state(&state, call_to_estimate, fees.clone(), block_env.clone());
+        let ethres = self.backend.call_with_state(
+            &state,
+            call_to_estimate,
+            fees.clone(),
+            block_env.clone(),
+            rpc_block_number,
+        );
 
         let gas_used = match ethres.try_into()? {
             GasEstimationCallResult::Success(gas) => Ok(gas),
@@ -3158,6 +3166,7 @@ impl EthApi {
                 request.clone(),
                 fees.clone(),
                 block_env.clone(),
+                rpc_block_number,
             );
 
             match ethres.try_into()? {

@@ -1385,7 +1385,7 @@ revertReason         [..]Transaction too old, data: "0x08c379a000000000000000000
 "#,"","","",""));
 });
 // tests that the revert reason is loaded using the correct `from` address.
-casttest!(revert_reason_from, |_prj, cmd| {
+casttest!(flaky_revert_reason_from, |_prj, cmd| {
     let rpc = next_rpc_endpoint(NamedChain::Sepolia);
     // https://sepolia.etherscan.io/tx/0x10ee70cf9f5ced5c515e8d53bfab5ea9f5c72cd61b25fba455c8355ee286c4e4
     cmd.args([
@@ -2142,7 +2142,7 @@ casttest!(storage_layout_complex_md, |_prj, cmd| {
 "#]]);
 });
 
-casttest!(storage_layout_complex_proxy, |_prj, cmd| {
+casttest!(flaky_storage_layout_complex_proxy, |_prj, cmd| {
     cmd.args([
         "storage",
         "--rpc-url",

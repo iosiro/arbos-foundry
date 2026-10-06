@@ -317,12 +317,13 @@ forgetest_init!(can_validate_verifier_settings, |prj, cmd| {
     prj.initialize_default_contracts();
     // Build the project to create the cache.
     cmd.forge_fuse().arg("build").assert_success();
+    // Use an explicit chain ID so validation does not depend on a public RPC endpoint.
     // No verifier URL.
     cmd.forge_fuse()
         .args([
             "verify-contract",
-            "--rpc-url",
-            "https://rpc.sepolia-api.lisk.com",
+            "--chain-id",
+            "4202",
             "--verifier",
             "blockscout",
             "0x19b248616E4964f43F611b5871CE1250f360E9d3",
@@ -338,8 +339,8 @@ Error: No verifier URL specified for verifier blockscout
     cmd.forge_fuse()
         .args([
             "verify-contract",
-            "--rpc-url",
-            "https://rpc.sepolia-api.lisk.com",
+            "--chain-id",
+            "4202",
             "--verifier",
             "etherscan",
             "0x19b248616E4964f43F611b5871CE1250f360E9d3",
@@ -353,10 +354,23 @@ Error: No known Etherscan API URL for chain `4202`. To fix this, please:
 
 "#]]);
 
-    cmd.forge_fuse().args(["verify-contract", "--rpc-url", "https://rpc.sepolia-api.lisk.com", "--verifier", "blockscout", "--verifier-url", "https://sepolia-blockscout.lisk.com/api", "0x19b248616E4964f43F611b5871CE1250f360E9d3", "src/Counter.sol:Counter"]).assert_success().stdout_eq(str![[r#"
-Start verifying contract `0x19b248616E4964f43F611b5871CE1250f360E9d3` deployed on 4202
+    cmd.forge_fuse()
+        .args([
+            "verify-contract",
+            "--chain-id",
+            "4202",
+            "--verifier",
+            "blockscout",
+            "--verifier-url",
+            "https://eth.blockscout.com/api",
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "src/Counter.sol:Counter",
+        ])
+        .assert_success()
+        .stdout_eq(str![[r#"
+Start verifying contract `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` deployed on 4202
 
-Contract [src/Counter.sol:Counter] "0x19b248616E4964f43F611b5871CE1250f360E9d3" is already verified. Skipping verification.
+Contract [src/Counter.sol:Counter] "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2" is already verified. Skipping verification.
 
 "#]]);
 });

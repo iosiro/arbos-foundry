@@ -102,6 +102,7 @@ soldeer-commands.workspace = true
 quick-junit = "0.5.1"
 
 [dev-dependencies]
+arbos-revm.workspace = true
 alloy-hardforks.workspace = true
 anvil.workspace = true
 forge-script-sequence.workspace = true

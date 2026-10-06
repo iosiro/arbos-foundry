@@ -75,7 +75,11 @@ t_linux_arm = Target(
 )
 t_macos = Target("macos-latest", "aarch64-apple-darwin", "macosx-aarch64")
 t_windows = Target("windows-latest", "x86_64-pc-windows-msvc", "windows-amd64")
-targets = [t_linux_x86] if is_pr else [t_linux_x86, t_linux_arm, t_macos, t_windows]
+targets = (
+    [t_linux_x86]
+    if is_pr or profile == "flaky"
+    else [t_linux_x86, t_linux_arm, t_macos, t_windows]
+)
 
 config = [
     Case(
@@ -114,6 +118,8 @@ def main():
 
                 if profile == "isolate":
                     flags += " --features=isolate-by-default"
+                elif profile == "flaky":
+                    flags += " --profile flaky"
                 name += os_str
 
                 flags += " --no-fail-fast"

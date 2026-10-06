@@ -1,4 +1,5 @@
 use crate::context::{FoundryBlockEnv, FoundryCfgEnv, FoundryTxEnv};
+use arbos_revm::chain::ArbitrumChain;
 use revm::{
     Database, Journal, JournalEntry,
     context::{JournalInner, JournalTr, LocalContextTr},
@@ -14,18 +15,24 @@ pub struct EvmEnv<Spec = SpecId> {
     pub cfg_env: FoundryCfgEnv<Spec>,
     /// The block environment.
     pub block_env: FoundryBlockEnv,
+    /// Block-scoped ArbOS metadata and program cache.
+    pub chain: ArbitrumChain,
 }
 
 impl Default for EvmEnv<SpecId> {
     fn default() -> Self {
-        Self { cfg_env: FoundryCfgEnv::default(), block_env: FoundryBlockEnv::default() }
+        Self {
+            cfg_env: FoundryCfgEnv::default(),
+            block_env: FoundryBlockEnv::default(),
+            chain: Default::default(),
+        }
     }
 }
 
 impl<Spec: Copy> EvmEnv<Spec> {
     /// Creates a new `EvmEnv` from the given configuration and block environments.
     pub fn new(cfg_env: FoundryCfgEnv<Spec>, block_env: FoundryBlockEnv) -> Self {
-        Self { cfg_env, block_env }
+        Self { cfg_env, block_env, chain: Default::default() }
     }
 
     /// Returns a reference to the block environment.
@@ -46,7 +53,7 @@ impl<Spec: Copy> EvmEnv<Spec> {
 
 impl<Spec> From<(FoundryCfgEnv<Spec>, FoundryBlockEnv)> for EvmEnv<Spec> {
     fn from((cfg_env, block_env): (FoundryCfgEnv<Spec>, FoundryBlockEnv)) -> Self {
-        Self { cfg_env, block_env }
+        Self { cfg_env, block_env, chain: Default::default() }
     }
 }
 
@@ -67,7 +74,7 @@ impl Env {
     }
 
     pub fn from(cfg: FoundryCfgEnv, block: FoundryBlockEnv, tx: FoundryTxEnv) -> Self {
-        Self { evm_env: EvmEnv { cfg_env: cfg, block_env: block }, tx }
+        Self { evm_env: EvmEnv { cfg_env: cfg, block_env: block, chain: Default::default() }, tx }
     }
 
     pub fn new_with_spec_id(
@@ -88,13 +95,18 @@ pub struct EnvMut<'a> {
     pub block: &'a mut FoundryBlockEnv,
     pub cfg: &'a mut FoundryCfgEnv,
     pub tx: &'a mut FoundryTxEnv,
+    pub chain: &'a mut ArbitrumChain,
 }
 
 impl EnvMut<'_> {
     /// Returns a copy of the environment.
     pub fn to_owned(&self) -> Env {
         Env {
-            evm_env: EvmEnv { cfg_env: self.cfg.to_owned(), block_env: self.block.to_owned() },
+            evm_env: EvmEnv {
+                cfg_env: self.cfg.to_owned(),
+                block_env: self.block.to_owned(),
+                chain: self.chain.clone(),
+            },
             tx: self.tx.to_owned(),
         }
     }
@@ -106,7 +118,7 @@ pub trait AsEnvMut {
 
 impl AsEnvMut for EnvMut<'_> {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
-        EnvMut { block: self.block, cfg: self.cfg, tx: self.tx }
+        EnvMut { block: self.block, cfg: self.cfg, tx: self.tx, chain: self.chain }
     }
 }
 
@@ -116,15 +128,21 @@ impl AsEnvMut for Env {
             block: &mut self.evm_env.block_env,
             cfg: &mut self.evm_env.cfg_env,
             tx: &mut self.tx,
+            chain: &mut self.evm_env.chain,
         }
     }
 }
 
-impl<DB: Database, J: JournalTr<Database = DB>, C, L: LocalContextTr> AsEnvMut
-    for revm::Context<FoundryBlockEnv, FoundryTxEnv, FoundryCfgEnv, DB, J, C, L>
+impl<DB: Database, J: JournalTr<Database = DB>, L: LocalContextTr> AsEnvMut
+    for revm::Context<FoundryBlockEnv, FoundryTxEnv, FoundryCfgEnv, DB, J, ArbitrumChain, L>
 {
     fn as_env_mut(&mut self) -> EnvMut<'_> {
-        EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx }
+        EnvMut {
+            block: &mut self.block,
+            cfg: &mut self.cfg,
+            tx: &mut self.tx,
+            chain: &mut self.chain,
+        }
     }
 }
 
@@ -136,14 +154,14 @@ pub trait ContextExt {
     ) -> (&mut Self::DB, &mut JournalInner<JournalEntry>, EnvMut<'_>);
 }
 
-impl<DB: Database, C, L: LocalContextTr> ContextExt
+impl<DB: Database, L: LocalContextTr> ContextExt
     for revm::Context<
         FoundryBlockEnv,
         FoundryTxEnv,
         FoundryCfgEnv,
         DB,
         Journal<DB, JournalEntry>,
-        C,
+        ArbitrumChain,
         L,
     >
 {
@@ -155,7 +173,12 @@ impl<DB: Database, C, L: LocalContextTr> ContextExt
         (
             &mut self.journaled_state.database,
             &mut self.journaled_state.inner,
-            EnvMut { block: &mut self.block, cfg: &mut self.cfg, tx: &mut self.tx },
+            EnvMut {
+                block: &mut self.block,
+                cfg: &mut self.cfg,
+                tx: &mut self.tx,
+                chain: &mut self.chain,
+            },
         )
     }
 }

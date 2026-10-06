@@ -168,7 +168,7 @@ where
             database: &mut *ccx.ecx.journaled_state.database as &mut dyn DatabaseExt,
         },
         local: FoundryLocalContext::default(),
-        chain: (),
+        chain: ccx.ecx.chain.clone(),
         error,
     };
 
@@ -181,6 +181,7 @@ where
     ccx.ecx.block = ctx.block;
     ccx.ecx.tx = ctx.tx;
     ccx.ecx.cfg = ctx.cfg;
+    ccx.ecx.chain = ctx.chain;
     ccx.ecx.error = ctx.error;
 
     Ok(res)

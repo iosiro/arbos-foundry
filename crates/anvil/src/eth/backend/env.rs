@@ -20,7 +20,11 @@ impl Env {
         tx: FoundryTxEnv,
         networks: NetworkConfigs,
     ) -> Self {
-        Self { evm_env: EvmEnv { cfg_env: cfg, block_env: block }, tx, networks }
+        Self {
+            evm_env: EvmEnv { cfg_env: cfg, block_env: block, chain: Default::default() },
+            tx,
+            networks,
+        }
     }
 }
 
@@ -30,6 +34,7 @@ impl AsEnvMut for Env {
             block: &mut self.evm_env.block_env,
             cfg: &mut self.evm_env.cfg_env,
             tx: &mut self.tx,
+            chain: &mut self.evm_env.chain,
         }
     }
 }

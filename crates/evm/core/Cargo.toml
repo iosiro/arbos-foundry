@@ -70,4 +70,5 @@ url.workspace = true
 arbos-revm.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 foundry-test-utils.workspace = true

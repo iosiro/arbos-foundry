@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use alloy_primitives::{Address, Bytes, U256, address, hex};
 use alloy_sol_types::SolValue;
 use arbos_revm::{
-    state::program::activate_program,
+    state::{ArbState, ArbStateGetter, program::activate_program},
     stylus_executor::stylus_code,
     utils::{Dictionary, brotli_compress, brotli_decompress, strip_wasm_for_stylus},
 };
@@ -194,7 +194,16 @@ fn activate_stylus_program(ccx: &mut CheatsCtxt, program_address: Address) -> Re
 
     let bytecode = ccx.ecx.journal_mut().code(program_address).ok().unwrap_or_default().data;
 
-    let wasm_bytecode = match stylus_code(&bytecode) {
+    let max_wasm_size = ccx
+        .ecx
+        .arb_state(None, false)
+        .programs()
+        .stylus_params()
+        .get()
+        .map_err(|e| fmt_err!("failed to read Stylus parameters: {e}"))?
+        .max_wasm_size;
+
+    let wasm_bytecode = match stylus_code(&bytecode, max_wasm_size) {
         Ok(Some(code)) => code,
         Ok(None) => return Err(fmt_err!("program is not a Stylus WASM contract")),
         Err(err) => {

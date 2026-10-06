@@ -43,14 +43,14 @@ contract StylusConfigTest is Test {
         emit log_named_uint("maxStackDepth", depth);
 
         // Verify defaults are reasonable (arbos-revm defaults)
-        // INITIAL_STYLUS_VERSION = 2
-        assertEq(version, 2, "Default stylus version should be 2");
+        // INITIAL_STYLUS_VERSION = 3
+        assertEq(version, 3, "Default stylus version should be 3");
         // INITIAL_INK_PRICE = 10000
         assertEq(price, 10000, "Default ink price should be 10000");
         // INITIAL_FREE_PAGES = 2
         assertEq(pages, 2, "Default free pages should be 2");
-        // INITIAL_MAX_STACK_DEPTH = 4 * 65536 = 262144
-        assertEq(depth, 262144, "Default max stack depth should be 262144");
+        // INITIAL_MAX_STACK_DEPTH = 22000
+        assertEq(depth, 22000, "Default max stack depth should be 22000");
     }
 
     /// @notice Test that all stylus parameters can be queried
@@ -132,7 +132,7 @@ contract StylusConfigFunctionLevelTest is Test {
         emit log_named_uint("inkPrice", price);
 
         // Should use defaults since no inline config for this function
-        assertEq(version, 2, "Stylus version should be default 2");
+        assertEq(version, 3, "Stylus version should be default 3");
         assertEq(price, 10000, "Ink price should be default 10000");
     }
 }

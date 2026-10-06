@@ -73,6 +73,7 @@ mod tests {
     fn create_eth_evm(spec: SpecId) -> (foundry_evm::Env, EitherEvm<TestEvm>) {
         let eth_env = foundry_evm::Env {
             evm_env: EvmEnv {
+                chain: Default::default(),
                 block_env: Default::default(),
                 cfg_env: FoundryCfgEnv::new_with_spec(spec),
             },
@@ -89,7 +90,7 @@ mod tests {
             block: eth_env.evm_env.block_env.clone(),
             cfg: eth_env.evm_env.cfg_env.clone(),
             tx: eth_env.tx.clone(),
-            chain: (),
+            chain: Default::default(),
             local: FoundryLocalContext::default(),
             error: Ok(()),
         };

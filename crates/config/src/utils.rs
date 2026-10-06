@@ -2,7 +2,7 @@
 
 use crate::{Config, stylus::StylusConfig};
 use alloy_primitives::U256;
-use arbos_revm::state::ArbosStateParams;
+use arbos_revm::state::{ArbosStateParams, program::StylusParams};
 use figment::value::Value;
 use foundry_compilers::artifacts::{
     EvmVersion,
@@ -305,6 +305,10 @@ pub fn evm_spec_id(evm_version: EvmVersion) -> SpecId {
 
 /// Applies Stylus configuration overrides to ArbOS state parameters.
 pub fn apply_stylus_config(params: &mut ArbosStateParams, override_config: &StylusConfig) {
+    if let Some(v) = override_config.arbos_version {
+        params.arbos_version = u64::from(v);
+        params.stylus_params = StylusParams::for_arbos_version(u64::from(v));
+    }
     if let Some(v) = override_config.stylus_version {
         params.stylus_params.version = v;
     }
@@ -349,5 +353,23 @@ pub fn apply_stylus_config(params: &mut ArbosStateParams, override_config: &Styl
     }
     if let Some(v) = override_config.max_wasm_size {
         params.stylus_params.max_wasm_size = v;
+    }
+}
+
+#[cfg(test)]
+mod stylus_tests {
+    use super::*;
+
+    #[test]
+    fn arbos_version_selects_matching_stylus_defaults_before_overrides() {
+        let mut params = ArbosStateParams::default();
+        let config =
+            StylusConfig { arbos_version: Some(40), ink_price: Some(20_000), ..Default::default() };
+
+        apply_stylus_config(&mut params, &config);
+
+        assert_eq!(params.arbos_version, 40);
+        assert_eq!(params.stylus_params.version, 2);
+        assert_eq!(params.stylus_params.ink_price, 20_000);
     }
 }

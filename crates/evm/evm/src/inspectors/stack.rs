@@ -708,6 +708,7 @@ impl InspectorStackRefMut<'_> {
             // need to reset the env in case it was modified via cheatcodes during execution
             *env.cfg = evm.cfg.clone();
             *env.block = evm.block.clone();
+            *env.chain = evm.chain.clone();
 
             *env.tx = cached_env.tx;
             env.block.basefee = cached_env.evm_env.block_env.basefee;

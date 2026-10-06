@@ -1,5 +1,8 @@
 //! RPC API keys utilities.
 
+mod arbitrum;
+pub use arbitrum::spawn_rpc_proxy_with_l1_block_number;
+
 use foundry_config::{
     NamedChain::{
         self, Arbitrum, Base, BinanceSmartChainTestnet, Celo, Mainnet, Optimism, Polygon, Sepolia,
@@ -44,14 +47,14 @@ shuffled_list!(
     HTTP_ARCHIVE_DOMAINS,
     vec![
         //
-        "reth-ethereum.ithaca.xyz/rpc",
+        "ethereum.reth.rs/rpc",
     ],
 );
 shuffled_list!(
     HTTP_DOMAINS,
     vec![
         //
-        "reth-ethereum.ithaca.xyz/rpc",
+        "ethereum.reth.rs/rpc",
         // "reth-ethereum-full.ithaca.xyz/rpc",
     ],
 );
@@ -59,24 +62,25 @@ shuffled_list!(
     WS_ARCHIVE_DOMAINS,
     vec![
         //
-        "reth-ethereum.ithaca.xyz/ws",
+        "ethereum.reth.rs/ws",
     ],
 );
 shuffled_list!(
     WS_DOMAINS,
     vec![
         //
-        "reth-ethereum.ithaca.xyz/ws",
+        "ethereum.reth.rs/ws",
         // "reth-ethereum-full.ithaca.xyz/ws",
     ],
 );
 
-// List of general purpose DRPC keys to rotate through
+// Public Arbitrum endpoints that retain archive state.
 shuffled_list!(
-    DRPC_KEYS,
+    ARBITRUM_URLS,
     vec![
-        "Agc9NK9-6UzYh-vQDDM80Tv0A5UnBkUR8I3qssvAG40d",
-        "AjUPUPonSEInt2CZ_7A-ai3hMyxxBlsR8I4EssvAG40d",
+        //
+        "https://arb-pokt.nodies.app",
+        "https://arbitrum.gateway.tenderly.co",
     ],
 );
 
@@ -107,7 +111,7 @@ pub fn rpc_endpoints() -> RpcEndpoints {
         ("polygon", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::Polygon))),
         ("bsc", RpcEndpointUrl::Url(next_rpc_endpoint(NamedChain::BinanceSmartChain))),
         ("avaxTestnet", RpcEndpointUrl::Url("https://api.avax-test.network/ext/bc/C/rpc".into())),
-        ("moonbeam", RpcEndpointUrl::Url("https://moonbeam-rpc.publicnode.com".into())),
+        ("moonbeam", RpcEndpointUrl::Url("https://moonbeam.api.onfinality.io/public".into())),
         ("rpcEnvAlias", RpcEndpointUrl::Env("${RPC_ENV_ALIAS}".into())),
     ])
 }
@@ -146,8 +150,21 @@ pub fn next_ws_archive_rpc_url() -> String {
     next_archive_url(true)
 }
 
+/// Returns an Arbitrum URL that has access to archive state.
+pub fn arbitrum_archive_rpc_url() -> String {
+    ["ARBITRUM_ARCHIVE_RPC", "ARBITRUM_RPC"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|url| !url.is_empty()))
+        .unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string())
+}
+
 /// Returns a URL that has access to archive state.
 fn next_archive_url(is_ws: bool) -> String {
+    let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+    if let Some(url) = env_rpc_url(env_var) {
+        test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
+        return url;
+    }
     let domain = if is_ws { &WS_ARCHIVE_DOMAINS } else { &HTTP_ARCHIVE_DOMAINS }.next();
     let url = if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
@@ -188,29 +205,40 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
     }
 
     if matches!(chain, Arbitrum) {
-        let rpc_url = env::var("ARBITRUM_RPC").unwrap_or_default();
-        if !rpc_url.is_empty() {
-            return rpc_url;
+        return arbitrum_archive_rpc_url();
+    }
+
+    if matches!(chain, Mainnet) {
+        let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+        if let Some(url) = env_rpc_url(env_var) {
+            return url;
         }
+    }
+
+    let publicnode_domain = match chain {
+        Sepolia => Some("ethereum-sepolia-rpc.publicnode.com"),
+        Polygon => Some("polygon-bor-rpc.publicnode.com"),
+        NamedChain::BinanceSmartChain => Some("bsc-rpc.publicnode.com"),
+        _ => None,
+    };
+    if let Some(domain) = publicnode_domain {
+        return if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     }
 
     let reth_works = true;
     let domain = if reth_works && matches!(chain, Mainnet) {
         *(if is_ws { &WS_DOMAINS } else { &HTTP_DOMAINS }).next()
     } else {
-        // DRPC for other networks used in tests.
-        let key = DRPC_KEYS.next();
-        let network = match chain {
-            Mainnet => "ethereum",
-            Polygon => "polygon",
-            Arbitrum => "arbitrum",
-            Sepolia => "sepolia",
-            _ => "",
-        };
-        &format!("lb.drpc.org/ogrpc?network={network}&dkey={key}")
+        panic!("no test RPC endpoint configured for {chain:?}")
     };
 
     if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") }
+}
+
+fn env_rpc_url(var: &str) -> Option<String> {
+    env::var(var).ok().and_then(|urls| {
+        urls.split(',').find(|url| !url.trim().is_empty()).map(str::trim).map(str::to_owned)
+    })
 }
 
 /// Basic redaction for debugging RPC URLs.
