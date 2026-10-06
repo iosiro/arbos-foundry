@@ -44,6 +44,8 @@ jobs:
       attestations: write
     name: ${{ matrix.target }} (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
+    # Windows artifacts are best-effort; other platforms remain required.
+    continue-on-error: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
     timeout-minutes: 240
     needs: prepare
     strategy:

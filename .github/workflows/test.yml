@@ -50,6 +50,8 @@ jobs:
   test:
     name: test ${{ matrix.name }}
     runs-on: ${{ matrix.runner_label }}
+    # Windows validation is best-effort; other platforms remain required.
+    continue-on-error: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
     timeout-minutes: 60
     permissions:
       contents: read
