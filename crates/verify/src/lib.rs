@@ -19,10 +19,10 @@ pub use bytecode::VerifyBytecodeArgs;
 pub mod retry;
 pub use retry::RetryArgs;
 
-mod sourcify;
+pub mod sourcify;
 
 pub mod verify;
-pub use verify::{VerifierArgs, VerifyArgs, VerifyCheckArgs};
+pub use verify::{VerifierArgs, VerifyArgs, VerifyCheckArgs, parse_etherscan_license_type};
 
 mod types;
 

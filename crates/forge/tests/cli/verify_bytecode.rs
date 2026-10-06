@@ -1,13 +1,19 @@
+use crate::utils;
+use alloy_chains::Chain;
+use alloy_primitives::hex;
 use foundry_compilers::artifacts::{BytecodeHash, EvmVersion};
 use foundry_config::Config;
 use foundry_test_utils::{
-    TestCommand, TestProject, forgetest_async,
+    TestCommand, TestProject,
+    etherscan::fetch_etherscan_source_flattened,
+    forgetest_async,
     rpc::{next_etherscan_api_key, next_http_archive_rpc_url},
     util::OutputExt,
 };
+use std::fs;
 
 #[expect(clippy::too_many_arguments)]
-fn test_verify_bytecode(
+async fn test_verify_bytecode(
     prj: TestProject,
     mut cmd: TestCommand,
     addr: &str,
@@ -17,17 +23,15 @@ fn test_verify_bytecode(
     verifier: &str,
     verifier_url: &str,
     expected_matches: (&str, &str),
+    chain: Chain,
 ) {
     let etherscan_key = next_etherscan_api_key();
     let rpc_url = next_http_archive_rpc_url();
 
-    // fetch and flatten source code
-    let source_code = cmd
-        .cast_fuse()
-        .args(["source", addr, "--flatten", "--etherscan-api-key", &etherscan_key])
-        .assert_success()
-        .get_output()
-        .stdout_lossy();
+    // fetch and flatten source code using the library directly
+    let source_code = fetch_etherscan_source_flattened(addr, &etherscan_key, chain)
+        .await
+        .expect("failed to fetch source code from etherscan");
 
     prj.add_source(contract_name, &source_code);
     prj.write_config(config);
@@ -65,7 +69,7 @@ fn test_verify_bytecode(
 }
 
 #[expect(clippy::too_many_arguments)]
-fn test_verify_bytecode_with_ignore(
+async fn test_verify_bytecode_with_ignore(
     prj: TestProject,
     mut cmd: TestCommand,
     addr: &str,
@@ -75,26 +79,15 @@ fn test_verify_bytecode_with_ignore(
     verifier_url: &str,
     expected_matches: (&str, &str),
     ignore: &str,
-    chain: &str,
+    chain: Chain,
 ) {
     let etherscan_key = next_etherscan_api_key();
     let rpc_url = next_http_archive_rpc_url();
 
-    // fetch and flatten source code
-    let source_code = cmd
-        .cast_fuse()
-        .args([
-            "source",
-            addr,
-            "--flatten",
-            "--etherscan-api-key",
-            &etherscan_key,
-            "--chain",
-            chain,
-        ])
-        .assert_success()
-        .get_output()
-        .stdout_lossy();
+    // fetch and flatten source code using the library directly
+    let source_code = fetch_etherscan_source_flattened(addr, &etherscan_key, chain)
+        .await
+        .expect("failed to fetch source code from etherscan");
 
     prj.add_source(contract_name, &source_code);
     prj.write_config(config);
@@ -144,6 +137,7 @@ fn test_verify_bytecode_with_ignore(
         );
     }
 }
+
 forgetest_async!(flaky_verify_bytecode_no_metadata, |prj, cmd| {
     test_verify_bytecode(
         prj,
@@ -162,7 +156,9 @@ forgetest_async!(flaky_verify_bytecode_no_metadata, |prj, cmd| {
         "etherscan",
         "https://api.etherscan.io/v2/api?chainid=1",
         ("partial", "partial"),
-    );
+        Chain::mainnet(),
+    )
+    .await;
 });
 
 forgetest_async!(flaky_verify_bytecode_with_metadata, |prj, cmd| {
@@ -181,7 +177,9 @@ forgetest_async!(flaky_verify_bytecode_with_metadata, |prj, cmd| {
         "etherscan",
         "https://api.etherscan.io/v2/api?chainid=1",
         ("partial", "partial"),
-    );
+        Chain::mainnet(),
+    )
+    .await;
 });
 
 // Test non-CREATE2 deployed contract with blockscout
@@ -201,7 +199,9 @@ forgetest_async!(flaky_verify_bytecode_with_blockscout, |prj, cmd| {
         "blockscout",
         "https://eth.blockscout.com/api",
         ("partial", "partial"),
-    );
+        Chain::mainnet(),
+    )
+    .await;
 });
 
 // Test CREATE2 deployed contract with blockscout
@@ -223,7 +223,9 @@ forgetest_async!(flaky_verify_bytecode_create2_with_blockscout, |prj, cmd| {
         "blockscout",
         "https://eth.blockscout.com/api",
         ("partial", "partial"),
-    );
+        Chain::mainnet(),
+    )
+    .await;
 });
 
 // Test `--constructor-args`
@@ -248,7 +250,96 @@ forgetest_async!(flaky_verify_bytecode_with_constructor_args, |prj, cmd| {
         "etherscan",
         "https://api.etherscan.io/v2/api?chainid=1",
         ("partial", "partial"),
+        Chain::mainnet(),
+    )
+    .await;
+});
+
+// Wrong `--constructor-args` used to verify clean, because supplied args that were not the tail
+// of the creation code were silently replaced by the real ones.
+forgetest_async!(flaky_verify_bytecode_warns_on_wrong_constructor_args, |prj, cmd| {
+    let etherscan_key = next_etherscan_api_key();
+    let rpc_url = next_http_archive_rpc_url();
+    let addr = "0x70f44C13944d49a236E3cD7a94f48f5daB6C619b";
+
+    let source_code = fetch_etherscan_source_flattened(addr, &etherscan_key, Chain::mainnet())
+        .await
+        .expect("failed to fetch source code from etherscan");
+    prj.add_source("StrategyManager", &source_code);
+    prj.write_config(Config {
+        evm_version: EvmVersion::London,
+        optimizer: Some(true),
+        optimizer_runs: Some(200),
+        ..Default::default()
+    });
+
+    let etherscan_key = next_etherscan_api_key();
+    let run = cmd
+        .forge_fuse()
+        .args([
+            "verify-bytecode",
+            addr,
+            "StrategyManager",
+            "--etherscan-api-key",
+            &etherscan_key,
+            "--verifier",
+            "etherscan",
+            "--verifier-url",
+            "https://api.etherscan.io/v2/api?chainid=1",
+            "--rpc-url",
+            &rpc_url,
+            // Three zero addresses instead of the real constructor arguments.
+            "--constructor-args",
+            "0x0000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .assert_success();
+    let output = run.get_output();
+
+    // The warning goes to stderr, the match verdict to stdout.
+    let stderr = output.stderr_lossy();
+    let stdout = output.stdout_lossy();
+
+    assert!(
+        stderr.contains(
+            "Provided constructor args could not be validated against deployment creation code"
+        ),
+        "expected a warning that the supplied args do not match the deployment, got:\n{stderr}"
     );
+    assert!(
+        !stdout.contains("Creation code matched"),
+        "wrong constructor args must not produce a creation match, got:\n{stdout}"
+    );
+
+    // Ignoring creation verification must still compare the runtime produced by the supplied
+    // arguments. StrategyManager embeds its constructor arguments as immutables, so they produce
+    // a runtime mismatch.
+    let etherscan_key = next_etherscan_api_key();
+    cmd.forge_fuse()
+        .args([
+            "verify-bytecode",
+            addr,
+            "StrategyManager",
+            "--etherscan-api-key",
+            &etherscan_key,
+            "--verifier",
+            "etherscan",
+            "--verifier-url",
+            "https://api.etherscan.io/v2/api?chainid=1",
+            "--rpc-url",
+            &rpc_url,
+            "--constructor-args",
+            "0x0000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000",
+            "--ignore",
+            "creation",
+            "--json",
+        ])
+        .assert_json_stdout(
+            r#"[{"bytecode_type":"runtime","match_type":null,"message":"Runtime code did not match - this may be due to varying compiler settings"}]"#,
+        );
 });
 
 // `--ignore` tests
@@ -270,8 +361,9 @@ forgetest_async!(flaky_verify_bytecode_can_ignore_creation, |prj, cmd| {
         "https://api.etherscan.io/v2/api?chainid=1",
         ("ignored", "partial"),
         "creation",
-        "1",
-    );
+        Chain::mainnet(),
+    )
+    .await;
 });
 
 forgetest_async!(flaky_verify_bytecode_can_ignore_runtime, |prj, cmd| {
@@ -292,8 +384,69 @@ forgetest_async!(flaky_verify_bytecode_can_ignore_runtime, |prj, cmd| {
         "https://api.etherscan.io/v2/api?chainid=1",
         ("partial", "ignored"),
         "runtime",
-        "1",
-    );
+        Chain::mainnet(),
+    )
+    .await;
+});
+
+// Test that verification fails when source code doesn't match deployed bytecode
+forgetest_async!(flaky_can_verify_bytecode_fails_on_source_mismatch, |prj, cmd| {
+    let etherscan_key = next_etherscan_api_key();
+    let rpc_url = next_http_archive_rpc_url();
+
+    // Fetch real source code using the library directly
+    let real_source = fetch_etherscan_source_flattened(
+        "0xba2492e52F45651B60B8B38d4Ea5E2390C64Ffb1",
+        &etherscan_key,
+        Chain::mainnet(),
+    )
+    .await
+    .expect("failed to fetch source code from etherscan");
+
+    prj.add_source("SystemConfig", &real_source);
+    prj.write_config(Config {
+        evm_version: EvmVersion::London,
+        optimizer_runs: Some(999999),
+        optimizer: Some(true),
+        cbor_metadata: false,
+        bytecode_hash: BytecodeHash::None,
+        ..Default::default()
+    });
+    // Build once with correct source (creates cache). Linting is unrelated to bytecode
+    // verification here and can dominate runtime on the flattened Etherscan source.
+    cmd.forge_fuse().args(["build", "--no-lint"]).assert_success();
+
+    let source_code = r#"
+    contract SystemConfig {
+        uint256 public constant MODIFIED_VALUE = 999;
+
+        function someFunction() public pure returns (uint256) {
+            return MODIFIED_VALUE;
+        }
+    }
+    "#;
+
+    // Now replace with different incorrect source code
+    prj.add_source("SystemConfig", source_code);
+    let etherscan_key = next_etherscan_api_key();
+    let args = vec![
+        "verify-bytecode",
+        "0xba2492e52F45651B60B8B38d4Ea5E2390C64Ffb1",
+        "SystemConfig",
+        "--etherscan-api-key",
+        &etherscan_key,
+        "--verifier",
+        "etherscan",
+        "--verifier-url",
+        "https://api.etherscan.io/v2/api?chainid=1",
+        "--rpc-url",
+        &rpc_url,
+    ];
+    let output = cmd.forge_fuse().args(args).assert_success().get_output().stderr_lossy();
+
+    // Verify that bytecode does NOT match (recompiled with incorrect source)
+    assert!(output.contains("Error: Creation code did not match".to_string().as_str()));
+    assert!(output.contains("Error: Runtime code did not match".to_string().as_str()));
 });
 
 // Test predeploy contracts
@@ -317,6 +470,293 @@ forgetest_async!(flaky_verify_bytecode_can_ignore_runtime, |prj, cmd| {
 //         "https://api.basescan.org/api",
 //         ("ignored", "partial"),
 //         "creation",
-//         "base",
-//     );
+//         Chain::base_mainnet(),
+//     ).await;
 // });
+
+// Tests that `verify-bytecode` works without any external block explorer, relying only on the
+// local project and an RPC endpoint.
+// <https://github.com/foundry-rs/foundry/issues/13479>
+forgetest_async!(can_verify_bytecode_without_explorer, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    prj.initialize_default_contracts();
+
+    let (_api, handle) = anvil::spawn(anvil::NodeConfig::test()).await;
+    let rpc = handle.http_endpoint();
+    let wallet = handle.dev_wallets().next().unwrap();
+    let pk = alloy_primitives::hex::encode(wallet.credential().to_bytes());
+
+    // Deploy the template contract; first tx of the default dev account.
+    cmd.forge_fuse();
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    let output = cmd
+        .args([
+            "create",
+            "./src/Counter.sol:Counter",
+            "--rpc-url",
+            rpc.as_str(),
+            "--private-key",
+            pk.as_str(),
+            "--broadcast",
+        ])
+        .assert_success()
+        .get_output()
+        .stdout_lossy();
+    let address = output
+        .lines()
+        .find_map(|line| line.strip_prefix("Deployed to: "))
+        .expect("contract address in `forge create` output")
+        .to_string();
+
+    // Bare contract names should compile only their uniquely resolved source.
+    prj.add_source("Broken", "contract Broken { uint256 public value = doesNotExist; }");
+
+    // The local anvil chain has no block explorer: the command must still verify the runtime
+    // bytecode and only warn about the unavailable explorer data.
+    cmd.forge_fuse();
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    let assert = cmd
+        .args(["verify-bytecode", &address, "Counter", "--rpc-url", rpc.as_str()])
+        .assert_success();
+    let output = assert.get_output();
+    let stdout = output.stdout_lossy();
+    let stderr = output.stderr_lossy();
+
+    assert!(stdout.contains("Runtime code matched"), "{stdout}");
+    assert!(stderr.contains("Creation data is unavailable"), "{stderr}");
+
+    // Dependencies and projects with Vyper sources retain full-project compilation. The unrelated
+    // invalid source therefore makes both builds fail.
+    prj.create_file("lib/Dependency.sol", "contract Dependency {}");
+    prj.add_source("UsesDependency", "import '../lib/Dependency.sol'; contract UsesDependency {}");
+    cmd.forge_fuse()
+        .args(["verify-bytecode", &address, "Dependency", "--rpc-url", rpc.as_str()])
+        .assert_failure();
+    let vyper_source = prj.add_raw_source("Counter.vy", "invalid Vyper source");
+    cmd.forge_fuse()
+        .args(["verify-bytecode", &address, "Counter", "--rpc-url", rpc.as_str()])
+        .assert_failure();
+    fs::remove_file(vyper_source).unwrap();
+
+    // `--ignore runtime` must skip the runtime fallback as well: with no creation data either,
+    // there is nothing left to verify.
+    cmd.forge_fuse();
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    let assert = cmd
+        .args([
+            "verify-bytecode",
+            &address,
+            "Counter",
+            "--rpc-url",
+            rpc.as_str(),
+            "--ignore",
+            "runtime",
+        ])
+        .assert_success();
+    let output = assert.get_output();
+    let stdout = output.stdout_lossy();
+    let stderr = output.stderr_lossy();
+
+    assert!(!stdout.contains("Runtime code matched"), "{stdout}");
+    assert!(stderr.contains("Creation data is unavailable"), "{stderr}");
+
+    // An explicitly configured but broken verifier must surface an error instead of being
+    // silently treated as "no explorer".
+    cmd.forge_fuse();
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    cmd.args([
+        "verify-bytecode",
+        &address,
+        "Counter",
+        "--rpc-url",
+        rpc.as_str(),
+        "--verifier-url",
+        "this-is-not-a-url",
+    ])
+    .assert_failure();
+});
+
+forgetest_async!(can_verify_bytecode_with_libraries, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
+    prj.update_config(|config| config.libraries.clear());
+    prj.add_source(
+        "Libraries",
+        r#"
+library FirstLib {
+    function compute(uint256 value) external pure returns (uint256) {
+        return value + 1;
+    }
+}
+
+library SecondLib {
+    function compute(uint256 value) external pure returns (uint256) {
+        return value * 2;
+    }
+}
+"#,
+    );
+    prj.add_source(
+        "LinkedContract",
+        r#"
+import {FirstLib, SecondLib} from "./Libraries.sol";
+
+contract LinkedContract {
+    uint256 public immutable initial;
+
+    constructor() {
+        initial = SecondLib.compute(FirstLib.compute(20));
+    }
+
+    function compute(uint256 value) external view returns (uint256) {
+        return SecondLib.compute(FirstLib.compute(value));
+    }
+}
+"#,
+    );
+
+    let (_api, handle) = anvil::spawn(anvil::NodeConfig::test()).await;
+    let rpc = handle.http_endpoint();
+    let wallet = handle.dev_wallets().next().unwrap();
+    let pk = hex::encode(wallet.credential().to_bytes());
+
+    cmd.forge_fuse();
+    cmd.unset_env("DAPP_LIBRARIES");
+    cmd.unset_env("FOUNDRY_LIBRARIES");
+    cmd.unset_env("FOUNDRY_CONFIG");
+    let output = cmd
+        .args([
+            "create",
+            "src/Libraries.sol:FirstLib",
+            "--rpc-url",
+            rpc.as_str(),
+            "--private-key",
+            pk.as_str(),
+            "--broadcast",
+        ])
+        .assert_success()
+        .get_output()
+        .stdout_lossy();
+    let first_lib = utils::parse_deployed_address(&output)
+        .unwrap_or_else(|| panic!("Failed to parse deployed library address: {output}"));
+
+    cmd.forge_fuse();
+    cmd.unset_env("DAPP_LIBRARIES");
+    cmd.unset_env("FOUNDRY_LIBRARIES");
+    cmd.unset_env("FOUNDRY_CONFIG");
+    let output = cmd
+        .args([
+            "create",
+            "src/Libraries.sol:SecondLib",
+            "--rpc-url",
+            rpc.as_str(),
+            "--private-key",
+            pk.as_str(),
+            "--broadcast",
+        ])
+        .assert_success()
+        .get_output()
+        .stdout_lossy();
+    let second_lib = utils::parse_deployed_address(&output)
+        .unwrap_or_else(|| panic!("Failed to parse deployed library address: {output}"));
+
+    let first_lib_spec = format!("src/Libraries.sol:FirstLib:{first_lib}");
+    let second_lib_spec = format!("src/Libraries.sol:SecondLib:{second_lib}");
+
+    cmd.forge_fuse();
+    cmd.unset_env("DAPP_LIBRARIES");
+    cmd.unset_env("FOUNDRY_LIBRARIES");
+    cmd.unset_env("FOUNDRY_CONFIG");
+    let output = cmd
+        .args([
+            "create",
+            "src/LinkedContract.sol:LinkedContract",
+            "--rpc-url",
+            rpc.as_str(),
+            "--private-key",
+            pk.as_str(),
+            "--broadcast",
+            "--libraries",
+            first_lib_spec.as_str(),
+            "--libraries",
+            second_lib_spec.as_str(),
+        ])
+        .assert_success()
+        .get_output()
+        .stdout_lossy();
+    let contract = utils::parse_deployed_address(&output)
+        .unwrap_or_else(|| panic!("Failed to parse deployed contract address: {output}"));
+
+    // Explicit CLI values must take precedence over configured addresses for the same libraries.
+    prj.update_config(|config| {
+        config.libraries = vec![
+            "src/Libraries.sol:FirstLib:0x1111111111111111111111111111111111111111".to_string(),
+            "src/Libraries.sol:SecondLib:0x2222222222222222222222222222222222222222".to_string(),
+        ];
+    });
+
+    // Ensure verification recompiles with its own linker arguments rather than reusing the
+    // artifacts produced by `forge create`.
+    prj.clear();
+
+    cmd.forge_fuse();
+    cmd.unset_env("DAPP_LIBRARIES");
+    cmd.unset_env("FOUNDRY_LIBRARIES");
+    cmd.unset_env("FOUNDRY_CONFIG");
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    let assert = cmd
+        .args([
+            "verify-bytecode",
+            contract.as_str(),
+            "src/LinkedContract.sol:LinkedContract",
+            "--rpc-url",
+            rpc.as_str(),
+            "--libraries",
+            first_lib_spec.as_str(),
+            "--libraries",
+            second_lib_spec.as_str(),
+        ])
+        .assert_success();
+    let output = assert.get_output();
+    let stdout = output.stdout_lossy();
+    let stderr = output.stderr_lossy();
+
+    assert!(stdout.contains("Runtime code matched with status full"), "{stdout}");
+    assert!(stderr.contains("Creation data is unavailable"), "{stderr}");
+
+    // Multi-library environment values continue to be parsed by the configuration provider.
+    prj.update_config(|config| config.libraries.clear());
+    prj.clear();
+
+    cmd.forge_fuse();
+    cmd.env("DAPP_LIBRARIES", format!("{first_lib_spec},{second_lib_spec}"));
+    cmd.unset_env("FOUNDRY_LIBRARIES");
+    cmd.unset_env("FOUNDRY_CONFIG");
+    cmd.unset_env("ETHERSCAN_API_KEY");
+    cmd.unset_env("VERIFIER_API_KEY");
+    cmd.unset_env("VERIFIER_URL");
+    let assert = cmd
+        .args([
+            "verify-bytecode",
+            contract.as_str(),
+            "src/LinkedContract.sol:LinkedContract",
+            "--rpc-url",
+            rpc.as_str(),
+        ])
+        .assert_success();
+    let output = assert.get_output();
+    let stdout = output.stdout_lossy();
+    let stderr = output.stderr_lossy();
+
+    assert!(stdout.contains("Runtime code matched with status full"), "{stdout}");
+    assert!(stderr.contains("Creation data is unavailable"), "{stderr}");
+});

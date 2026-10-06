@@ -13,6 +13,9 @@ extend-exclude = [
     "**/test/**",
     "**/*_test.*",
     "**/*_tests.*",
+    # Preserve upstream release history and release-tool regular expressions.
+    "vendor/foundry-fork-db/CHANGELOG.md",
+    "vendor/foundry-fork-db/cliff.toml",
 ]
 
 [default.extend-words]
@@ -22,3 +25,4 @@ Caf = "Caf"
 froms = "froms"
 strat = "strat"
 ba = "ba"
+consts = "consts"

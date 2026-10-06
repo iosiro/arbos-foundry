@@ -1,0 +1,441 @@
+use crate::{
+    cmd::send::{
+        cast_send, cast_send_with_tempo_wallet, cast_send_with_tempo_wallet_via_sponsor,
+        validate_sponsor_url,
+    },
+    tempo,
+    tx::{CastTxBuilder, CastTxSender, SendTxOpts, TxParams},
+};
+use alloy_ens::NameOrAddress;
+use alloy_network::{EthereumWallet, TransactionBuilder};
+use alloy_primitives::{Address, B256};
+use alloy_provider::{Provider, ProviderBuilder as AlloyProviderBuilder};
+use alloy_signer::Signer;
+use clap::Parser;
+use foundry_cli::utils::{LoadConfig, get_chain, maybe_print_resolved_lane, resolve_lane};
+use foundry_common::{
+    FoundryTransactionBuilder,
+    provider::ProviderBuilder,
+    tempo::{maybe_print_fee_token, resolve_and_set_fee_token},
+};
+use foundry_wallets::{TempoAccountsWallet, WalletSigner};
+use std::{str::FromStr, time::Duration};
+use tempo_alloy::TempoNetwork;
+use tempo_primitives::transaction::FEE_PAYER_SIGNATURE_MARKER;
+
+mod create;
+pub(crate) use create::iso4217_warning_message;
+pub(crate) mod logo;
+pub(crate) mod mine;
+
+/// TIP-20 token operations (Tempo).
+#[derive(Debug, Parser, Clone)]
+pub enum Tip20Subcommand {
+    /// Create a new TIP-20 token via the TIP20Factory.
+    #[command(visible_alias = "c")]
+    Create {
+        /// The token name (e.g. "US Dollar Coin").
+        name: String,
+
+        /// The token symbol (e.g. "USDC").
+        symbol: String,
+
+        /// The ISO 4217 currency code (e.g. "USD", "EUR", "GBP").
+        /// This field is IMMUTABLE after creation and affects fee payment
+        /// eligibility, DEX routing, and quote token pairing.
+        currency: String,
+
+        /// The TIP-20 quote token address used for exchange pricing.
+        #[arg(value_parser = NameOrAddress::from_str)]
+        quote_token: NameOrAddress,
+
+        /// The admin address to receive DEFAULT_ADMIN_ROLE on the new token.
+        #[arg(value_parser = NameOrAddress::from_str)]
+        admin: NameOrAddress,
+
+        /// A unique salt for deterministic address derivation (hex-encoded bytes32).
+        salt: B256,
+
+        /// Optional T5 logo URI for the token.
+        #[arg(long, value_name = "URI")]
+        logo_uri: Option<String>,
+
+        /// Skip the ISO 4217 currency code validation warning.
+        #[arg(long)]
+        force: bool,
+
+        #[command(flatten)]
+        send_tx: SendTxOpts,
+
+        #[command(flatten)]
+        tx: TxParams,
+    },
+
+    /// Validate a TIP-20 logo URI offline against Tempo T5 constraints.
+    LogoCheck {
+        /// The logo URI to validate. Empty string is valid.
+        #[arg(value_name = "URI")]
+        logo_uri: String,
+    },
+
+    /// Update a TIP-20 token logo URI.
+    LogoSet {
+        /// The TIP-20 token contract address.
+        #[arg(value_parser = NameOrAddress::from_str)]
+        token: NameOrAddress,
+
+        /// The new logo URI. Empty string clears the on-chain value.
+        #[arg(value_name = "URI")]
+        logo_uri: String,
+
+        #[command(flatten)]
+        send_tx: SendTxOpts,
+
+        #[command(flatten)]
+        tx: TxParams,
+    },
+
+    /// Mine a TIP-1022 salt for virtual address' master registration on Tempo.
+    #[command(visible_alias = "m")]
+    Mine {
+        /// Address that will call `registerVirtualMaster(bytes32)`.
+        #[arg(value_name = "ADDRESS")]
+        master: Address,
+
+        /// Salt to validate directly instead of mining one.
+        #[arg(long, conflicts_with_all = ["seed", "no_random"], value_name = "HEX")]
+        salt: Option<B256>,
+
+        /// Number of threads to use. Specifying 0 defaults to the number of logical cores.
+        #[arg(global = true, long, short = 'j', visible_alias = "jobs")]
+        threads: Option<usize>,
+
+        /// The random number generator's seed, used to initialize the salt search.
+        #[arg(long, value_name = "HEX")]
+        seed: Option<B256>,
+
+        /// Don't initialize the salt with a random value, and instead use the default value of 0.
+        #[arg(long, conflicts_with = "seed")]
+        no_random: bool,
+
+        /// Submit `registerVirtualMaster(bytes32)` on Tempo after finding or validating the salt.
+        #[arg(long, conflicts_with_all = ["seed", "no_random"])]
+        register: bool,
+
+        #[command(flatten)]
+        send_tx: SendTxOpts,
+
+        #[command(flatten)]
+        tx: TxParams,
+    },
+}
+
+impl Tip20Subcommand {
+    pub async fn run(self) -> eyre::Result<()> {
+        match self {
+            Self::Create {
+                name,
+                symbol,
+                currency,
+                quote_token,
+                admin,
+                salt,
+                logo_uri,
+                force,
+                send_tx,
+                tx,
+            } => {
+                create::run(
+                    name,
+                    symbol,
+                    currency,
+                    quote_token,
+                    admin,
+                    salt,
+                    logo_uri,
+                    force,
+                    send_tx,
+                    tx,
+                )
+                .await?;
+            }
+            Self::LogoCheck { logo_uri } => {
+                logo::check(logo_uri)?;
+            }
+            Self::LogoSet { token, logo_uri, send_tx, tx } => {
+                logo::set(token, logo_uri, send_tx, tx).await?;
+            }
+            Self::Mine { master, salt, threads, seed, no_random, register, send_tx, tx } => {
+                let output = mine::run(master, salt, threads, seed, no_random)?;
+                if register {
+                    mine::register(master, output.salt, send_tx, tx).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) async fn resolve_tip20_signer(
+    send_tx: &SendTxOpts,
+    tx_params: &TxParams,
+) -> eyre::Result<(Option<WalletSigner>, Option<TempoAccountsWallet>)> {
+    if tx_params.tempo.session_id()?.is_some() {
+        tempo::ensure_session_not_browser(&tx_params.tempo, send_tx.browser.browser)?;
+    }
+
+    let config = send_tx.eth.load_config()?;
+    let provider = ProviderBuilder::<TempoNetwork>::from_config(&config)?.build()?;
+    let chain = get_chain(config.chain, &provider).await?;
+    tempo::resolve_session_or_wallet_signer(&tx_params.tempo, &send_tx.eth.wallet, chain.id()).await
+}
+
+pub(crate) async fn send_tip20_transaction(
+    to: NameOrAddress,
+    sig: &'static str,
+    args: Vec<String>,
+    send_tx: SendTxOpts,
+    tx_params: TxParams,
+    pre_resolved_signer: Option<WalletSigner>,
+    access_key: Option<TempoAccountsWallet>,
+) -> eyre::Result<()> {
+    let mut tx_opts = tx_params.into_transaction_opts();
+    let print_sponsor_hash = tx_opts.tempo.print_sponsor_hash;
+    let sponsor_url = tx_opts.tempo.sponsor_url.clone();
+    let sponsor_fee_payer = tx_opts.tempo.sponsor;
+    let expires_at = tx_opts.tempo.resolve_expires();
+    let tempo_sponsor = if print_sponsor_hash || sponsor_url.is_some() {
+        None
+    } else {
+        tx_opts.tempo.sponsor_config().await?
+    };
+
+    if let Some(ref url) = sponsor_url {
+        validate_sponsor_url(url)?;
+        if send_tx.browser.browser {
+            eyre::bail!("--sponsor-url cannot be combined with --browser");
+        }
+    }
+
+    let config = send_tx.eth.load_config()?;
+    let provider = ProviderBuilder::<TempoNetwork>::from_config(&config)?.build()?;
+    if let Some(interval) = send_tx.poll_interval {
+        provider.client().set_poll_interval(Duration::from_secs(interval))
+    }
+
+    let resolved_lane = resolve_lane(&mut tx_opts.tempo, &config.root)?;
+    if let Some(ref ak) = access_key {
+        tx_opts.tempo.key_id = Some(ak.key_id()?);
+    }
+
+    let builder = CastTxBuilder::new(&provider, tx_opts, &config)
+        .await?
+        .with_to(Some(to))
+        .await?
+        .with_code_sig_and_args(None, Some(sig.to_string()), args)
+        .await?;
+    let chain = builder.chain();
+
+    if print_sponsor_hash {
+        // Box this branch's future to keep its async state off the parent frame; otherwise
+        // `send_tip20_transaction` trips `clippy::large_stack_frames` by a small margin.
+        return Box::pin(async {
+            let (mut tx, from) = if let Some(ref ak) = access_key {
+                let (tx, _, prepared) = builder.build_with_tempo_wallet(ak).await?;
+                (tx, prepared.account())
+            } else {
+                let signer = pre_resolved_signer.as_ref().ok_or_else(|| {
+                    eyre::eyre!("--tempo.print-sponsor-hash requires a signer (e.g. --private-key)")
+                })?;
+                let from = signer.address();
+                let (tx, _) = builder.build(signer).await?;
+                (tx, from)
+            };
+            if let Some(fee_payer) = sponsor_fee_payer {
+                resolve_and_set_fee_token(
+                    (!config.eth_rpc_curl).then_some(&provider),
+                    Some(chain),
+                    &mut tx,
+                    Some(fee_payer),
+                )
+                .await?;
+            }
+            let hash = tx.compute_sponsor_hash(from).ok_or_else(|| {
+                eyre::eyre!("This network does not support sponsored transactions")
+            })?;
+            sh_println!("{hash:?}")?;
+            eyre::Ok(())
+        })
+        .await;
+    }
+
+    if let Some(ts) = expires_at {
+        sh_status!("Transaction expires at unix timestamp {ts}")?;
+    }
+
+    let timeout = send_tx.timeout.unwrap_or(config.transaction_timeout);
+    // Box the larger branch-specific build futures to keep the parent async frame small.
+    if let Some(browser) = send_tx.browser.run::<TempoNetwork>().await? {
+        let (mut tx, _) = Box::pin(builder.with_browser_wallet().build(browser.address())).await?;
+        maybe_print_resolved_lane(resolved_lane.as_ref(), tx.nonce().unwrap_or_default())?;
+        if let Some(sponsor) = &tempo_sponsor {
+            attach_sponsor(
+                sponsor,
+                (!config.eth_rpc_curl).then_some(&provider),
+                chain,
+                &mut tx,
+                browser.address(),
+            )
+            .await?;
+        } else {
+            let fee_token = resolve_and_set_fee_token(
+                (!config.eth_rpc_curl).then_some(&provider),
+                Some(chain),
+                &mut tx,
+                Some(browser.address()),
+            )
+            .await?;
+            maybe_print_fee_token((!config.eth_rpc_curl).then_some(&provider), fee_token).await?;
+        }
+        let tx_hash = browser.send_transaction_via_browser(tx).await?;
+        CastTxSender::new(&provider)
+            .print_tx_result(tx_hash, send_tx.cast_async, send_tx.confirmations, timeout)
+            .await?;
+    } else if let Some(ak) = access_key {
+        let (mut tx, _, prepared) = Box::pin(builder.build_with_tempo_wallet(&ak)).await?;
+        maybe_print_resolved_lane(resolved_lane.as_ref(), tx.nonce().unwrap_or_default())?;
+        if let Some(sponsor) = &tempo_sponsor {
+            attach_sponsor(
+                sponsor,
+                (!config.eth_rpc_curl).then_some(&provider),
+                chain,
+                &mut tx,
+                prepared.account(),
+            )
+            .await?;
+        }
+        if let Some(sponsor_url) = sponsor_url.as_deref() {
+            cast_send_with_tempo_wallet_via_sponsor(
+                &provider,
+                tx,
+                &prepared,
+                sponsor_url,
+                send_tx.cast_async,
+                send_tx.sync,
+                send_tx.confirmations,
+                timeout,
+            )
+            .await?;
+        } else {
+            cast_send_with_tempo_wallet(
+                &provider,
+                tx,
+                &prepared,
+                tempo_sponsor.is_none().then_some(chain),
+                None,
+                send_tx.cast_async,
+                send_tx.sync,
+                send_tx.confirmations,
+                timeout,
+                tempo_sponsor.is_none() && !config.eth_rpc_curl,
+            )
+            .await?;
+        }
+    } else if let Some(sponsor_url) = sponsor_url {
+        let (signer, _) = resolve_send_signer(pre_resolved_signer, &send_tx.eth).await?;
+
+        let (mut tx, _) = Box::pin(builder.build(&signer)).await?;
+        maybe_print_resolved_lane(resolved_lane.as_ref(), tx.nonce().unwrap_or_default())?;
+        tx.set_fee_payer_signature(FEE_PAYER_SIGNATURE_MARKER);
+
+        let wallet = EthereumWallet::from(signer);
+        let connector = tempo::sponsor_relay_connector(&provider, &sponsor_url)?;
+        let provider = AlloyProviderBuilder::<_, _, TempoNetwork>::default()
+            .wallet(wallet)
+            .connect_with(&connector)
+            .await?;
+        cast_send(
+            provider,
+            tx,
+            None,
+            None,
+            send_tx.cast_async,
+            send_tx.sync,
+            send_tx.confirmations,
+            timeout,
+            false,
+        )
+        .await?;
+    } else {
+        let (signer, from) = resolve_send_signer(pre_resolved_signer, &send_tx.eth).await?;
+
+        let (mut tx, _) = builder.build(&signer).await?;
+        maybe_print_resolved_lane(resolved_lane.as_ref(), tx.nonce().unwrap_or_default())?;
+        if let Some(sponsor) = &tempo_sponsor {
+            attach_sponsor(
+                sponsor,
+                (!config.eth_rpc_curl).then_some(&provider),
+                chain,
+                &mut tx,
+                from,
+            )
+            .await?;
+        }
+
+        let wallet = EthereumWallet::from(signer);
+        let provider = AlloyProviderBuilder::<_, _, TempoNetwork>::default()
+            .wallet(wallet)
+            .connect_provider(&provider);
+        cast_send(
+            provider,
+            tx,
+            tempo_sponsor.is_none().then_some(chain),
+            None,
+            send_tx.cast_async,
+            send_tx.sync,
+            send_tx.confirmations,
+            timeout,
+            tempo_sponsor.is_none() && !config.eth_rpc_curl,
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+/// Resolves the sending signer, falling back to the wallet options, and validates it against
+/// an explicit `--from`.
+async fn resolve_send_signer(
+    pre_resolved: Option<WalletSigner>,
+    eth: &foundry_cli::opts::EthereumOpts,
+) -> eyre::Result<(WalletSigner, Address)> {
+    let signer = match pre_resolved {
+        Some(signer) => signer,
+        None => eth.wallet.signer().await?,
+    };
+    let from = signer.address();
+    crate::tx::validate_from_address(eth.wallet.from, from)?;
+    Ok((signer, from))
+}
+
+/// Resolves the sponsored fee token and attaches the sponsor signature preview for `payer`.
+async fn attach_sponsor<P>(
+    sponsor: &crate::tempo::TempoSponsor,
+    provider: Option<&P>,
+    chain: foundry_config::Chain,
+    tx: &mut <TempoNetwork as alloy_network::Network>::TransactionRequest,
+    payer: Address,
+) -> eyre::Result<()>
+where
+    P: Provider<TempoNetwork>,
+{
+    sponsor
+        .resolve_and_set_fee_token(
+            provider.map(|p| p as &dyn Provider<TempoNetwork>),
+            Some(chain),
+            tx,
+        )
+        .await?;
+    sponsor.attach_and_print::<TempoNetwork>(tx, payer).await?;
+    Ok(())
+}

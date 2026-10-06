@@ -1,15 +1,15 @@
 use crate::eth::error::BlockchainError;
 use alloy_consensus::SignableTransaction;
 use alloy_dyn_abi::TypedData;
-use alloy_network::TxSignerSync;
+use alloy_network::{Network, TxSignerSync};
 use alloy_primitives::{Address, B256, Signature, map::AddressHashMap};
 use alloy_signer::Signer as AlloySigner;
 use alloy_signer_local::PrivateKeySigner;
-use anvil_core::eth::transaction::{TypedTransaction, TypedTransactionRequest};
+use foundry_primitives::{FoundryTxEnvelope, FoundryTypedTx};
 
-/// A transaction signer
+/// Network-agnostic signing: messages, typed data, and hashes.
 #[async_trait::async_trait]
-pub trait Signer: Send + Sync {
+pub trait MessageSigner: Send + Sync {
     /// returns the available accounts for this signer
     fn accounts(&self) -> Vec<Address>;
 
@@ -31,13 +31,22 @@ pub trait Signer: Send + Sync {
 
     /// Signs the given hash.
     async fn sign_hash(&self, address: Address, hash: B256) -> Result<Signature, BlockchainError>;
+}
 
-    /// signs a transaction request using the given account in request
-    fn sign_transaction(
+/// A transaction signer, generic over the network.
+///
+/// Modelled after alloy's `NetworkWallet<N>`: the
+/// [`sign_transaction_from`](Signer::sign_transaction_from) method takes an
+/// unsigned transaction and returns the fully-signed envelope in one step.
+pub trait Signer<N: Network>: MessageSigner {
+    /// Signs an unsigned transaction and returns the signed envelope.
+    ///
+    /// Mirrors `NetworkWallet::sign_transaction_from`.
+    fn sign_transaction_from(
         &self,
-        request: TypedTransactionRequest,
-        address: &Address,
-    ) -> Result<Signature, BlockchainError>;
+        sender: &Address,
+        tx: N::UnsignedTx,
+    ) -> Result<N::TxEnvelope, BlockchainError>;
 }
 
 /// Maintains developer keys
@@ -55,7 +64,7 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl Signer for DevSigner {
+impl MessageSigner for DevSigner {
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
     }
@@ -90,47 +99,78 @@ impl Signer for DevSigner {
 
         Ok(signer.sign_hash(&hash).await?)
     }
+}
 
-    fn sign_transaction(
+impl Signer<foundry_primitives::FoundryNetwork> for DevSigner {
+    fn sign_transaction_from(
         &self,
-        request: TypedTransactionRequest,
-        address: &Address,
-    ) -> Result<Signature, BlockchainError> {
-        let signer = self.accounts.get(address).ok_or(BlockchainError::NoSignerAvailable)?;
-        match request {
-            TypedTransactionRequest::Legacy(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
-            TypedTransactionRequest::EIP2930(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
-            TypedTransactionRequest::EIP1559(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
-            TypedTransactionRequest::EIP7702(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
-            TypedTransactionRequest::EIP4844(mut tx) => Ok(signer.sign_transaction_sync(&mut tx)?),
-        }
+        sender: &Address,
+        tx: FoundryTypedTx,
+    ) -> Result<FoundryTxEnvelope, BlockchainError> {
+        let mut signer =
+            self.accounts.get(sender).ok_or(BlockchainError::NoSignerAvailable)?.clone();
+        // The transaction is authoritative for its chain ID. Developer wallets are created with
+        // the node's initial chain ID, which can later change through a reset or
+        // `anvil_setChainId`.
+        signer.set_chain_id(None);
+        let envelope = match tx {
+            FoundryTypedTx::Legacy(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Legacy(t.into_signed(sig))
+            }
+            FoundryTypedTx::Eip2930(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Eip2930(t.into_signed(sig))
+            }
+            FoundryTypedTx::Eip1559(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Eip1559(t.into_signed(sig))
+            }
+            FoundryTypedTx::Eip7702(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Eip7702(t.into_signed(sig))
+            }
+            FoundryTypedTx::Eip4844(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Eip4844(t.into_signed(sig))
+            }
+            #[cfg(feature = "optimism")]
+            FoundryTypedTx::Deposit(_) => {
+                unreachable!("op deposit txs should not be signed")
+            }
+            #[cfg(feature = "optimism")]
+            FoundryTypedTx::PostExec(_) => {
+                unreachable!("op post-exec txs should not be signed")
+            }
+            FoundryTypedTx::Tempo(mut t) => {
+                let sig = signer.sign_transaction_sync(&mut t)?;
+                FoundryTxEnvelope::Tempo(t.into_signed(sig.into()))
+            }
+        };
+        Ok(envelope)
     }
 }
 
-/// converts the `request` into a [`TypedTransactionRequest`] with the given signature
-///
-/// # Errors
-///
-/// This will fail if the `signature` contains an erroneous recovery id.
-pub fn build_typed_transaction(
-    request: TypedTransactionRequest,
-    signature: Signature,
-) -> Result<TypedTransaction, BlockchainError> {
-    let tx = match request {
-        TypedTransactionRequest::Legacy(tx) => TypedTransaction::Legacy(tx.into_signed(signature)),
-        TypedTransactionRequest::EIP2930(tx) => {
-            TypedTransaction::EIP2930(tx.into_signed(signature))
-        }
-        TypedTransactionRequest::EIP1559(tx) => {
-            TypedTransaction::EIP1559(tx.into_signed(signature))
-        }
-        TypedTransactionRequest::EIP7702(tx) => {
-            TypedTransaction::EIP7702(tx.into_signed(signature))
-        }
-        TypedTransactionRequest::EIP4844(tx) => {
-            TypedTransaction::EIP4844(tx.into_signed(signature))
-        }
-    };
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxLegacy;
 
-    Ok(tx)
+    #[test]
+    fn dev_signer_uses_transaction_chain_id() {
+        let mut account = PrivateKeySigner::random();
+        account.set_chain_id(Some(1));
+        let sender = account.address();
+        let signer = DevSigner::new(vec![account]);
+        let tx = TxLegacy { chain_id: Some(56), ..Default::default() };
+
+        let FoundryTxEnvelope::Legacy(signed) =
+            signer.sign_transaction_from(&sender, FoundryTypedTx::Legacy(tx)).unwrap()
+        else {
+            panic!("expected legacy transaction")
+        };
+
+        assert_eq!(signed.tx().chain_id, Some(56));
+        assert_eq!(signed.recover_signer().unwrap(), sender);
+    }
 }

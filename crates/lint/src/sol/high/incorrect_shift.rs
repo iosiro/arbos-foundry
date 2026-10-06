@@ -3,7 +3,12 @@ use crate::{
     linter::{EarlyLintPass, LintContext},
     sol::{Severity, SolLint},
 };
-use solar::ast::{BinOp, BinOpKind, Expr, ExprKind};
+use solar::{
+    ast::{Stmt, StmtKind, visit::Visit, yul},
+    data_structures::Never,
+    interface::kw,
+};
+use std::ops::ControlFlow;
 
 declare_forge_lint!(
     INCORRECT_SHIFT,
@@ -13,28 +18,31 @@ declare_forge_lint!(
 );
 
 impl<'ast> EarlyLintPass<'ast> for IncorrectShift {
-    fn check_expr(&mut self, ctx: &LintContext, expr: &'ast Expr<'ast>) {
-        if let ExprKind::Binary(
-            left_expr,
-            BinOp { kind: BinOpKind::Shl | BinOpKind::Shr, .. },
-            right_expr,
-        ) = &expr.kind
-            && contains_incorrect_shift(left_expr, right_expr)
-        {
-            ctx.emit(&INCORRECT_SHIFT, expr.span);
+    fn check_stmt(&mut self, ctx: &LintContext, stmt: &'ast Stmt<'ast>) {
+        if let StmtKind::Assembly(assembly) = &stmt.kind {
+            let _ = ShiftChecker { ctx }.visit_yul_block(&assembly.block);
         }
     }
 }
 
-// TODO: come up with a better heuristic. Treat initial impl as a PoC.
-// Checks if the left operand is a literal and the right operand is not, indicating a potential
-// reversed shift operation.
-fn contains_incorrect_shift<'ast>(
-    left_expr: &'ast Expr<'ast>,
-    right_expr: &'ast Expr<'ast>,
-) -> bool {
-    let is_left_literal = matches!(left_expr.kind, ExprKind::Lit(..));
-    let is_right_not_literal = !matches!(right_expr.kind, ExprKind::Lit(..));
+struct ShiftChecker<'a, 's> {
+    ctx: &'a LintContext<'s, 'a>,
+}
 
-    is_left_literal && is_right_not_literal
+impl<'ast> Visit<'ast> for ShiftChecker<'_, '_> {
+    type BreakValue = Never;
+
+    fn visit_yul_expr(&mut self, expr: &'ast yul::Expr<'ast>) -> ControlFlow<Self::BreakValue> {
+        // `shl(x, 2)`: the shift amount comes first in Yul, so a literal in the value position
+        // and a computed amount betray swapped arguments.
+        if let yul::ExprKind::Call(call) = &expr.kind
+            && matches!(call.name.name, kw::Shl | kw::Shr | kw::Sar)
+            && let [left, right] = call.arguments.as_ref()
+            && !matches!(left.kind, yul::ExprKind::Lit(_))
+            && matches!(right.kind, yul::ExprKind::Lit(_))
+        {
+            self.ctx.emit(&INCORRECT_SHIFT, expr.span);
+        }
+        self.walk_yul_expr(expr)
+    }
 }

@@ -4,8 +4,11 @@ use crate::{
     constants::{CHEATCODE_ADDRESS, HARDHAT_CONSOLE_ADDRESS},
     traces::{CallTraceArena, CallTraceDecoder, CallTraceNode, DecodedCallData},
 };
-use alloy_primitives::map::HashSet;
-use comfy_table::{Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::ASCII_MARKDOWN};
+use alloy_primitives::{Address, map::HashSet};
+use comfy_table::{
+    Cell, CellAlignment, Color, Table,
+    presets::{ASCII_FULL, ASCII_MARKDOWN},
+};
 use foundry_common::{TestFunctionExt, calc, shell};
 use foundry_evm::traces::CallKind;
 
@@ -24,6 +27,9 @@ pub struct GasReport {
     ignore: HashSet<String>,
     /// Whether to include gas reports for tests.
     include_tests: bool,
+    /// Additional network-specific cheatcode addresses omitted from reports.
+    #[serde(skip)]
+    extra_cheatcode_addresses: HashSet<Address>,
     /// All contracts that were analyzed grouped by their identifier
     /// ``test/Counter.t.sol:CounterTest
     pub contracts: BTreeMap<String, ContractInfo>,
@@ -34,11 +40,20 @@ impl GasReport {
         report_for: impl IntoIterator<Item = String>,
         ignore: impl IntoIterator<Item = String>,
         include_tests: bool,
+        extra_cheatcode_addresses: impl IntoIterator<Item = Address>,
     ) -> Self {
         let report_for = report_for.into_iter().collect::<HashSet<_>>();
         let ignore = ignore.into_iter().collect::<HashSet<_>>();
+        let extra_cheatcode_addresses = extra_cheatcode_addresses.into_iter().collect();
         let report_any = report_for.is_empty() || report_for.contains("*");
-        Self { report_any, report_for, ignore, include_tests, ..Default::default() }
+        Self {
+            report_any,
+            report_for,
+            ignore,
+            include_tests,
+            extra_cheatcode_addresses,
+            ..Default::default()
+        }
     }
 
     /// Whether the given contract should be reported.
@@ -61,6 +76,12 @@ impl GasReport {
         self.report_any || self.report_for.contains(contract_name)
     }
 
+    fn is_internal_address(&self, address: Address) -> bool {
+        address == CHEATCODE_ADDRESS
+            || address == HARDHAT_CONSOLE_ADDRESS
+            || self.extra_cheatcode_addresses.contains(&address)
+    }
+
     /// Analyzes the given traces and generates a gas report.
     pub async fn analyze(
         &mut self,
@@ -75,7 +96,7 @@ impl GasReport {
     async fn analyze_node(&mut self, node: &CallTraceNode, decoder: &CallTraceDecoder) {
         let trace = &node.trace;
 
-        if trace.address == CHEATCODE_ADDRESS || trace.address == HARDHAT_CONSOLE_ADDRESS {
+        if self.is_internal_address(trace.address) {
             return;
         }
 
@@ -85,7 +106,7 @@ impl GasReport {
         if !self.should_report(contract_name) {
             return;
         }
-        let contract_info = self.contracts.entry(name.to_string()).or_default();
+        let contract_info = self.contracts.entry(name.clone()).or_default();
         let is_create_call = trace.kind.is_any_create();
 
         // Record contract deployment size.
@@ -144,7 +165,7 @@ impl GasReport {
 impl Display for GasReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         if shell::is_json() {
-            writeln!(f, "{}", &self.format_json_output())?;
+            writeln!(f, "{}", self.format_json_output())?;
         } else {
             for (name, contract) in &self.contracts {
                 if contract.functions.is_empty() {
@@ -175,8 +196,8 @@ impl GasReport {
 
                     let functions = contract
                         .functions
-                        .iter()
-                        .flat_map(|(_, sigs)| {
+                        .values()
+                        .flat_map(|sigs| {
                             sigs.iter().map(|(sig, gas_info)| {
                                 let display_name = sig.replace(':', "");
                                 (display_name, gas_info)
@@ -201,9 +222,9 @@ impl GasReport {
     fn format_table_output(&self, contract: &ContractInfo, name: &str) -> Table {
         let mut table = Table::new();
         if shell::is_markdown() {
-            table.load_preset(ASCII_MARKDOWN);
+            table.load_style(ASCII_MARKDOWN);
         } else {
-            table.apply_modifier(UTF8_ROUND_CORNERS);
+            table.load_style(ASCII_FULL.with_rounded_corners());
         }
 
         table.set_header(vec![Cell::new(format!("{name} Contract")).fg(Color::Magenta)]);
@@ -213,8 +234,8 @@ impl GasReport {
             Cell::new("Deployment Size").fg(Color::Cyan),
         ]);
         table.add_row(vec![
-            Cell::new(contract.gas.to_string()),
-            Cell::new(contract.size.to_string()),
+            Cell::new(contract.gas.to_string()).set_alignment(CellAlignment::Right),
+            Cell::new(contract.size.to_string()).set_alignment(CellAlignment::Right),
         ]);
 
         // Add a blank row to separate deployment info from function info.
@@ -229,22 +250,30 @@ impl GasReport {
             Cell::new("# Calls").fg(Color::Cyan),
         ]);
 
-        contract.functions.iter().for_each(|(fname, sigs)| {
-            sigs.iter().for_each(|(sig, gas_info)| {
+        for (fname, sigs) in &contract.functions {
+            for (sig, gas_info) in sigs {
                 // Show function signature if overloaded else display function name.
                 let display_name =
-                    if sigs.len() == 1 { fname.to_string() } else { sig.replace(':', "") };
+                    if sigs.len() == 1 { fname.clone() } else { sig.replace(':', "") };
 
                 table.add_row(vec![
                     Cell::new(display_name),
-                    Cell::new(gas_info.min.to_string()).fg(Color::Green),
-                    Cell::new(gas_info.mean.to_string()).fg(Color::Yellow),
-                    Cell::new(gas_info.median.to_string()).fg(Color::Yellow),
-                    Cell::new(gas_info.max.to_string()).fg(Color::Red),
-                    Cell::new(gas_info.calls.to_string()),
+                    Cell::new(gas_info.min.to_string())
+                        .fg(Color::Green)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(gas_info.mean.to_string())
+                        .fg(Color::Yellow)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(gas_info.median.to_string())
+                        .fg(Color::Yellow)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(gas_info.max.to_string())
+                        .fg(Color::Red)
+                        .set_alignment(CellAlignment::Right),
+                    Cell::new(gas_info.calls.to_string()).set_alignment(CellAlignment::Right),
                 ]);
-            })
-        });
+            }
+        }
 
         table
     }
@@ -268,4 +297,19 @@ pub struct GasInfo {
 
     #[serde(skip)]
     pub frames: Vec<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use foundry_evm::constants::MONAD_CHEATCODE_ADDRESS;
+
+    #[test]
+    fn network_cheatcode_addresses_are_opt_in() {
+        let ethereum = GasReport::new([], [], false, []);
+        assert!(!ethereum.is_internal_address(MONAD_CHEATCODE_ADDRESS));
+
+        let monad = GasReport::new([], [], false, [MONAD_CHEATCODE_ADDRESS]);
+        assert!(monad.is_internal_address(MONAD_CHEATCODE_ADDRESS));
+    }
 }

@@ -1,0 +1,134 @@
+[package]
+name = "foundry-fork-db"
+description = "Fork database used by Foundry"
+version = "0.27.0"
+publish = false
+
+edition = "2024"
+rust-version = "1.95"
+authors = ["Foundry Contributors"]
+license = "MIT OR Apache-2.0"
+homepage = "https://getfoundry.sh"
+repository = "https://github.com/foundry-rs/foundry-core"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+zstd = ["dep:zstd"]
+
+[dependencies]
+alloy-chains = { version = "0.2.34", features = ["serde"] }
+alloy-consensus = "2.2.0"
+alloy-primitives = { version = "1.6.0", features = ["getrandom", "rand", "map-fxhash", "map-foldhash", "map"] }
+alloy-provider = { version = "2.2.0", default-features = false }
+alloy-rpc-types = { version = "2.2.0", features = ["eth"] }
+
+eyre = "0.6.12"
+futures = "0.3.32"
+
+parking_lot = "0.12.5"
+
+revm = { version = "42.0.1", features = ["std", "serde"] }
+
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
+
+thiserror = "2.0.18"
+tokio = { version = "1.47.1", features = ["rt-multi-thread"] }
+tracing = "0.1.44"
+
+url = "2.5.8"
+zstd = { version = "0.13.3", optional = true }
+
+[dev-dependencies]
+alloy-rpc-client = "2.2.0"
+tempfile = "3.20.0"
+tiny_http = "0.12.0"
+
+[lints.clippy]
+borrow_as_ptr = "warn"
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+cloned_instead_of_copied = "warn"
+collection_is_never_read = "warn"
+dbg_macro = "warn"
+derive_partial_eq_without_eq = "warn"
+empty_line_after_doc_comments = "warn"
+empty_line_after_outer_attr = "warn"
+enum_glob_use = "warn"
+equatable_if_let = "warn"
+explicit_into_iter_loop = "warn"
+explicit_iter_loop = "warn"
+flat_map_option = "warn"
+if_then_some_else_none = "warn"
+implicit_clone = "warn"
+if_not_else = "warn"
+imprecise_flops = "warn"
+iter_on_empty_collections = "warn"
+iter_with_drain = "warn"
+iter_without_into_iter = "warn"
+large_stack_frames = "warn"
+manual_assert = "warn"
+manual_clamp = "warn"
+manual_string_new = "warn"
+missing_const_for_fn = "warn"
+mutex_integer = "warn"
+naive_bytecount = "warn"
+needless_bitwise_bool = "warn"
+needless_continue = "warn"
+needless_for_each = "warn"
+nonstandard_macro_braces = "warn"
+option_as_ref_cloned = "warn"
+path_buf_push_overwrite = "warn"
+read_zero_byte_vec = "warn"
+redundant_clone = "warn"
+single_char_pattern = "warn"
+redundant_else = "warn"
+string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
+suboptimal_flops = "warn"
+suspicious_operation_groupings = "warn"
+trailing_empty_array = "warn"
+trait_duplication_in_bounds = "warn"
+transmute_undefined_repr = "warn"
+trivial_regex = "warn"
+tuple_array_conversions = "warn"
+uninhabited_references = "warn"
+unnecessary_struct_initialization = "warn"
+uninlined_format_args = "warn"
+unnecessary_self_imports = "warn"
+unnested_or_patterns = "warn"
+unused_peekable = "warn"
+unused_rounding = "warn"
+use_self = "warn"
+useless_let_if_seq = "warn"
+while_float = "warn"
+zero_sized_map_values = "warn"
+
+# Explicitly allowed nursery lints — too noisy or have known false positives.
+as_ptr_cast_mut = "allow"
+cognitive_complexity = "allow"
+debug_assert_with_mut_call = "allow"
+fallible_impl_from = "allow"
+future_not_send = "allow"
+needless_collect = "allow"
+non_send_fields_in_send_ty = "allow"
+redundant_pub_crate = "allow"
+significant_drop_in_scrutinee = "allow"
+significant_drop_tightening = "allow"
+too_long_first_doc_paragraph = "allow"
+
+# Specific allows.
+result_large_err = "allow"
+
+[lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+unused_must_use = "deny"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+
+[lints.rustdoc]
+all = "warn"

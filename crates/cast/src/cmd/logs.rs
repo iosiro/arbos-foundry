@@ -1,19 +1,38 @@
-use crate::Cast;
+use crate::{Cast, encode_event_topic};
 use alloy_dyn_abi::{DynSolType, DynSolValue, Specifier};
 use alloy_ens::NameOrAddress;
 use alloy_json_abi::Event;
-use alloy_network::AnyNetwork;
-use alloy_primitives::{Address, B256, hex::FromHex};
+use alloy_network::{AnyNetwork, Network};
+use alloy_primitives::{Address, B256, TxHash, hex::FromHex};
+use alloy_provider::Provider;
 use alloy_rpc_types::{BlockId, BlockNumberOrTag, Filter, FilterBlockOption, FilterSet, Topic};
 use clap::Parser;
 use eyre::Result;
-use foundry_cli::{opts::EthereumOpts, utils, utils::LoadConfig};
+use foundry_cli::{
+    opts::RpcOpts,
+    utils::{self, LoadConfig},
+};
 use itertools::Itertools;
 use std::{io, str::FromStr};
 
 /// CLI arguments for `cast logs`.
 #[derive(Debug, Parser)]
 pub struct LogsArgs {
+    #[command(flatten)]
+    query: LogQueryArgs,
+
+    /// If the RPC type and endpoints supports `eth_subscribe` stream logs instead of printing and
+    /// exiting. Will continue until interrupted or TO_BLOCK is reached.
+    #[arg(long)]
+    subscribe: bool,
+
+    #[command(flatten)]
+    rpc: RpcOpts,
+}
+
+/// Arguments shared by commands that query logs with `eth_getLogs`.
+#[derive(Debug, Parser)]
+pub struct LogQueryArgs {
     /// The block height to start query at.
     ///
     /// Can also be the tags earliest, finalized, safe, latest, or pending.
@@ -40,22 +59,73 @@ pub struct LogsArgs {
     #[arg(value_name = "TOPICS_OR_ARGS")]
     topics_or_args: Vec<String>,
 
-    /// If the RPC type and endpoints supports `eth_subscribe` stream logs instead of printing and
-    /// exiting. Will continue until interrupted or TO_BLOCK is reached.
-    #[arg(long)]
-    subscribe: bool,
-
-    #[command(flatten)]
-    eth: EthereumOpts,
+    /// Split the query into chunks of this many blocks to work around provider range/result
+    /// limits.
+    ///
+    /// When omitted, the range is queried in a single request. Pass a value (e.g. `10000`) to
+    /// fetch the logs in `query-size`-block chunks instead.
+    #[arg(long, value_name = "BLOCKS")]
+    query_size: Option<u64>,
 }
 
 impl LogsArgs {
     pub async fn run(self) -> Result<()> {
-        let Self { from_block, to_block, address, sig_or_topic, topics_or_args, subscribe, eth } =
-            self;
+        let Self { query, subscribe, rpc } = self;
 
-        let config = eth.load_config()?;
+        let config = rpc.load_config()?;
         let provider = utils::get_provider(&config)?;
+        let (filter, query_size) = query.resolve(&provider).await?;
+        let cast = Cast::new(&provider);
+
+        if !subscribe {
+            let logs = match query_size {
+                Some(chunk_size) => cast.filter_logs_chunked(filter, chunk_size).await?,
+                None => cast.filter_logs(filter).await?,
+            };
+            sh_println!("{logs}")?;
+            return Ok(());
+        }
+
+        // JSON envelope intentionally unsupported for streaming: --subscribe emits NDJSON events
+        // continuously; a terminal JsonEnvelope is pointless.
+        // FIXME: this is a hotfix for <https://github.com/foundry-rs/foundry/issues/7682>
+        //  currently the alloy `eth_subscribe` impl does not work with all transports, so we use
+        // the builtin transport here for now
+        let url = config.get_rpc_url_or_localhost_http()?;
+        let provider = alloy_provider::ProviderBuilder::<_, _, AnyNetwork>::default()
+            .connect(url.as_ref())
+            .await?;
+        let cast = Cast::new(&provider);
+        let mut stdout = io::stdout();
+        cast.subscribe(filter, &mut stdout).await?;
+
+        Ok(())
+    }
+}
+
+impl LogQueryArgs {
+    /// Takes a lone positional transaction hash, if present.
+    pub(super) fn take_transaction_hash(&mut self) -> Option<TxHash> {
+        if self.from_block.is_none()
+            && self.to_block.is_none()
+            && self.address.is_none()
+            && self.topics_or_args.is_empty()
+            && self.query_size.is_none()
+            && let Some(tx_hash) = self.sig_or_topic.as_deref().and_then(|value| value.parse().ok())
+        {
+            self.sig_or_topic = None;
+            return Some(tx_hash);
+        }
+        None
+    }
+
+    /// Resolves names and block tags and builds the RPC filter.
+    pub async fn resolve<P, N>(self, provider: &P) -> Result<(Filter, Option<u64>)>
+    where
+        P: Provider<N> + Clone + Unpin,
+        N: Network,
+    {
+        let Self { from_block, to_block, address, sig_or_topic, topics_or_args, query_size } = self;
 
         let cast = Cast::new(&provider);
         let addresses = match address {
@@ -73,27 +143,9 @@ impl LogsArgs {
             cast.convert_block_number(Some(from_block.unwrap_or_else(BlockId::earliest))).await?;
         let to_block =
             cast.convert_block_number(Some(to_block.unwrap_or_else(BlockId::latest))).await?;
-
         let filter = build_filter(from_block, to_block, addresses, sig_or_topic, topics_or_args)?;
 
-        if !subscribe {
-            let logs = cast.filter_logs(filter).await?;
-            sh_println!("{logs}")?;
-            return Ok(());
-        }
-
-        // FIXME: this is a hotfix for <https://github.com/foundry-rs/foundry/issues/7682>
-        //  currently the alloy `eth_subscribe` impl does not work with all transports, so we use
-        // the builtin transport here for now
-        let url = config.get_rpc_url_or_localhost_http()?;
-        let provider = alloy_provider::ProviderBuilder::<_, _, AnyNetwork>::default()
-            .connect(url.as_ref())
-            .await?;
-        let cast = Cast::new(&provider);
-        let mut stdout = io::stdout();
-        cast.subscribe(filter, &mut stdout).await?;
-
-        Ok(())
+        Ok((filter, query_size))
     }
 }
 
@@ -138,8 +190,8 @@ fn build_filter_event_sig(event: Event, args: Vec<String>) -> Result<Filter, eyr
     let (with_args, without_args): (Vec<_>, Vec<_>) = event
         .inputs
         .iter()
+        .filter(|input| input.indexed)
         .zip(args)
-        .filter(|(input, _)| input.indexed)
         .map(|(input, arg)| {
             let kind = input.resolve()?;
             Ok((kind, arg))
@@ -163,9 +215,7 @@ fn build_filter_event_sig(event: Event, args: Vec<String>) -> Result<Filter, eyr
         .chain(without_args.into_iter().map(|(i, _)| (i, None)))
         .sorted_by(|(i1, _), (i2, _)| i1.cmp(i2))
         .map(|(_, token)| {
-            token
-                .map(|token| Topic::from(B256::from_slice(token.abi_encode().as_slice())))
-                .unwrap_or(Topic::default())
+            token.map(|token| Topic::from(encode_event_topic(&token))).unwrap_or(Topic::default())
         })
         .collect::<Vec<Topic>>();
 
@@ -207,7 +257,7 @@ fn build_filter_topics(topics: Vec<String>) -> Result<Filter, eyre::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{U160, U256};
+    use alloy_primitives::{U160, U256, keccak256};
     use alloy_rpc_types::ValueOrArray;
 
     const ADDRESS: &str = "0x4D1A2e2bB4F88F0250f26Ffff098B0b30B26BF38";
@@ -294,6 +344,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filter, expected)
+    }
+
+    #[test]
+    fn test_build_filter_sig_with_non_indexed_input_first() {
+        let event = Event::parse("event Owned(uint256 value, address indexed owner)").unwrap();
+        let address = Address::from_str(ADDRESS).unwrap();
+        let expected = Filter {
+            block_option: FilterBlockOption::Range { from_block: None, to_block: None },
+            address: vec![].into(),
+            topics: [
+                event.selector().into(),
+                B256::left_padding_from(address.as_slice()).into(),
+                vec![].into(),
+                vec![].into(),
+            ],
+        };
+
+        let filter = build_filter_event_sig(event, vec![ADDRESS.to_string()]).unwrap();
+
+        assert_eq!(filter, expected);
+    }
+
+    #[test]
+    fn test_build_filter_sig_with_dynamic_indexed_input() {
+        let event = Event::parse("event Message(string indexed value)").unwrap();
+        let expected = Filter {
+            block_option: FilterBlockOption::Range { from_block: None, to_block: None },
+            address: vec![].into(),
+            topics: [
+                event.selector().into(),
+                keccak256("hello").into(),
+                vec![].into(),
+                vec![].into(),
+            ],
+        };
+
+        let filter = build_filter_event_sig(event, vec!["hello".to_string()]).unwrap();
+
+        assert_eq!(filter, expected);
     }
 
     #[test]

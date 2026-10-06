@@ -21,12 +21,8 @@ impl TomlFile {
         Ok(Self { doc, path })
     }
 
-    fn doc(&self) -> &toml_edit::DocumentMut {
+    const fn doc(&self) -> &toml_edit::DocumentMut {
         &self.doc
-    }
-
-    fn doc_mut(&mut self) -> &mut toml_edit::DocumentMut {
-        &mut self.doc
     }
 
     fn path(&self) -> &Path {
@@ -47,7 +43,7 @@ impl Deref for TomlFile {
 
 impl DerefMut for TomlFile {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.doc_mut()
+        &mut self.doc
     }
 }
 
@@ -87,7 +83,7 @@ impl TomlFile {
         } else {
             // insert profile section at the beginning of the map
             let mut profile_section = toml_edit::Table::new();
-            profile_section.set_position(0);
+            profile_section.set_position(Some(0));
             profile_section.set_implicit(true);
             self.insert(Config::PROFILE_SECTION, toml_edit::Item::Table(profile_section));
             self.get_mut(Config::PROFILE_SECTION).expect("exists per above")
@@ -143,9 +139,7 @@ fn fix_toml_non_strict_profiles(
         .as_table()
         .iter()
         .map(|(k, _)| k.to_string())
-        .filter(|k| {
-            !(k == Config::PROFILE_SECTION || Config::STANDALONE_SECTIONS.contains(&k.as_str()))
-        })
+        .filter(|k| !Config::is_standalone_section(k))
         .collect::<Vec<_>>();
 
     // remove each profile and insert into [profile] section

@@ -1,22 +1,90 @@
+use alloy_dyn_abi::JsonAbiExt;
 use alloy_primitives::{Address, B256, U256, hex, keccak256};
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use eyre::{Result, WrapErr};
+use foundry_cli::{
+    json::print_scalar,
+    opts::BuildOpts,
+    utils::{LoadConfig, find_contract_artifacts, parse_constructor_args},
+};
+use foundry_common::{compile, shell};
+use foundry_compilers::{info::ContractInfo, utils::canonicalize};
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use regex::RegexSetBuilder;
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Instant,
-};
+use std::time::Instant;
 
 // https://etherscan.io/address/0x4e59b44847b379578588920ca78fbf26c0b4956c#code
 const DEPLOYER: &str = "0x4e59b44847b379578588920ca78fbf26c0b4956c";
 
+#[derive(Clone, Debug, Subcommand)]
+enum Create2Subcommand {
+    /// Compute a contract's CREATE2 init code hash.
+    #[command(visible_alias = "initcodehash")]
+    InitCodeHash(InitCodeHashArgs),
+}
+
+foundry_config::impl_figment_convert!(InitCodeHashArgs, build);
+
+#[derive(Clone, Debug, Args)]
+struct InitCodeHashArgs {
+    /// The contract identifier in the form `<path>:<contractname>`.
+    contract: ContractInfo,
+
+    /// The constructor arguments.
+    #[arg(value_name = "ARGS", allow_negative_numbers = true)]
+    constructor_args: Vec<String>,
+
+    #[command(flatten)]
+    build: BuildOpts,
+}
+
+impl Create2Subcommand {
+    fn run(&self) -> Result<()> {
+        match self {
+            Self::InitCodeHash(args) => args.run(),
+        }
+    }
+}
+
+impl InitCodeHashArgs {
+    fn run(&self) -> Result<()> {
+        let config = self.load_config()?;
+        let project = config.project()?;
+        let target_path = if let Some(path) = &self.contract.path {
+            canonicalize(project.root().join(path))?
+        } else {
+            project.find_contract_path(&self.contract.name)?
+        };
+
+        let output = compile::compile_target(&target_path, &project, true)?;
+        let (abi, bin, _) = find_contract_artifacts(output, &target_path, &self.contract.name)?;
+        let Some(bytecode) = bin.object.into_bytes() else {
+            eyre::bail!("contract contains unlinked libraries");
+        };
+        if bytecode.is_empty() {
+            eyre::bail!("no bytecode found in bin object for {}", self.contract.name);
+        }
+
+        let mut init_code = bytecode.to_vec();
+        if let Some(constructor) = &abi.constructor {
+            let params = parse_constructor_args(constructor, &self.constructor_args)?;
+            init_code.extend(constructor.abi_encode_input(&params)?);
+        } else if !self.constructor_args.is_empty() {
+            eyre::bail!("contract does not have a constructor");
+        }
+
+        print_scalar(keccak256(init_code))?;
+        Ok(())
+    }
+}
+
 /// CLI arguments for `cast create2`.
 #[derive(Clone, Debug, Parser)]
+#[command(subcommand_negates_reqs = true, args_conflicts_with_subcommands = true)]
 pub struct Create2Args {
+    #[command(subcommand)]
+    command: Option<Create2Subcommand>,
+
     /// Prefix for the contract address.
     #[arg(
         long,
@@ -95,8 +163,22 @@ pub struct Create2Output {
 }
 
 impl Create2Args {
+    pub fn execute(self) -> Result<()> {
+        if let Some(command) = &self.command {
+            return command.run();
+        }
+        self.run().map(drop)
+    }
+
     pub fn run(self) -> Result<Create2Output> {
+        if self.command.is_some() {
+            eyre::bail!(
+                "`Create2Args::run` does not support subcommands; use `Create2Args::execute` instead"
+            );
+        }
+
         let Self {
+            command: _,
             starts_with,
             ends_with,
             matching,
@@ -122,7 +204,7 @@ impl Create2Args {
         if let Some(salt) = salt {
             let salt = hex::FromHex::from_hex(salt)?;
             let address = deployer.create2(salt, init_code_hash);
-            sh_println!("{address}")?;
+            sh_println!("{address}\t{salt}")?;
             return Ok(Create2Output { address, salt });
         }
 
@@ -165,9 +247,9 @@ impl Create2Args {
 
         let regex = RegexSetBuilder::new(regexs).case_insensitive(!case_sensitive).build()?;
 
-        let mut n_threads = std::thread::available_parallelism().map_or(1, |n| n.get());
-        if let Some(threads) = threads {
-            n_threads = n_threads.min(threads);
+        let mut n_threads = threads.unwrap_or(0);
+        if n_threads == 0 {
+            n_threads = std::thread::available_parallelism().map_or(1, |n| n.get());
         }
         if cfg!(test) {
             n_threads = n_threads.min(2);
@@ -189,68 +271,41 @@ impl Create2Args {
             rng.fill_bytes(remaining);
         }
 
-        sh_println!("Configuration:")?;
-        sh_println!("Init code hash: {init_code_hash}")?;
-        sh_println!("Regex patterns: {:?}\n", regex.patterns())?;
-        sh_println!(
+        sh_status!("Configuration:")?;
+        sh_status!("Init code hash: {init_code_hash}")?;
+        sh_status!("Regex patterns: {:?}\n", regex.patterns())?;
+        sh_status!(
             "Starting to generate deterministic contract address with {n_threads} threads..."
         )?;
-        let mut handles = Vec::with_capacity(n_threads);
-        let found = Arc::new(AtomicBool::new(false));
         let timer = Instant::now();
-
-        // Loops through all possible salts in parallel until a result is found.
-        // Each thread iterates over `(i..).step_by(n_threads)`.
-        for i in 0..n_threads {
-            // Create local copies for the thread.
-            let increment = n_threads;
-            let regex = regex.clone();
-            let regex_len = regex.patterns().len();
-            let found = Arc::clone(&found);
-            handles.push(std::thread::spawn(move || {
-                // Read the first bytes of the salt as a usize to be able to increment it.
-                struct B256Aligned(B256, [usize; 0]);
-                let mut salt = B256Aligned(salt, []);
-                // SAFETY: B256 is aligned to `usize`.
-                let salt_word = unsafe {
-                    &mut *salt.0.as_mut_ptr().add(32 - usize::BITS as usize / 8).cast::<usize>()
-                };
-                // Important: add the thread index to the salt to avoid duplicate results.
-                *salt_word = salt_word.wrapping_add(i);
-
-                let mut checksum = [0; 42];
-                loop {
-                    // Stop if a result was found in another thread.
-                    if found.load(Ordering::Relaxed) {
-                        break None;
-                    }
-
-                    // Calculate the `CREATE2` address.
-                    #[expect(clippy::needless_borrows_for_generic_args)]
-                    let addr = deployer.create2(&salt.0, &init_code_hash);
-
-                    // Check if the regex matches the calculated address' checksum.
-                    let _ = addr.to_checksum_raw(&mut checksum, None);
-                    // SAFETY: stripping 2 ASCII bytes ("0x") off of an already valid UTF-8 string
-                    // is safe.
-                    let s = unsafe { std::str::from_utf8_unchecked(checksum.get_unchecked(2..)) };
-                    if regex.matches(s).into_iter().count() == regex_len {
-                        // Notify other threads that we found a result.
-                        found.store(true, Ordering::Relaxed);
-                        break Some((addr, salt.0));
-                    }
-
-                    // Increment the salt for the next iteration.
-                    *salt_word = salt_word.wrapping_add(increment);
-                }
-            }));
+        let regex_len = regex.patterns().len();
+        let mut checksum_buf = [0u8; 42];
+        let mut hex_buf = [0u8; 40];
+        let (address, salt) = super::miner::mine_salt(salt, n_threads, move |salt| {
+            #[expect(clippy::needless_borrows_for_generic_args)]
+            let addr = deployer.create2(&salt, &init_code_hash);
+            // Use checksum format only when case_sensitive is enabled — it requires an extra
+            // keccak256 call, so we fall back to plain hex when case sensitivity is off.
+            let s = if case_sensitive {
+                let _ = addr.to_checksum_raw(&mut checksum_buf, None);
+                // SAFETY: stripping 2 ASCII bytes ("0x") off of an already valid UTF-8 string.
+                unsafe { std::str::from_utf8_unchecked(checksum_buf.get_unchecked(2..)) }
+            } else {
+                // SAFETY: hex::encode_to_slice always produces valid UTF-8 (hex digits).
+                let _ = hex::encode_to_slice(addr.as_slice(), &mut hex_buf);
+                unsafe { std::str::from_utf8_unchecked(&hex_buf) }
+            };
+            (regex.matches(s).into_iter().count() == regex_len).then_some((addr, salt))
+        })
+        .ok_or_else(|| eyre::eyre!("create2 salt mining failed: all threads panicked"))?;
+        sh_status!("Successfully found contract address in {:?}", timer.elapsed())?;
+        sh_status!("Address: {address}")?;
+        sh_status!("Salt: {salt} ({})", U256::from_be_bytes(salt.0))?;
+        // The machine-readable stdout record duplicates the prose above when stdout is an
+        // interactive terminal.
+        if !shell::is_out_tty() {
+            sh_println!("{address}\t{salt}")?;
         }
-
-        let results = handles.into_iter().filter_map(|h| h.join().unwrap()).collect::<Vec<_>>();
-        let (address, salt) = results.into_iter().next().unwrap();
-        sh_println!("Successfully found contract address in {:?}", timer.elapsed())?;
-        sh_println!("Address: {address}")?;
-        sh_println!("Salt: {salt} ({})", U256::from_be_bytes(salt.0))?;
 
         Ok(Create2Output { address, salt })
     }
@@ -268,6 +323,16 @@ mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
     use std::str::FromStr;
+
+    #[test]
+    fn create2_subcommand_is_rejected_by_legacy_runner() {
+        let args = Create2Args::parse_from(["foundry-cli", "init-code-hash", "MissingContract"]);
+        let err = args.run().err().unwrap();
+        assert_eq!(
+            err.to_string(),
+            "`Create2Args::run` does not support subcommands; use `Create2Args::execute` instead"
+        );
+    }
 
     #[test]
     fn basic_create2() {
