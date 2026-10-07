@@ -3385,7 +3385,9 @@ forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
                 "testReject",
             ])
             .assert_success();
-        for name in ["testRejectZeroCount", "testRejectZeroCountDelegate"] {
+        for name in
+            ["testRejectZeroCount", "testRejectZeroCountDelegate", "testRejectPrecompileZeroCount"]
+        {
             cmd.forge_fuse()
                 .args(["test", "--network", "arbitrum", "--mt", &format!(r"^{name}\(\)$")])
                 .assert_failure()
@@ -3411,6 +3413,23 @@ forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
 [FAIL: Message param mismatch at value: expected=99, got=42] [..]
 ...
 "#]]);
+    }
+});
+
+forgetest_init!(test_stylus_host_inspection, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/fixtures/Stylus/foundry_stylus_inspector.wasm");
+    std::fs::copy(fixture, prj.root().join("inspector.wasm")).unwrap();
+    prj.add_test("StylusInspector.t.sol", include_str!("../../fixtures/StylusInspector.t.sol"));
+    for isolate in [false, true] {
+        prj.update_config(|config| config.isolate = isolate);
+        cmd.forge_fuse()
+            .args(["test", "--network", "arbitrum", "--mc", "StylusInspectorTest", "-vvvv"])
+            .assert_success();
     }
 });
 

@@ -7,6 +7,10 @@ interface StylusEventVm {
     function deployStylusCode(string calldata) external returns (address);
 }
 
+interface EventArbSys {
+    function sendTxToL1(address destination, bytes calldata data) external payable returns (uint256);
+}
+
 contract EventProxy {
     function forward(address target, bytes memory data, bool delegate) public {
         (bool ok, bytes memory result) = delegate ? target.delegatecall(data) : target.call(data);
@@ -68,6 +72,18 @@ contract StylusEventsTest is Test {
     }
 
     // These must fail when run by the CLI regression harness.
+    function testRejectPrecompileZeroCount() public {
+        EventArbSys sys = EventArbSys(address(0x64));
+        vm.recordLogs();
+        sys.sendTxToL1(address(1), "");
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertGt(logs.length, 0);
+        bytes32 topic = logs[0].topics[0];
+        vm.expectEmit(false, false, false, false, address(sys), 0);
+        assembly { log4(0, 0, topic, 0, 0, 0) }
+        sys.sendTxToL1(address(1), "");
+    }
+
     function testRejectZeroCount() public {
         vm.expectEmit(true, false, false, true, program, 0);
         emit Message(7, 42);
