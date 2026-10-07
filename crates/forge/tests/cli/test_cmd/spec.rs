@@ -3363,6 +3363,57 @@ contract BlockCacheTest is Test {
     }
 });
 
+forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.fs_permissions.add(PathPermission::read("."));
+    });
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/fixtures/Stylus/foundry_stylus_events.wasm");
+    std::fs::copy(fixture, prj.root().join("events.wasm")).unwrap();
+    prj.add_test("StylusEvents.t.sol", include_str!("../../fixtures/StylusEvents.t.sol"));
+    for isolate in [false, true] {
+        prj.update_config(|config| config.isolate = isolate);
+        cmd.forge_fuse()
+            .args([
+                "test",
+                "--network",
+                "arbitrum",
+                "--mc",
+                "StylusEventsTest",
+                "--no-match-test",
+                "testReject",
+            ])
+            .assert_success();
+        for name in ["testRejectZeroCount", "testRejectZeroCountDelegate"] {
+            cmd.forge_fuse()
+                .args(["test", "--network", "arbitrum", "--mt", &format!(r"^{name}\(\)$")])
+                .assert_failure()
+                .stdout_eq(str![[r#"
+...
+[FAIL: log emitted but expected 0 times] [..]
+...
+"#]]);
+        }
+        cmd.forge_fuse()
+            .args(["test", "--network", "arbitrum", "--mt", "testRejectAnonymousTemplate"])
+            .assert_failure()
+            .stdout_eq(str![[r#"
+...
+[FAIL: use vm.expectEmitAnonymous to match anonymous events] [..]
+...
+"#]]);
+        cmd.forge_fuse()
+            .args(["test", "--network", "arbitrum", "--mt", "testRejectWrongData"])
+            .assert_failure()
+            .stdout_eq(str![[r#"
+...
+[FAIL: Message param mismatch at value: expected=99, got=42] [..]
+...
+"#]]);
+    }
+});
+
 forgetest_init!(test_deploy_stylus_code_executes_program, |prj, cmd| {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
