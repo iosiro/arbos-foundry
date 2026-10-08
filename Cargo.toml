@@ -29,7 +29,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.93"
 authors = ["Foundry Contributors"]
@@ -220,7 +220,7 @@ foundry-wallets = { path = "crates/wallets" }
 foundry-linking = { path = "crates/linking" }
 
 # arbos-revm
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "86343eccb4e1615aa9616da0a6284db925bf0440", version = "0.2.0", default-features = false }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "dd2ea9d6dbd5c0e8a1fb14503a304c354867c56f", version = "0.2.1", default-features = false }
 
 # solc & compilation utilities
 foundry-block-explorers = { version = "0.22.0", default-features = false }
