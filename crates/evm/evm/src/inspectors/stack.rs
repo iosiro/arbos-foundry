@@ -292,6 +292,9 @@ pub struct InspectorData {
 pub struct InnerContextData {
     /// Origin of the transaction in the outer EVM context.
     original_origin: Address,
+    /// Fees visible to code, while the isolated transaction itself runs fee-free.
+    original_basefee: u64,
+    original_gas_price: u128,
 }
 
 /// An inspector that calls multiple inspectors in sequence.
@@ -582,6 +585,9 @@ impl InspectorStackRefMut<'_> {
         let inner_context_data =
             self.inner_context_data.as_ref().expect("should be called in inner context");
         ecx.tx.caller = inner_context_data.original_origin;
+        // Validation and upfront fee deduction have already run with zero fees.
+        ecx.block.basefee = inner_context_data.original_basefee;
+        ecx.tx.gas_price = inner_context_data.original_gas_price;
     }
 
     fn do_call_end(
@@ -674,7 +680,11 @@ impl InspectorStackRefMut<'_> {
         }
         ecx.tx.gas_price = 0;
 
-        self.inner_context_data = Some(InnerContextData { original_origin: cached_env.tx.caller });
+        self.inner_context_data = Some(InnerContextData {
+            original_origin: cached_env.tx.caller,
+            original_basefee: cached_env.evm_env.block_env.basefee,
+            original_gas_price: cached_env.tx.gas_price,
+        });
         self.in_inner_context = true;
 
         let res = self.with_inspector(|inspector| {
@@ -911,6 +921,13 @@ impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for InspectorStackRefMut<'_
         self.step_end_inlined(interpreter, ecx);
     }
 
+    fn log(&mut self, ecx: &mut FoundryContext<&mut dyn DatabaseExt>, log: Log) {
+        call_inspectors!(
+            [&mut self.tracer, &mut self.log_collector, &mut self.cheatcodes, &mut self.printer],
+            |inspector| inspector.log(ecx, log.clone()),
+        );
+    }
+
     #[allow(clippy::redundant_clone)]
     fn log_full(
         &mut self,
@@ -1032,6 +1049,9 @@ impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for InspectorStackRefMut<'_
         // We are processing inner context outputs in the outer context, so need to avoid processing
         // twice.
         if self.in_inner_context && ecx.journaled_state.depth == 1 {
+            // Restore fee-free bookkeeping before REVM refunds and pays the beneficiary.
+            ecx.block.basefee = 0;
+            ecx.tx.gas_price = 0;
             return;
         }
 
@@ -1090,6 +1110,8 @@ impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for InspectorStackRefMut<'_
         // We are processing inner context outputs in the outer context, so need to avoid processing
         // twice.
         if self.in_inner_context && ecx.journaled_state.depth == 1 {
+            ecx.block.basefee = 0;
+            ecx.tx.gas_price = 0;
             return;
         }
 
@@ -1140,6 +1162,10 @@ impl InspectorExt for InspectorStackRefMut<'_> {
 }
 
 impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for InspectorStack {
+    fn log(&mut self, ecx: &mut FoundryContext<&mut dyn DatabaseExt>, log: Log) {
+        self.as_mut().log(ecx, log);
+    }
+
     fn step(
         &mut self,
         interpreter: &mut Interpreter,

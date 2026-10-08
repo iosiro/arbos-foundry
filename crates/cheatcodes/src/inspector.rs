@@ -467,6 +467,8 @@ pub struct Cheatcodes {
     pub expected_calls: ExpectedCallTracker,
     /// Expected emits
     pub expected_emits: ExpectedEmitTracker,
+    /// A precompile log failure to propagate when its call returns.
+    pending_log_error: Option<&'static str>,
     /// Expected creates
     pub expected_creates: Vec<ExpectedCreate>,
 
@@ -574,6 +576,7 @@ impl Cheatcodes {
             mocked_functions: Default::default(),
             expected_calls: Default::default(),
             expected_emits: Default::default(),
+            pending_log_error: None,
             expected_creates: Default::default(),
             allowed_mem_writes: Default::default(),
             broadcast: Default::default(),
@@ -1219,9 +1222,24 @@ impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for Cheatcodes {
         }
     }
 
+    fn log(&mut self, _ecx: Ecx, log: Log) {
+        if !self.expected_emits.is_empty()
+            && let Some(error) = expect::handle_expect_emit(self, &log, None)
+        {
+            self.pending_log_error.get_or_insert(error);
+        }
+        if let Some(logs) = &mut self.recorded_logs {
+            logs.push(Vm::Log {
+                topics: log.data.topics().to_vec(),
+                data: log.data.data.clone(),
+                emitter: log.address,
+            });
+        }
+    }
+
     fn log_full(&mut self, interpreter: &mut Interpreter, _ecx: Ecx, log: Log) {
         if !self.expected_emits.is_empty() {
-            expect::handle_expect_emit(self, &log, interpreter);
+            expect::handle_expect_emit(self, &log, Some(interpreter));
         }
 
         // `recordLogs`
@@ -1239,6 +1257,10 @@ impl Inspector<FoundryContext<&mut dyn DatabaseExt>> for Cheatcodes {
     }
 
     fn call_end(&mut self, ecx: Ecx, call: &CallInputs, outcome: &mut CallOutcome) {
+        if let Some(error) = self.pending_log_error.take() {
+            outcome.result.result = InstructionResult::Revert;
+            outcome.result.output = Error::encode(error);
+        }
         let cheatcode_call = call.target_address == CHEATCODE_ADDRESS
             || call.target_address == HARDHAT_CONSOLE_ADDRESS;
 

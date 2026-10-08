@@ -18,6 +18,7 @@ mod invariant;
 mod logs;
 mod repros;
 mod spec;
+mod stylus_inspector;
 mod table;
 mod trace;
 
