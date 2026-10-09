@@ -466,6 +466,7 @@ struct StorageHookInspectorState {
     assume_no_revert: Option<AssumeNoRevert>,
     expected_calls: ExpectedCallTracker,
     expected_emits: ExpectedEmitTracker,
+    pending_log_error: Option<&'static str>,
     expected_creates: Vec<ExpectedCreate>,
 }
 
@@ -831,6 +832,8 @@ pub struct Cheatcodes<FEN: FoundryEvmNetwork = EthEvmNetwork> {
     pub expected_calls: ExpectedCallTracker,
     /// Expected emits
     pub expected_emits: ExpectedEmitTracker,
+    /// Failure from a precompile log, which has no interpreter to stop directly.
+    pending_log_error: Option<&'static str>,
     /// Expected creates
     pub expected_creates: Vec<ExpectedCreate>,
 
@@ -1017,6 +1020,7 @@ impl<FEN: FoundryEvmNetwork> Cheatcodes<FEN> {
             mocked_functions: Default::default(),
             expected_calls: Default::default(),
             expected_emits: Default::default(),
+            pending_log_error: None,
             expected_creates: Default::default(),
             allowed_mem_writes: Default::default(),
             broadcast: Default::default(),
@@ -2400,10 +2404,9 @@ impl<FEN: FoundryEvmNetwork> Inspector<FoundryContextFor<'_, FEN>> for Cheatcode
         if !self.expected_emits.is_empty()
             && let Some(err) = expect::handle_expect_emit(self, &log, None)
         {
-            // Because we do not have access to the interpreter here, we cannot fail the test
-            // immediately. In most cases the failure will still be caught on `call_end`.
-            // In the rare case it is not, we log the error here.
-            let _ = sh_err!("{err:?}");
+            // Precompile logs are delivered immediately before call_end. Preserve the
+            // first failure even if later logs remove or satisfy the expectation.
+            self.pending_log_error.get_or_insert(err);
         }
 
         // `recordLogs`
@@ -2442,6 +2445,10 @@ impl<FEN: FoundryEvmNetwork> Inspector<FoundryContextFor<'_, FEN>> for Cheatcode
         outcome: &mut CallOutcome,
     ) {
         let isolated_snapshot_gas_used = self.gas_metering.isolated_snapshot_gas_used.take();
+        if let Some(error) = self.pending_log_error.take() {
+            outcome.result.result = InstructionResult::Revert;
+            outcome.result.output = Error::encode(error);
+        }
         if self.finish_storage_hook_call(ecx, call, outcome) {
             return;
         }
@@ -3503,6 +3510,7 @@ impl<FEN: FoundryEvmNetwork> Cheatcodes<FEN> {
             assume_no_revert: self.assume_no_revert.take(),
             expected_calls: std::mem::take(&mut self.expected_calls),
             expected_emits: std::mem::take(&mut self.expected_emits),
+            pending_log_error: self.pending_log_error.take(),
             expected_creates: std::mem::take(&mut self.expected_creates),
         }
     }
@@ -3518,6 +3526,7 @@ impl<FEN: FoundryEvmNetwork> Cheatcodes<FEN> {
         self.assume_no_revert = state.assume_no_revert;
         self.expected_calls = state.expected_calls;
         self.expected_emits = state.expected_emits;
+        self.pending_log_error = state.pending_log_error;
         self.expected_creates = state.expected_creates;
     }
 

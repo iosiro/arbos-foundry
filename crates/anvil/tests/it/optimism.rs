@@ -508,6 +508,9 @@ async fn jovian_mining_and_simulation_use_da_footprint() {
     )
     .await;
     let l1_block = address!("0x4200000000000000000000000000000000000015");
+    // Model a deployed system contract. A storage-only account with zero nonce, balance,
+    // and code is indistinguishable from an absent account through standard account RPCs.
+    origin_api.anvil_set_nonce(l1_block, U256::ONE).await.unwrap();
     let mut scalar_slot = [0u8; 32];
     scalar_slot[18..20].copy_from_slice(&DA_FOOTPRINT_SCALAR.to_be_bytes());
     origin_api
@@ -518,6 +521,7 @@ async fn jovian_mining_and_simulation_use_da_footprint() {
     let fork_url = spawn_rpc_proxy_with_extra_data(origin.http_endpoint(), JOVIAN_EXTRA_DATA).await;
     let (api, handle) = spawn(
         NodeConfig::test()
+            .with_networks(NetworkConfigs::with_optimism())
             .with_no_storage_caching(true)
             .with_eth_rpc_url(Some(fork_url))
             .with_fork_block_number(Some(0u64))

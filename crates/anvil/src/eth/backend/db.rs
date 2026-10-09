@@ -370,7 +370,14 @@ where
     }
 
     fn set_storage_at(&mut self, address: Address, slot: B256, val: B256) -> DatabaseResult<()> {
-        self.insert_account_storage(address, slot.into(), val.into())
+        let account = self.load_account(address)?;
+        // An RPC storage override creates the account. Leaving it marked absent would
+        // discard its storage when constructing historical state or an execution overlay.
+        if account.account_state == AccountState::NotExisting {
+            account.account_state = AccountState::StorageCleared;
+        }
+        account.storage.insert(slot.into(), val.into());
+        Ok(())
     }
 
     fn insert_block_hash(&mut self, number: U256, hash: B256) {

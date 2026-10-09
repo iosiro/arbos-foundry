@@ -9011,15 +9011,15 @@ casttest!(can_disassemble_contract_code, |_prj, cmd| {
 "#]]);
 });
 
-// tests that cast call --trace selects TempoEvmNetwork when Tempo is inferred from
-// the fork RPC, or when a Tempo chain ID is provided explicitly via --chain.
+// Tests explicit Tempo execution with either the RPC's chain ID or a --chain override.
 casttest!(cast_call_trace_selects_tempo_network, async |_prj, cmd| {
+    cmd.set_network(Some("tempo"));
     let (_, tempo_handle) = anvil::spawn(NodeConfig::test_tempo()).await;
     let (_, eth_handle) = anvil::spawn(NodeConfig::test()).await;
 
     let token = PATH_USD_ADDRESS.to_string();
     for (name, rpc, extra_args) in [
-        ("inferred Tempo RPC", tempo_handle.http_endpoint(), Vec::<&str>::new()),
+        ("Tempo RPC", tempo_handle.http_endpoint(), Vec::<&str>::new()),
         ("explicit Tempo --chain", eth_handle.http_endpoint(), vec!["--chain", "4217"]),
     ] {
         cmd.cast_fuse();

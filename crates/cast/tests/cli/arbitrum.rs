@@ -15,6 +15,7 @@ sol! {
 }
 
 casttest!(arbitrum_fork_trace_and_replay_apply_stylus_config, async |prj, cmd| {
+    cmd.set_network(Some("arbitrum"));
     let (_api, handle) = anvil::spawn(
         NodeConfig::test()
             .with_networks(NetworkConfigs::with_arbitrum())
@@ -98,4 +99,79 @@ Transaction successfully executed.
     // Local tracing overrides must not mutate the fork source.
     let output = provider.call(query.into()).await.unwrap();
     assert_eq!(u32::abi_decode(&output).unwrap(), 13_579);
+});
+
+casttest!(arbitrum_default_fork_execution_and_ethereum_opt_in, async |prj, cmd| {
+    cmd.set_network(None);
+    // An Ethereum source must not silently change the selected local execution family.
+    let (_api, handle) = anvil::spawn(NodeConfig::test().with_chain_id(Some(1_u64))).await;
+    let provider = handle.http_provider();
+    let query = TransactionRequest::default()
+        .with_to(address!("0000000000000000000000000000000000000071"))
+        .with_input(inkPriceCall {}.abi_encode());
+    assert!(provider.call(query.clone().into()).await.unwrap().is_empty());
+    let pending = provider
+        .send_transaction(
+            query
+                .with_from(provider.get_accounts().await.unwrap()[0])
+                .with_gas_limit(1_000_000)
+                .into(),
+        )
+        .await
+        .unwrap();
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(20), pending.get_receipt())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(receipt.status());
+    prj.add_source(
+        "ArbWasm.sol",
+        "interface ArbWasm { function inkPrice() external view returns (uint32); }",
+    );
+    cmd.set_current_dir(prj.root());
+    for ethereum in [false, true] {
+        for replay in [false, true] {
+            cmd.cast_fuse();
+            if ethereum {
+                cmd.env("FOUNDRY_NETWORK", "ethereum");
+            }
+            if replay {
+                cmd.args(["run", &receipt.transaction_hash().to_string()]);
+            } else {
+                cmd.args([
+                    "call",
+                    "--trace",
+                    "0x0000000000000000000000000000000000000071",
+                    "inkPrice()(uint32)",
+                ]);
+            }
+            let output = cmd
+                .args([
+                    "--disable-external-identification",
+                    "--with-local-artifacts",
+                    "--rpc-url",
+                    &handle.http_endpoint(),
+                ])
+                .assert_success();
+            if ethereum {
+                output.stdout_eq(str![[r#"
+...
+    └─ ← [Stop]
+...
+Transaction successfully executed.
+[GAS]
+
+"#]]);
+            } else {
+                output.stdout_eq(str![[r#"
+...
+    └─ ← [Return] 10000 [1e4]
+...
+Transaction successfully executed.
+[GAS]
+
+"#]]);
+            }
+        }
+    }
 });

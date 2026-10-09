@@ -1,5 +1,27 @@
 //! Contains various tests for checking forge commands related to config values
 
+// Exercise actual CLI defaults and configuration precedence, without the execution-test
+// harness's explicit Ethereum selection.
+macro_rules! forgetest {
+    ($test:ident, | $prj:ident, $cmd:ident | $body:expr) => {
+        foundry_test_utils::forgetest!($test, |$prj, $cmd| {
+            $prj.set_network(None);
+            $cmd.set_network(None);
+            $body
+        });
+    };
+}
+
+macro_rules! forgetest_init {
+    ($test:ident, | $prj:ident, $cmd:ident | $body:expr) => {
+        foundry_test_utils::forgetest_init!($test, |$prj, $cmd| {
+            $prj.set_network(None);
+            $cmd.set_network(None);
+            $body
+        });
+    };
+}
+
 use alloy_primitives::{Address, B256, U256};
 use foundry_cli::utils as forge_utils;
 use foundry_compilers::{
@@ -116,6 +138,7 @@ create2_library_salt = "0x000000000000000000000000000000000000000000000000000000
 create2_deployer = "0x4e59b44847b379578588920ca78fbf26c0b4956c"
 assertions_revert = true
 legacy_assertions = false
+network = "arbitrum"
 celo = false
 bypass_prevrandao = false
 transaction_timeout = 120
@@ -495,7 +518,7 @@ forgetest!(can_extract_config_values, |prj, cmd| {
         extra_args: vec![],
         experimental: false,
         via_ssa_cfg: false,
-        networks: Default::default(),
+        networks: foundry_evm_networks::NetworkConfigs::with_arbitrum(),
         transaction_timeout: 120,
         additional_compiler_profiles: Default::default(),
         compilation_restrictions: Default::default(),
@@ -506,6 +529,49 @@ forgetest!(can_extract_config_values, |prj, cmd| {
     prj.write_config(input.clone());
     let config = cmd.config();
     similar_asserts::assert_eq!(input, config);
+});
+
+// CLI selection overrides environment and project selection.
+forgetest!(can_select_ethereum_execution, |prj, cmd| {
+    cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "arbitrum"
+...
+"#]]);
+    cmd.forge_fuse().args(["config", "--network", "ethereum"]).assert_success().stdout_eq(str![[
+        r#"
+...
+network = "ethereum"
+...
+"#
+    ]]);
+    prj.update_config(|config| {
+        config.networks = foundry_evm_networks::NetworkConfigs::with_ethereum();
+    });
+    cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "ethereum"
+...
+"#]]);
+    cmd.forge_fuse().args(["config", "--network", "arbitrum"]).assert_success().stdout_eq(str![[
+        r#"
+...
+network = "arbitrum"
+...
+"#
+    ]]);
+    cmd.forge_fuse().env("FOUNDRY_NETWORK", "arbitrum");
+    cmd.args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "arbitrum"
+...
+"#]]);
+    cmd.forge_fuse().env("FOUNDRY_NETWORK", "arbitrum");
+    cmd.args(["config", "--network", "ethereum"]).assert_success().stdout_eq(str![[r#"
+...
+network = "ethereum"
+...
+"#]]);
 });
 
 // tests config gets printed to std out
@@ -2439,7 +2505,7 @@ forgetest_init!(test_default_config, |prj, cmd| {
   "soldeer": null,
   "assertions_revert": true,
   "legacy_assertions": false,
-  "network": null,
+  "network": "arbitrum",
   "celo": false,
   "bypass_prevrandao": false,
   "transaction_timeout": 120,

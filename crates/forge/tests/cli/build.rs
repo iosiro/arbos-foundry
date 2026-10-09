@@ -417,6 +417,7 @@ forgetest!(build_sizes_respects_configured_code_size_limit, |prj, cmd| {
 
 #[cfg(feature = "monad")]
 forgetest!(build_sizes_respects_monad_network_code_size_limit, |prj, cmd| {
+    cmd.set_network(None);
     prj.add_source("LargeContract.sol", generate_large_init_contract(50_000).as_str());
     prj.update_config(|config| {
         config.networks = foundry_evm_networks::NetworkConfigs::with_monad();

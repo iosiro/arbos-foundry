@@ -977,6 +977,7 @@ Installing forge-std in [..] (url: https://github.com/foundry-rs/forge-std, tag:
 
 // checks that `forge init --network tempo` works.
 forgetest!(can_init_tempo_project, |prj, cmd| {
+    cmd.set_network(None);
     prj.wipe();
 
     cmd.args(["init", "--network", "tempo"])
@@ -1032,6 +1033,7 @@ Installing tempo-std in [..] (url: https://github.com/tempoxyz/tempo-std, tag: N
 
 // checks that `forge init --network tempo` correctly setup network key in config
 forgetest!(can_execute_test_and_script_with_default_tempo_config, |prj, cmd| {
+    cmd.set_network(None);
     prj.wipe();
 
     // Initialize a Tempo project.
