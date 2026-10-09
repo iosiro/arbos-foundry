@@ -9,6 +9,9 @@ pub use init::{configure_env, environment};
 
 pub mod database;
 
+mod remote_db;
+pub use remote_db::RemoteAccountDB;
+
 mod multi;
 pub use multi::{ForkId, MultiFork, MultiForkHandler};
 

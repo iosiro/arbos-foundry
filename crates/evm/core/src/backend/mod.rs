@@ -5,7 +5,7 @@ use crate::{
     constants::{CALLER, CHEATCODE_ADDRESS, DEFAULT_CREATE2_DEPLOYER, TEST_CONTRACT_ADDRESS},
     evm::new_evm_with_inspector,
     evm_trait::Evm,
-    fork::{CreateFork, ForkId, MultiFork},
+    fork::{CreateFork, ForkId, MultiFork, RemoteAccountDB},
     state_snapshot::StateSnapshots,
     utils::{configure_tx_env, configure_tx_req_env, get_blob_base_fee_update_fraction_by_spec_id},
 };
@@ -50,7 +50,7 @@ mod snapshot;
 pub use snapshot::{BackendStateSnapshot, RevertStateSnapshotAction, StateSnapshot};
 
 // A `revm::Database` that is used in forking mode
-type ForkDB = CacheDB<SharedBackend>;
+type ForkDB = CacheDB<RemoteAccountDB<SharedBackend>>;
 
 /// Represents a numeric `ForkId` valid only for the existence of the `Backend`.
 ///
@@ -496,7 +496,7 @@ impl Backend {
 
         if let Some(fork) = fork {
             let (fork_id, fork, _) = backend.forks.create_fork(fork)?;
-            let fork_db = ForkDB::new(fork);
+            let fork_db = ForkDB::new(RemoteAccountDB(fork));
             let fork_ids = backend.inner.insert_new_fork(
                 fork_id.clone(),
                 fork_db,
@@ -835,9 +835,11 @@ impl Backend {
 
                 // otherwise we need to replace the account's info with the one from the fork's
                 // database
-                let fork_account = Database::basic(&mut fork.db, loaded_account)?
-                    .ok_or(BackendError::MissingAccount(loaded_account))?;
-                init_account.info = fork_account;
+                let fork_account = Database::basic(&mut fork.db, loaded_account)?;
+                init_account
+                    .status
+                    .set(revm::state::AccountStatus::LoadedAsNotExisting, fork_account.is_none());
+                init_account.info = fork_account.unwrap_or_default();
             }
             fork.journaled_state = journaled_state;
         }
@@ -1009,7 +1011,7 @@ impl DatabaseExt for Backend {
         trace!("create fork");
         let (fork_id, fork, _) = self.forks.create_fork(create_fork)?;
 
-        let fork_db = ForkDB::new(fork);
+        let fork_db = ForkDB::new(RemoteAccountDB(fork));
         let (id, _) =
             self.inner.insert_new_fork(fork_id, fork_db, self.fork_init_journaled_state.clone());
         Ok(id)
@@ -1085,10 +1087,12 @@ impl DatabaseExt for Backend {
             if target_fork.journaled_state.depth == 0 {
                 // Initialize caller with its fork info
                 if let Some(mut acc) = caller_account {
-                    let fork_account = Database::basic(&mut target_fork.db, caller)?
-                        .ok_or(BackendError::MissingAccount(caller))?;
-
-                    acc.info = fork_account;
+                    let fork_account = Database::basic(&mut target_fork.db, caller)?;
+                    acc.status.set(
+                        revm::state::AccountStatus::LoadedAsNotExisting,
+                        fork_account.is_none(),
+                    );
+                    acc.info = fork_account.unwrap_or_default();
                     target_fork.journaled_state.state.insert(caller, acc);
                 }
             }
@@ -1780,7 +1784,7 @@ impl BackendInner {
 
         if let Some(active) = self.forks[idx].as_mut() {
             // we initialize a _new_ `ForkDB` but keep the state of persistent accounts
-            let mut new_db = ForkDB::new(backend);
+            let mut new_db = ForkDB::new(RemoteAccountDB(backend));
             for addr in self.persistent_accounts.iter().copied() {
                 merge_db_account_data(addr, &active.db, &mut new_db);
             }

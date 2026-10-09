@@ -18,7 +18,7 @@ env:
   RUST_PROFILE: maxperf
   RUST_FEATURES: aws-kms,gcp-kms,turnkey,cli,asm-keccak,js-tracer
 
-  LAST_STABLE_VERSION: "v0.1.0"
+  LAST_STABLE_VERSION: "v0.2.1"
 
 jobs:
   prepare:
@@ -31,7 +31,7 @@ jobs:
     outputs:
       tag_name: ${{ steps.release_info.outputs.tag_name }}
       release_name: ${{ steps.release_info.outputs.release_name }}
-      changelog: ${{ steps.build_changelog.outputs.changelog }}
+      changelog: ${{ steps.release_notes.outputs.changelog }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -72,6 +72,22 @@ jobs:
           toTag: ${{ steps.release_info.outputs.tag_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select release notes
+        id: release_notes
+        env:
+          TAG_NAME: ${{ steps.release_info.outputs.tag_name }}
+          GENERATED_CHANGELOG: ${{ steps.build_changelog.outputs.changelog }}
+        run: |
+          {
+            echo 'changelog<<RELEASE_NOTES_END'
+            if [[ -f ".github/release-notes/${TAG_NAME}.md" ]]; then
+              cat ".github/release-notes/${TAG_NAME}.md"
+            else
+              printf '%s\n' "${GENERATED_CHANGELOG}"
+            fi
+            echo 'RELEASE_NOTES_END'
+          } >> "$GITHUB_OUTPUT"
 
   release:
     permissions:

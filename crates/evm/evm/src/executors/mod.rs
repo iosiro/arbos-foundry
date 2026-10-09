@@ -26,7 +26,7 @@ use arbos_revm::{
 };
 use foundry_evm_core::{
     EvmEnv, FoundryTxEnv,
-    backend::{Backend, BackendError, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
+    backend::{Backend, BackendResult, CowBackend, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
         CALLER, CHEATCODE_ADDRESS, CHEATCODE_CONTRACT_HASH, DEFAULT_CREATE2_DEPLOYER,
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
@@ -222,10 +222,8 @@ impl Executor {
     /// Creates the default CREATE2 Contract Deployer for local tests and scripts.
     pub fn deploy_create2_deployer(&mut self) -> eyre::Result<()> {
         trace!("deploying local create2 deployer");
-        let create2_deployer_account = self
-            .backend()
-            .basic_ref(DEFAULT_CREATE2_DEPLOYER)?
-            .ok_or_else(|| BackendError::MissingAccount(DEFAULT_CREATE2_DEPLOYER))?;
+        let create2_deployer_account =
+            self.backend().basic_ref(DEFAULT_CREATE2_DEPLOYER)?.unwrap_or_default();
 
         // If the deployer is not currently deployed, deploy the default one.
         if create2_deployer_account.code.is_none_or(|code| code.is_empty()) {
