@@ -18,7 +18,7 @@ env:
   RUST_PROFILE: dist
   RUST_FEATURES: aws-kms,gcp-kms,turnkey,cli,asm-keccak,js-tracer
 
-  LAST_STABLE_VERSION: "v0.2.1"
+  LAST_STABLE_VERSION: "v0.2.2"
 
 jobs:
   prepare:

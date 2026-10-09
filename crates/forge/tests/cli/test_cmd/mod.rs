@@ -25,6 +25,7 @@ mod mutation;
 mod repros;
 mod showmap;
 mod spec;
+mod stylus_codehash;
 mod symbolic;
 mod symbolic_calls;
 mod symbolic_cheatcodes;

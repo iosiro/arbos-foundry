@@ -10,7 +10,7 @@ use foundry_evm::{
     backend::{
         BlockchainDb, DatabaseResult, RevertStateSnapshotAction, SharedBackend, StateSnapshot,
     },
-    fork::database::ForkDbStateSnapshot,
+    fork::{RemoteAccountDB, database::ForkDbStateSnapshot},
 };
 use revm::{
     context::BlockEnv,
@@ -20,7 +20,7 @@ use revm::{
 
 pub use foundry_evm::fork::database::ForkedDatabase;
 
-impl<N: Network> MaybeFullDatabase for SharedBackend<N> {
+impl<N: Network> MaybeFullDatabase for RemoteAccountDB<SharedBackend<N>> {
     fn clear_into_state_snapshot(&mut self) -> StateSnapshot {
         StateSnapshot::default()
     }

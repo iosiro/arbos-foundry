@@ -2,6 +2,7 @@
 
 use crate::{
     backend::{RevertStateSnapshotAction, StateSnapshot},
+    fork::RemoteAccountDB,
     state_snapshot::StateSnapshots,
 };
 use alloy_network::Network;
@@ -36,7 +37,7 @@ pub struct ForkedDatabase<N: Network, B: ForkBlockEnv = BlockEnv> {
     ///
     /// This separates Read/Write operations
     ///   - reads from the `SharedBackend as DatabaseRef` writes to the internal cache storage.
-    cache_db: CacheDB<SharedBackend<N, B>>,
+    cache_db: CacheDB<RemoteAccountDB<SharedBackend<N, B>>>,
     /// Contains all the data already fetched.
     ///
     /// This exclusively stores the _unchanged_ remote client state.
@@ -49,18 +50,18 @@ impl<N: Network, B: ForkBlockEnv> ForkedDatabase<N, B> {
     /// Creates a new instance of this DB
     pub fn new(backend: SharedBackend<N, B>, db: BlockchainDb<B>) -> Self {
         Self {
-            cache_db: CacheDB::new(backend.clone()),
+            cache_db: CacheDB::new(RemoteAccountDB(backend.clone())),
             backend,
             db,
             state_snapshots: Arc::new(Mutex::new(Default::default())),
         }
     }
 
-    pub const fn database(&self) -> &CacheDB<SharedBackend<N, B>> {
+    pub const fn database(&self) -> &CacheDB<RemoteAccountDB<SharedBackend<N, B>>> {
         &self.cache_db
     }
 
-    pub const fn database_mut(&mut self) -> &mut CacheDB<SharedBackend<N, B>> {
+    pub const fn database_mut(&mut self) -> &mut CacheDB<RemoteAccountDB<SharedBackend<N, B>>> {
         &mut self.cache_db
     }
 
@@ -81,7 +82,7 @@ impl<N: Network, B: ForkBlockEnv> ForkedDatabase<N, B> {
         // wipe the storage retrieved from remote
         self.inner().db().clear();
         // create a fresh `CacheDB`, effectively wiping modified state
-        self.cache_db = CacheDB::new(self.backend.clone());
+        self.cache_db = CacheDB::new(RemoteAccountDB(self.backend.clone()));
         trace!(target: "backend::forkdb", "Cleared database");
         Ok(())
     }
@@ -157,9 +158,6 @@ impl<N: Network, B: ForkBlockEnv> Database for ForkedDatabase<N, B> {
     type Error = DatabaseError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        // Note: this will always return Some, since the `SharedBackend` will always load the
-        // account, this differs from `<CacheDB as Database>::basic`, See also
-        // [MemDb::ensure_loaded](crate::backend::MemDb::ensure_loaded)
         Database::basic(&mut self.cache_db, address)
     }
 
@@ -207,7 +205,7 @@ impl<N: Network, B: ForkBlockEnv> DatabaseCommit for ForkedDatabase<N, B> {
 /// This mimics `revm::CacheDB`
 #[derive(Clone, Debug)]
 pub struct ForkDbStateSnapshot<N: Network, B: ForkBlockEnv = BlockEnv> {
-    pub local: CacheDB<SharedBackend<N, B>>,
+    pub local: CacheDB<RemoteAccountDB<SharedBackend<N, B>>>,
     pub state_snapshot: StateSnapshot,
 }
 
@@ -235,15 +233,11 @@ impl<N: Network, B: ForkBlockEnv> DatabaseRef for ForkDbStateSnapshot<N, B> {
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         match self.local.cache.accounts.get(&address) {
-            Some(account) => Ok(Some(account.info.clone())),
-            None => {
-                let mut acc = self.state_snapshot.accounts.get(&address).cloned();
-
-                if acc.is_none() {
-                    acc = self.local.basic_ref(address)?;
-                }
-                Ok(acc)
-            }
+            Some(account) => Ok(account.info()),
+            None => match self.state_snapshot.accounts.get(&address) {
+                Some(info) => Ok((!info.is_empty()).then(|| info.clone())),
+                None => self.local.basic_ref(address),
+            },
         }
     }
 
@@ -275,8 +269,34 @@ mod tests {
     use crate::backend::BlockchainDbMeta;
     use foundry_common::provider::get_http_provider;
 
-    /// Demonstrates that `Database::basic` for `ForkedDatabase` will always return the
-    /// `AccountInfo`
+    #[test]
+    fn fork_snapshot_preserves_missing_accounts_without_remote_lookup() {
+        let endpoint = "http://127.0.0.1:1";
+        let provider = get_http_provider(endpoint);
+        let db = BlockchainDb::new(
+            BlockchainDbMeta::new(BlockEnv::default(), endpoint.to_string()),
+            None,
+        );
+        let (backend, handler) = SharedBackend::new(provider, db, None);
+        drop(handler);
+        let address = Address::random();
+        let mut snapshot = ForkDbStateSnapshot {
+            local: CacheDB::new(RemoteAccountDB(backend)),
+            state_snapshot: StateSnapshot::default(),
+        };
+        snapshot.state_snapshot.accounts.insert(address, AccountInfo::default());
+        assert!(snapshot.basic_ref(address).unwrap().is_none());
+        snapshot
+            .local
+            .cache
+            .accounts
+            .insert(address, revm::database::DbAccount::new_not_existing());
+        assert!(snapshot.basic_ref(address).unwrap().is_none());
+        snapshot.local.insert_account_info(address, AccountInfo::default());
+        assert_eq!(snapshot.basic_ref(address).unwrap(), Some(AccountInfo::default()));
+    }
+
+    /// A missing remote account can subsequently be created in the local cache.
     #[tokio::test(flavor = "multi_thread")]
     async fn fork_db_insert_basic_default() {
         let rpc = foundry_test_utils::rpc::next_http_rpc_endpoint();
@@ -291,8 +311,8 @@ mod tests {
         let address = Address::random();
 
         let info = Database::basic(&mut db, address).unwrap();
-        assert!(info.is_some());
-        let mut info = info.unwrap();
+        assert!(info.is_none());
+        let mut info = info.unwrap_or_default();
         info.balance = U256::from(500u64);
 
         // insert the modified account info
@@ -321,7 +341,8 @@ mod tests {
         let mut state_snapshot = StateSnapshot::default();
         state_snapshot.storage.entry(address).or_default().insert(slot, expected);
 
-        let snapshot = ForkDbStateSnapshot { local: CacheDB::new(backend), state_snapshot };
+        let snapshot =
+            ForkDbStateSnapshot { local: CacheDB::new(RemoteAccountDB(backend)), state_snapshot };
 
         let got = DatabaseRef::storage_ref(&snapshot, address, slot).unwrap();
         assert_eq!(got, expected);

@@ -24,10 +24,7 @@ use foundry_evm_core::evm::{MonadEvmNetwork, try_transact_monad_system_replay};
 use foundry_evm_core::refresh_chain_journal;
 use foundry_evm_core::{
     EvmEnv, FoundryBlock, FoundryChain, FoundryTransaction,
-    backend::{
-        Backend, BackendError, BackendResult, CowBackend, DatabaseError, DatabaseExt,
-        GLOBAL_FAIL_SLOT,
-    },
+    backend::{Backend, BackendResult, CowBackend, DatabaseError, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
         CALLER, CHEATCODE_ADDRESS, CHEATCODE_CONTRACT_HASH, DEFAULT_CREATE2_DEPLOYER,
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
@@ -469,10 +466,8 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
     /// Creates the default CREATE2 Contract Deployer for local tests and scripts.
     pub fn deploy_create2_deployer(&mut self) -> eyre::Result<()> {
         trace!("deploying local create2 deployer");
-        let create2_deployer_account = self
-            .backend()
-            .basic_ref(DEFAULT_CREATE2_DEPLOYER)?
-            .ok_or_else(|| BackendError::MissingAccount(DEFAULT_CREATE2_DEPLOYER))?;
+        let create2_deployer_account =
+            self.backend().basic_ref(DEFAULT_CREATE2_DEPLOYER)?.unwrap_or_default();
 
         // If the deployer is not currently deployed, deploy the default one.
         if create2_deployer_account.code.is_none_or(|code| code.is_empty()) {
