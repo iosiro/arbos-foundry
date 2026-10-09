@@ -2143,7 +2143,8 @@ contract TempoDefaultEvmVersionTest is Test {{
     cmd.args(["test", "--network", "tempo", "--mc", "TempoDefaultEvmVersionTest"]).assert_success();
 });
 
-forgetest_init!(test_network_arbitrum_initializes_arbos_state, |prj, cmd| {
+forgetest_async!(arbitrum_default_and_ethereum_opt_in_fork, |prj, cmd| {
+    foundry_test_utils::util::initialize(prj.root());
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
     });
@@ -2166,16 +2167,49 @@ contract ArbosStateTest is Test {
     ArbWasm constant ARB_WASM = ArbWasm(address(0x71));
 
     function test_arbos_state_is_initialized_for_local_execution() public view {
+        (bool ok, bytes memory version) = address(0x64).staticcall(abi.encodeWithSignature("arbOSVersion()"));
+        assertTrue(ok);
+        assertEq(abi.decode(version, (uint256)), 55 + 61);
         assertEq(ARB_WASM.stylusVersion(), 3);
         assertEq(ARB_WASM.inkPrice(), 10_000);
         assertEq(ARB_WASM.freePages(), 2);
         assertEq(ARB_WASM.maxStackDepth(), 22_000);
     }
 }
+
+contract EthereumStateTest is Test {
+    function test_arbitrum_precompiles_are_not_installed() public view {
+        (bool ok, bytes memory output) = address(0x64).staticcall(abi.encodeWithSignature("arbOSVersion()"));
+        assertTrue(ok);
+        assertEq(output.length, 0);
+        assertEq(address(0x64).code.length, 0);
+    }
+}
 "#,
     );
 
-    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbosStateTest"]).assert_success();
+    cmd.args(["test", "--mc", "ArbosStateTest"]).assert_success();
+    cmd.forge_fuse().env("FOUNDRY_NETWORK", "arbitrum");
+    cmd.args(["test", "--network", "ethereum", "--mc", "EthereumStateTest"]).assert_success();
+    cmd.forge_fuse()
+        .args(["test", "--network", "arbitrum", "--mc", "ArbosStateTest"])
+        .assert_success();
+
+    let (_api, handle) = anvil::spawn(anvil::NodeConfig::test().with_chain_id(Some(1_u64))).await;
+    cmd.forge_fuse()
+        .args(["test", "--fork-url", &handle.http_endpoint(), "--mc", "ArbosStateTest"])
+        .assert_success();
+    cmd.forge_fuse()
+        .args([
+            "test",
+            "--fork-url",
+            &handle.http_endpoint(),
+            "--network",
+            "ethereum",
+            "--mc",
+            "EthereumStateTest",
+        ])
+        .assert_success();
 
     prj.update_config(|config| {
         config.networks = NetworkConfigs::with_arbitrum();
@@ -3427,9 +3461,7 @@ forgetest_init!(test_stylus_host_inspection, |prj, cmd| {
     prj.add_test("StylusInspector.t.sol", include_str!("../../fixtures/StylusInspector.t.sol"));
     for isolate in [false, true] {
         prj.update_config(|config| config.isolate = isolate);
-        cmd.forge_fuse()
-            .args(["test", "--network", "arbitrum", "--mc", "StylusInspectorTest", "-vvvv"])
-            .assert_success();
+        cmd.forge_fuse().args(["test", "--mc", "StylusInspectorTest", "-vvvv"]).assert_success();
     }
 });
 

@@ -114,26 +114,29 @@ contract StylusTest is Test {
 3. Run your tests:
 
 ```bash
-arbos-forge test --network arbitrum
+arbos-forge test
 ```
 
 ### Execution Network and Test Isolation
 
-Select the Arbitrum execution backend with `--network arbitrum`, or configure it
+Arbitrum is the default execution backend. No network flag or project setting is
+required. To opt into Ethereum execution, use `--network ethereum` or configure it
 for the project:
 
 ```toml
 [profile.default]
-network = "arbitrum"
+network = "ethereum"
 fs_permissions = [{ access = "read", path = "./path/to/your" }]
 ```
 
 Use `--stylus-debug` for WASM artifacts that import debug host functions such as
-`console.log_txt`. The same network flag is available to `arbos-anvil` and
-`arbos-chisel`. `arbos-cast call --trace` and `arbos-cast run` select their backend
-from project configuration or the RPC endpoint. Fork endpoints with a known
-Arbitrum chain ID select the Arbitrum backend automatically when no network
-override is set.
+`console.log_txt`. `arbos-anvil` and `arbos-chisel` also default to Arbitrum and
+accept `--network ethereum`. For `arbos-cast call --trace` and `arbos-cast run`,
+select Ethereum through project configuration or `FOUNDRY_NETWORK=ethereum`.
+The same environment variable works for Forge and Chisel. Forking an Ethereum
+endpoint does not implicitly switch execution away from Arbitrum; select Ethereum
+explicitly when its execution rules are wanted. Network selection does not change
+the configured chain ID or RPC URL.
 
 Newer Foundry enables call isolation by default: top-level calls in a test run as
 separate transactions. Tests that intentionally share transient storage or warm

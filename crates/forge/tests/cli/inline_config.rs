@@ -144,25 +144,16 @@ forgetest!(invalid_value, |prj, cmd| {
     ",
     );
 
-    cmd.arg("test").assert_failure().stderr_eq(str![[]]).stdout_eq(str![[r#"
+    cmd.arg("test")
+        .assert_failure()
+        .stdout_eq(str![[r#"
 [COMPILING_FILES] with [SOLC_VERSION]
 [SOLC_VERSION] [ELAPSED]
 Compiler run successful!
 
-Ran 1 test for test/inline.sol:Inline
-[FAIL: invalid type: found sequence, expected u32 for key "default.fuzz.runs" in inline config] setUp() ([GAS])
-Suite result: FAILED. 0 passed; 1 failed; 0 skipped; [ELAPSED]
-
-Ran 1 test suite [ELAPSED]: 0 tests passed, 1 failed, 0 skipped (1 total tests)
-
-Failing tests:
-Encountered 1 failing test in test/inline.sol:Inline
-[FAIL: invalid type: found sequence, expected u32 for key "default.fuzz.runs" in inline config] setUp() ([GAS])
-
-Encountered a total of 1 failing tests, 0 tests succeeded
-
-Tip: Run `forge test --rerun` to retry only the 1 failed test
-Tip: Run `forge test --debug --match-test <TEST_NAME>` to inspect one failing test in the debugger
+"#]])
+        .stderr_eq(str![[r#"
+Error: invalid type: found sequence, expected u32 for key "default.fuzz.runs" in inline config
 
 "#]]);
 });
@@ -178,25 +169,16 @@ forgetest!(invalid_value_2, |prj, cmd| {
     ",
     );
 
-    cmd.arg("test").assert_failure().stderr_eq(str![[]]).stdout_eq(str![[r#"
+    cmd.arg("test")
+        .assert_failure()
+        .stdout_eq(str![[r#"
 [COMPILING_FILES] with [SOLC_VERSION]
 [SOLC_VERSION] [ELAPSED]
 Compiler run successful!
 
-Ran 1 test for test/inline.sol:Inline
-[FAIL: invalid type: found string "2", expected u32 for key "default.fuzz.runs" in inline config] setUp() ([GAS])
-Suite result: FAILED. 0 passed; 1 failed; 0 skipped; [ELAPSED]
-
-Ran 1 test suite [ELAPSED]: 0 tests passed, 1 failed, 0 skipped (1 total tests)
-
-Failing tests:
-Encountered 1 failing test in test/inline.sol:Inline
-[FAIL: invalid type: found string "2", expected u32 for key "default.fuzz.runs" in inline config] setUp() ([GAS])
-
-Encountered a total of 1 failing tests, 0 tests succeeded
-
-Tip: Run `forge test --rerun` to retry only the 1 failed test
-Tip: Run `forge test --debug --match-test <TEST_NAME>` to inspect one failing test in the debugger
+"#]])
+        .stderr_eq(str![[r#"
+Error: invalid type: found string "2", expected u32 for key "default.fuzz.runs" in inline config
 
 "#]]);
 });
@@ -399,6 +381,10 @@ forgetest_init!(
 );
 
 forgetest_init!(config_inline_evm_version, |prj, cmd| {
+    // BLOBBASEFEE is an Ethereum opcode; Arbitrum intentionally rejects it.
+    prj.update_config(|config| {
+        config.networks = foundry_evm_networks::NetworkConfigs::with_ethereum();
+    });
     prj.add_test(
         "inline.sol",
         r#"

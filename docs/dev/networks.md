@@ -16,6 +16,12 @@ Compile-time support and runtime selection are separate:
   [`FoundryEvmFactory`](../../crates/evm/core/src/evm/mod.rs). Tool entry points dispatch to a
   concrete implementation only after runtime selection.
 
+In arbos-foundry, loaded user configuration and Anvil's CLI default an unselected execution
+profile to Arbitrum after merging explicit selectors. `NetworkConfigs::default()` remains
+unselected: database and RPC identity code must not inherit the CLI's execution default. An
+Ethereum fork source does not opt the local executor into Ethereum; select `network = "ethereum"`
+explicitly. Execution selection does not rewrite the chain ID or the RPC source's identity.
+
 `NetworkConfigs` is discovery and selection state, not an execution-policy container. Its lifetime
 ends when a tool selects its concrete `FoundryEvmNetwork`. After that dispatch, the selected types,
 factory, context, and narrow resolved inputs are authoritative.

@@ -54,6 +54,20 @@ repl_test!(repl_help, |repl| {
     repl.expect_prompt();
 });
 
+repl_test!(default_execution_is_arbitrum, |repl| {
+    repl.sendln("(bool ok, bytes memory output) = address(0x64).staticcall(abi.encodeWithSignature(\"arbOSVersion()\"));");
+    repl.sendln_raw("ok ? abi.decode(output, (uint256)) : 0");
+    repl.expect("Decimal: 116");
+    repl.expect_prompt();
+});
+
+repl_test!(explicit_ethereum_execution, "--network ethereum", |repl| {
+    repl.sendln("(bool ok, bytes memory output) = address(0x64).staticcall(abi.encodeWithSignature(\"arbOSVersion()\"));");
+    repl.sendln_raw("ok ? output.length : 1");
+    repl.expect("Decimal: 0");
+    repl.expect_prompt();
+});
+
 repl_test!(save_renamed_session_removes_stale_cache, |repl| {
     let old_id = unique_cache_id("rename-old");
     let new_id = unique_cache_id("rename-new");
