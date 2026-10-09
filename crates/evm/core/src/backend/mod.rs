@@ -720,7 +720,8 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
                 backend.forks.create_fork_with_hash_mode(fork, FEN::EvmFactory::BLOCK_HASH_MODE)?;
             let context = resolved.context();
             let block = resolved.block();
-            let fork_db = ForkDB::new(RemoteAccountDB(fork));
+            let fork_db =
+                ForkDB::new(RemoteAccountDB::with_spec(fork, backend.inner.spec_id.into()));
             let fork_ids = backend.inner.insert_new_fork(
                 fork_id.clone(),
                 block,
@@ -854,6 +855,9 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
     /// Sets the current spec id
     pub fn set_spec_id(&mut self, spec_id: impl Into<SpecFor<FEN>>) -> &mut Self {
         self.inner.spec_id = spec_id.into();
+        for fork in self.inner.forks.iter_mut().flatten() {
+            fork.db.db.set_spec_id(self.inner.spec_id.into());
+        }
         self
     }
 
@@ -1449,7 +1453,8 @@ impl<FEN: FoundryEvmNetwork> Backend<FEN> {
         let context_update = std::marker::PhantomData;
 
         // Update the local mapping only after all context fetches and decoding have succeeded.
-        let mut fork_db = ForkDB::new(RemoteAccountDB(backend));
+        let mut fork_db =
+            ForkDB::new(RemoteAccountDB::with_spec(backend, self.inner.spec_id.into()));
         self.factory.initialize_backend(&mut fork_db, &fork_env)?;
         // Both active and inactive rolls start from pre-fork setup, not fork-local writes.
         let mut fork_init_journaled_state = self.fork_init_journaled_state.clone();
@@ -1965,7 +1970,7 @@ impl<FEN: FoundryEvmNetwork> DatabaseExt<FEN::EvmFactory> for Backend<FEN> {
             self.forks.create_fork_with_hash_mode(create_fork, FEN::EvmFactory::BLOCK_HASH_MODE)?;
         let context = resolved.context();
         let block = resolved.block();
-        let mut fork_db = ForkDB::new(RemoteAccountDB(fork));
+        let mut fork_db = ForkDB::new(RemoteAccountDB::with_spec(fork, self.inner.spec_id.into()));
         self.factory.initialize_backend(&mut fork_db, &env)?;
         let mut journaled_state = self.fork_init_journaled_state.clone();
         refresh_fork_journal(
@@ -2713,7 +2718,7 @@ pub struct Fork<N: Network, B: ForkBlockEnv = BlockEnv> {
 impl<N: Network, B: ForkBlockEnv> Fork<N, B> {
     /// Returns a reference to the underlying [`SharedBackend`].
     pub const fn backend(&self) -> &SharedBackend<N, B> {
-        &self.db.db.0
+        self.db.db.inner()
     }
 
     /// Returns true if the account is a contract
@@ -2987,7 +2992,7 @@ impl<FEN: FoundryEvmNetwork> BackendInner<FEN> {
 
         // Initialize a new `ForkDB` with persistent account data and the prepared journal. The
         // live fork remains untouched until publication.
-        let mut new_db = ForkDB::new(RemoteAccountDB(backend));
+        let mut new_db = ForkDB::new(RemoteAccountDB::with_spec(backend, self.spec_id.into()));
         for addr in self.persistent_accounts.iter().copied() {
             merge_db_account_data(addr, &current.db, &mut new_db);
         }
@@ -3386,7 +3391,7 @@ mod tests {
         let (backend, handler) = SharedBackend::new(provider, db, None);
         drop(handler);
         Fork {
-            db: CacheDB::new(RemoteAccountDB(backend)),
+            db: CacheDB::new(RemoteAccountDB::new(backend)),
             journaled_state: JournalInner::new(),
             source_chain_id: 1,
             position: ForkPosition::AfterBlock { block: BlockNumHash::default() },

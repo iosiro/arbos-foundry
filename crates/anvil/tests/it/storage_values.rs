@@ -101,10 +101,14 @@ async fn storage_values_agrees_with_get_storage_at() {
     api.anvil_set_storage_at(address, U256::from(0), B256::with_last_byte(0x11)).await.unwrap();
     api.mine_one().await.unwrap();
     let first = provider.get_block_number().await.unwrap();
+    // Overrides mutate the current tip. Advance it before changing storage so `first`
+    // is an immutable historical state, rather than the live state being edited.
+    api.mine_one().await.unwrap();
 
     api.anvil_set_storage_at(address, U256::from(1), B256::with_last_byte(0x22)).await.unwrap();
     api.mine_one().await.unwrap();
     let second = provider.get_block_number().await.unwrap();
+    api.mine_one().await.unwrap();
 
     // The batch endpoint must agree with the single-slot endpoint at every block it is asked
     // about, which is the property that matters for callers migrating between the two.
@@ -126,6 +130,14 @@ async fn storage_values_agrees_with_get_storage_at() {
             expected.push(B256::from(value));
         }
         assert_eq!(batched[&address], expected, "divergence at block {block}");
+        assert_eq!(
+            expected,
+            vec![
+                B256::with_last_byte(0x11),
+                if block == first { B256::ZERO } else { B256::with_last_byte(0x22) },
+            ],
+            "storage overrides must survive mining and historical snapshots"
+        );
     }
 }
 

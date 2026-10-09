@@ -15,6 +15,7 @@ sol! {
 }
 
 casttest!(arbitrum_fork_trace_and_replay_apply_stylus_config, async |prj, cmd| {
+    cmd.set_network(Some("arbitrum"));
     let (_api, handle) = anvil::spawn(
         NodeConfig::test()
             .with_networks(NetworkConfigs::with_arbitrum())
@@ -101,6 +102,7 @@ Transaction successfully executed.
 });
 
 casttest!(arbitrum_default_fork_execution_and_ethereum_opt_in, async |prj, cmd| {
+    cmd.set_network(None);
     // An Ethereum source must not silently change the selected local execution family.
     let (_api, handle) = anvil::spawn(NodeConfig::test().with_chain_id(Some(1_u64))).await;
     let provider = handle.http_provider();

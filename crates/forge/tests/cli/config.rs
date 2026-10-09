@@ -1,5 +1,27 @@
 //! Contains various tests for checking forge commands related to config values
 
+// Exercise actual CLI defaults and configuration precedence, without the execution-test
+// harness's explicit Ethereum selection.
+macro_rules! forgetest {
+    ($test:ident, | $prj:ident, $cmd:ident | $body:expr) => {
+        foundry_test_utils::forgetest!($test, |$prj, $cmd| {
+            $prj.set_network(None);
+            $cmd.set_network(None);
+            $body
+        });
+    };
+}
+
+macro_rules! forgetest_init {
+    ($test:ident, | $prj:ident, $cmd:ident | $body:expr) => {
+        foundry_test_utils::forgetest_init!($test, |$prj, $cmd| {
+            $prj.set_network(None);
+            $cmd.set_network(None);
+            $body
+        });
+    };
+}
+
 use alloy_primitives::{Address, B256, U256};
 use foundry_cli::utils as forge_utils;
 use foundry_compilers::{

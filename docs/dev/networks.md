@@ -22,6 +22,13 @@ unselected: database and RPC identity code must not inherit the CLI's execution 
 Ethereum fork source does not opt the local executor into Ethereum; select `network = "ethereum"`
 explicitly. Execution selection does not rewrite the chain ID or the RPC source's identity.
 
+The CLI integration-test harness explicitly selects Ethereum for inherited upstream tests.
+Network-specific tests must select their execution family with CLI flags or
+`TestCommand::set_network`. Tests of unselected CLI defaults or project configuration use
+`set_network(None)` to remove the harness override, including after command resets. Chisel's
+REPL harness follows the same convention. Keep dedicated unselected-execution tests so this
+test default cannot mask regressions in the shipped Arbitrum default.
+
 `NetworkConfigs` is discovery and selection state, not an execution-policy container. Its lifetime
 ends when a tool selects its concrete `FoundryEvmNetwork`. After that dispatch, the selected types,
 factory, context, and narrow resolved inputs are authoritative.

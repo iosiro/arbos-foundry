@@ -188,6 +188,7 @@ forgetest!(flaky_testdata, |_prj, cmd| {
 // Ensures `vm.deployCode` works with the optimism network family active, covering the OP EVM's
 // nested frame execution path which is only reachable through this cheatcode.
 forgetest_init!(deploy_code_cheatcode_on_optimism_network, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = foundry_evm_networks::NetworkConfigs::with_optimism();
     });
@@ -4088,6 +4089,7 @@ contract PrecompileDebugTest {
 });
 
 forgetest!(debug_dump_marks_tempo_precompile_call_steps, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = foundry_evm_networks::NetworkConfigs::with_tempo();
         config.hardfork = Some("tempo:T5".parse::<foundry_config::FoundryHardfork>().unwrap());

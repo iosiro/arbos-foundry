@@ -54,12 +54,14 @@ repl_test!(repl_help, |repl| {
     repl.expect_prompt();
 });
 
-repl_test!(default_execution_is_arbitrum, |repl| {
+#[test]
+fn default_execution_is_arbitrum() {
+    let mut repl = ChiselSession::with_network("default_execution_is_arbitrum", "", false, None);
     repl.sendln("(bool ok, bytes memory output) = address(0x64).staticcall(abi.encodeWithSignature(\"arbOSVersion()\"));");
     repl.sendln_raw("ok ? abi.decode(output, (uint256)) : 0");
     repl.expect("Decimal: 116");
     repl.expect_prompt();
-});
+}
 
 repl_test!(explicit_ethereum_execution, "--network ethereum", |repl| {
     repl.sendln("(bool ok, bytes memory output) = address(0x64).staticcall(abi.encodeWithSignature(\"arbOSVersion()\"));");
@@ -357,7 +359,7 @@ repl_test!(
 
 repl_test!(
     eval_tempo_chain_id_uses_tempo_executor,
-    "--chain 4217 eval address(0xfeEC000000000000000000000000000000000000).code.length",
+    "--network tempo --chain 4217 eval address(0xfeEC000000000000000000000000000000000000).code.length",
     |repl| {
         repl.expect("Decimal: 1");
     }
@@ -365,7 +367,7 @@ repl_test!(
 
 repl_test!(
     eval_tempo_named_chain_uses_tempo_executor,
-    "--chain tempo eval address(0xfeEC000000000000000000000000000000000000).code.length",
+    "--network tempo --chain tempo eval address(0xfeEC000000000000000000000000000000000000).code.length",
     |repl| {
         repl.expect("Decimal: 1");
     }

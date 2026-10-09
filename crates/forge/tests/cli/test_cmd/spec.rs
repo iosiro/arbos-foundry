@@ -2144,9 +2144,11 @@ contract TempoDefaultEvmVersionTest is Test {{
 });
 
 forgetest_async!(arbitrum_default_and_ethereum_opt_in_fork, |prj, cmd| {
+    cmd.set_network(None);
     foundry_test_utils::util::initialize(prj.root());
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
+        config.networks = NetworkConfigs::default();
     });
 
     prj.add_test(
@@ -3451,6 +3453,7 @@ forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
 });
 
 forgetest_init!(test_stylus_host_inspection, |prj, cmd| {
+    cmd.set_network(Some("arbitrum"));
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));

@@ -5084,6 +5084,7 @@ forgetest_async!(script_check_contract_sizes_uses_amsterdam_code_size_limit, |pr
 });
 
 forgetest_async!(script_check_contract_sizes_uses_network_specific_spec, |prj, cmd| {
+    cmd.set_network(None);
     foundry_test_utils::util::initialize(prj.root());
     write_large_runtime_deploy_script(&prj, 50_000);
 

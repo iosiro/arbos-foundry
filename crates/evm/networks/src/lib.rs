@@ -419,7 +419,7 @@ impl NetworkConfigs {
     ///
     /// Apply after merging selectors, not while decoding RPC identities: an unresolved RPC
     /// profile still represents Ethereum, and must not acquire local execution defaults.
-    pub fn with_default_arbitrum(self) -> Self {
+    pub const fn with_default_arbitrum(self) -> Self {
         if self.has_network_selection() {
             self
         } else {

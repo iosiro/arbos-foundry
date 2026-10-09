@@ -50,7 +50,7 @@ impl<N: Network, B: ForkBlockEnv> ForkedDatabase<N, B> {
     /// Creates a new instance of this DB
     pub fn new(backend: SharedBackend<N, B>, db: BlockchainDb<B>) -> Self {
         Self {
-            cache_db: CacheDB::new(RemoteAccountDB(backend.clone())),
+            cache_db: CacheDB::new(RemoteAccountDB::new(backend.clone())),
             backend,
             db,
             state_snapshots: Arc::new(Mutex::new(Default::default())),
@@ -82,7 +82,7 @@ impl<N: Network, B: ForkBlockEnv> ForkedDatabase<N, B> {
         // wipe the storage retrieved from remote
         self.inner().db().clear();
         // create a fresh `CacheDB`, effectively wiping modified state
-        self.cache_db = CacheDB::new(RemoteAccountDB(self.backend.clone()));
+        self.cache_db = CacheDB::new(self.cache_db.db.clone());
         trace!(target: "backend::forkdb", "Cleared database");
         Ok(())
     }
@@ -235,7 +235,7 @@ impl<N: Network, B: ForkBlockEnv> DatabaseRef for ForkDbStateSnapshot<N, B> {
         match self.local.cache.accounts.get(&address) {
             Some(account) => Ok(account.info()),
             None => match self.state_snapshot.accounts.get(&address) {
-                Some(info) => Ok((!info.is_empty()).then(|| info.clone())),
+                Some(info) => Ok(self.local.db.normalize_account(info.clone())),
                 None => self.local.basic_ref(address),
             },
         }
@@ -281,10 +281,14 @@ mod tests {
         drop(handler);
         let address = Address::random();
         let mut snapshot = ForkDbStateSnapshot {
-            local: CacheDB::new(RemoteAccountDB(backend)),
+            local: CacheDB::new(RemoteAccountDB::new(backend)),
             state_snapshot: StateSnapshot::default(),
         };
         snapshot.state_snapshot.accounts.insert(address, AccountInfo::default());
+        assert!(snapshot.basic_ref(address).unwrap().is_none());
+        snapshot.local.db.set_spec_id(revm::primitives::hardfork::SpecId::HOMESTEAD);
+        assert_eq!(snapshot.basic_ref(address).unwrap(), Some(AccountInfo::default()));
+        snapshot.local.db.set_spec_id(revm::primitives::hardfork::SpecId::SPURIOUS_DRAGON);
         assert!(snapshot.basic_ref(address).unwrap().is_none());
         snapshot
             .local
@@ -341,8 +345,10 @@ mod tests {
         let mut state_snapshot = StateSnapshot::default();
         state_snapshot.storage.entry(address).or_default().insert(slot, expected);
 
-        let snapshot =
-            ForkDbStateSnapshot { local: CacheDB::new(RemoteAccountDB(backend)), state_snapshot };
+        let snapshot = ForkDbStateSnapshot {
+            local: CacheDB::new(RemoteAccountDB::new(backend)),
+            state_snapshot,
+        };
 
         let got = DatabaseRef::storage_ref(&snapshot, address, slot).unwrap();
         assert_eq!(got, expected);
