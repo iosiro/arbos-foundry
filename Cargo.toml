@@ -331,7 +331,7 @@ foundry-wallets = { version = "0.1.0", default-features = false }
 foundry-linking = { path = "crates/linking" }
 
 # Arbitrum execution
-arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "162bb662e8a9fd736198972a71bd11e134534c04", version = "0.3.0", default-features = false, features = ["alloy"] }
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "4e69b9408c83eedb253c53602477330f38b7c0e0", version = "0.3.0", default-features = false, features = ["alloy"] }
 foundry-primitives = { path = "crates/primitives", default-features = false }
 foundry-tui = { path = "crates/tui", default-features = false }
 
