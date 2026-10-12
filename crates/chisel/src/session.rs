@@ -251,14 +251,14 @@ mod tests {
         opts::EvmOpts,
     };
     use foundry_evm_networks::NetworkConfigs;
-    use semver::Version;
+    use foundry_test_utils::util::SOLC_VERSION;
 
     #[test]
     fn deserialized_sessions_do_not_restore_force() {
         let session = ChiselSession::<EthEvmNetwork>::new(SessionSourceConfig {
             foundry_config: Config {
                 force: true,
-                solc: Some(SolcReq::Version(Version::new(0, 8, 29))),
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
                 ..Default::default()
             },
             no_vm: true,
@@ -294,7 +294,7 @@ mod tests {
                 root: root.path().to_path_buf(),
                 networks,
                 stylus,
-                solc: Some(SolcReq::Version(Version::new(0, 8, 29))),
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
                 ..Default::default()
             },
             executor_builder: ArbitrumEvmNetwork::executor_builder(&evm_opts),
