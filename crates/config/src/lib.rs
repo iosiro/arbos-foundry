@@ -597,7 +597,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_args: Vec<String>,
 
-    /// Networks with enabled features.
+    /// Execution network. Loaded configurations default to Arbitrum; use `network = "ethereum"`
+    /// to opt into Ethereum execution.
     #[serde(flatten)]
     pub networks: NetworkConfigs,
 
@@ -963,8 +964,10 @@ impl Config {
 
     fn normalize_hardfork_settings(&mut self) -> Result<(), Error> {
         self.networks.validate().map_err(Error::from)?;
-        let Some(hardfork) = self.hardfork else { return Ok(()) };
-        self.networks = self.networks.normalize_for_hardfork(hardfork).map_err(Error::from)?;
+        if let Some(hardfork) = self.hardfork {
+            self.networks = self.networks.normalize_for_hardfork(hardfork).map_err(Error::from)?;
+        }
+        self.networks = self.networks.with_default_arbitrum();
         Ok(())
     }
 
@@ -3487,7 +3490,13 @@ mod tests {
             let roundtrip = Figment::from(Config::from_provider(&original).unwrap());
             for figment in &[original, roundtrip] {
                 let config = Config::from_provider(figment).unwrap();
-                assert_eq!(config, Config::default().normalized_optimizer_settings());
+                assert_eq!(
+                    config,
+                    Config {
+                        networks: NetworkConfigs::with_arbitrum(),
+                        ..Config::default().normalized_optimizer_settings()
+                    }
+                );
             }
             Ok(())
         });
@@ -3786,6 +3795,7 @@ mod tests {
                 config,
                 Config {
                     gas_limit: gas.into(),
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4523,6 +4533,7 @@ mod tests {
                     ]),
                     build_info_path: Some("build-info".into()),
                     always_use_create_2_factory: true,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4759,6 +4770,7 @@ mod tests {
                     eth_rpc_url: Some("https://example.com/".to_string()),
                     auto_detect_solc: false,
                     evm_version: EvmVersion::Berlin,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4811,6 +4823,7 @@ mod tests {
                     src: "mysrc".into(),
                     out: "myout".into(),
                     verbosity: 3,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4823,6 +4836,7 @@ mod tests {
                     src: "other-src".into(),
                     out: "myout".into(),
                     verbosity: 3,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4863,7 +4877,7 @@ mod tests {
                     out: "myout".into(),
                     libs: default.libs.clone(),
                     remappings: default.remappings.clone(),
-                    network: None,
+                    network: Some("arbitrum".into()),
                 }
             );
             jail.set_env("FOUNDRY_PROFILE", r"other");
@@ -5149,7 +5163,10 @@ mod tests {
     #[test]
     fn config_roundtrip() {
         figment::Jail::expect_with(|jail| {
-            let default = Config::default().normalized_optimizer_settings();
+            let default = Config {
+                networks: NetworkConfigs::with_arbitrum(),
+                ..Config::default().normalized_optimizer_settings()
+            };
             let basic = default.clone().into_basic();
             jail.create_file("foundry.toml", &basic.to_string_pretty().unwrap())?;
 
@@ -8448,6 +8465,26 @@ mod tests {
                 Warning::UnknownSectionKey { key, section, .. }
                     if key == "ink_prcie" && section == "stylus"
             ));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn execution_network_defaults_to_arbitrum() {
+        figment::Jail::expect_with(|jail| {
+            let config = Config::load().unwrap();
+            assert!(config.networks.is_arbitrum());
+            assert_eq!(serde_json::to_value(&config).unwrap()["network"], "arbitrum");
+
+            jail.create_file(
+                "foundry.toml",
+                "[profile.default]\nnetwork = 'ethereum'\n[profile.arbitrum]\nnetwork = 'arbitrum'\n",
+            )?;
+            assert_eq!(Config::load().unwrap().networks, NetworkConfigs::with_ethereum());
+            jail.set_env("FOUNDRY_PROFILE", "arbitrum");
+            assert!(Config::load().unwrap().networks.is_arbitrum());
+            jail.set_env("FOUNDRY_NETWORK", "ethereum");
+            assert_eq!(Config::load().unwrap().networks, NetworkConfigs::with_ethereum());
             Ok(())
         });
     }

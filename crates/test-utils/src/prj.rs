@@ -168,6 +168,8 @@ pub struct TestProject<
     /// The Cargo profile directory (`target/<profile>`) containing the Foundry binaries built
     /// alongside this test executable.
     profile_dir: PathBuf,
+    /// Explicit execution network for inherited upstream tests. `None` tests CLI defaults.
+    network: Option<&'static str>,
     /// The project in which the test should run.
     pub(crate) inner: Arc<TempProject<MultiCompiler, T>>,
 }
@@ -184,7 +186,24 @@ impl TestProject {
 
     pub fn with_project(project: TempProject) -> Self {
         init_tracing();
-        Self { profile_dir: cargo_profile_dir(), inner: Arc::new(project) }
+        Self {
+            profile_dir: cargo_profile_dir(),
+            network: Some("ethereum"),
+            inner: Arc::new(project),
+        }
+    }
+
+    /// Selects a test network, or leaves selection to the CLI and project configuration.
+    pub const fn set_network(&mut self, network: Option<&'static str>) {
+        self.network = network;
+    }
+
+    fn configure_network(&self, cmd: &mut Command) {
+        if let Some(network) = self.network {
+            cmd.env("FOUNDRY_NETWORK", network);
+        } else {
+            cmd.env_remove("FOUNDRY_NETWORK");
+        }
     }
 
     /// Returns the root path of the project's workspace.
@@ -451,6 +470,7 @@ impl TestProject {
         cmd.current_dir(self.inner.root());
         // Disable color output for comparisons; can be overridden with `--color always`.
         cmd.env("NO_COLOR", "1");
+        self.configure_network(&mut cmd);
         cmd
     }
 
@@ -493,6 +513,7 @@ impl TestProject {
         let mut cmd = Command::new(self.foundry_bin_path("cast"));
         // disable color output for comparisons
         cmd.env("NO_COLOR", "1");
+        self.configure_network(&mut cmd);
         cmd
     }
 
@@ -572,6 +593,14 @@ pub struct TestCommand {
 }
 
 impl TestCommand {
+    /// Selects the network for this command and subsequent `forge_fuse`/`cast_fuse` calls.
+    /// Pass `None` to test unselected CLI defaults or project configuration precedence.
+    pub fn set_network(&mut self, network: Option<&'static str>) -> &mut Self {
+        self.project.set_network(network);
+        self.project.configure_network(&mut self.cmd);
+        self
+    }
+
     /// Returns a mutable reference to the underlying command.
     pub const fn cmd(&mut self) -> &mut Command {
         &mut self.cmd

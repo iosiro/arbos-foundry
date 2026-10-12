@@ -370,6 +370,7 @@ contract PrecompileCheatcodeLoadTest is Test {
 });
 
 forgetest_init!(tempo_t5_hardfork_precompile_smoke, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = NetworkConfigs::with_tempo();
         config.hardfork = Some("tempo:T5".parse::<foundry_config::FoundryHardfork>().unwrap());
@@ -422,6 +423,7 @@ contract TempoT5PrecompileSmokeTest is Test {
 });
 
 forgetest_init!(tempo_t6_keychain_helpers_and_decoding, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = NetworkConfigs::with_tempo();
         config.hardfork = Some("tempo:T6".parse::<foundry_config::FoundryHardfork>().unwrap());
@@ -580,6 +582,7 @@ contract TempoT6KeychainHelpersTest is Test {
 });
 
 forgetest_init!(tempo_t8_current_committee_decoding, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = NetworkConfigs::with_tempo();
         config.hardfork = Some("tempo:T8".parse::<foundry_config::FoundryHardfork>().unwrap());
@@ -639,6 +642,7 @@ contract TempoT8CurrentCommitteeTest is Test {
 // tests transfer using celo precompile.
 // <https://github.com/foundry-rs/foundry/issues/11622>
 forgetest_init!(celo_transfer, |prj, cmd| {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = NetworkConfigs::with_celo();
     });

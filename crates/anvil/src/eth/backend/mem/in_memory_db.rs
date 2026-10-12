@@ -302,7 +302,7 @@ impl DatabaseRef for PersistentStateDb {
         Ok(match self.accounts.get(&address) {
             Some(account) if account.account_state == AccountState::NotExisting => None,
             Some(account) => Some(account.info.clone()),
-            None => Some(AccountInfo::default()),
+            None => None,
         })
     }
 
@@ -546,7 +546,7 @@ impl Db for MemDb {
     }
 
     fn set_storage_at(&mut self, address: Address, slot: B256, val: B256) -> DatabaseResult<()> {
-        self.inner.insert_account_storage(address, slot.into(), val.into())
+        Db::set_storage_at(&mut self.inner, address, slot, val)
     }
 
     fn insert_block_hash(&mut self, number: U256, hash: B256) {
@@ -923,12 +923,22 @@ mod tests {
     fn historical_missing_accounts_match_live_state() {
         let missing = Address::with_last_byte(1);
         let deleted = Address::with_last_byte(2);
+        let empty = Address::with_last_byte(3);
         let mut db = StateRootDb::default();
+        db.insert_account(empty, AccountInfo::default());
         let historical = db.current_state();
 
         let live_account = db.basic_ref(missing).unwrap();
-        assert_eq!(live_account, Some(AccountInfo::default()));
+        assert_eq!(live_account, None);
         assert_eq!(historical.basic_ref(missing).unwrap(), live_account);
+        assert_eq!(historical.basic_ref(empty).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(historical.basic_ref(empty).unwrap(), db.basic_ref(empty).unwrap());
+        assert!(!historical.read_as_state_snapshot().accounts.contains_key(&missing));
+
+        // Populating an account later must not change its existence in an older snapshot.
+        db.insert_account(missing, AccountInfo::from_balance(U256::ONE));
+        assert_eq!(historical.basic_ref(missing).unwrap(), None);
+        assert_eq!(db.current_state().basic_ref(missing).unwrap(), db.basic_ref(missing).unwrap());
 
         db.insert_account(deleted, AccountInfo::from_balance(U256::from(1)));
         db.inner.inner.cache.accounts.get_mut(&deleted).unwrap().account_state =
@@ -946,6 +956,36 @@ mod tests {
         let historical = fresh.current_state();
         assert_eq!(historical.basic_ref(deleted).unwrap(), None);
         assert!(!historical.maybe_as_full_db().unwrap().contains_key(&deleted));
+    }
+
+    #[test]
+    fn storage_override_materializes_missing_accounts() {
+        let address = Address::with_last_byte(42);
+        let slot = U256::from(8);
+        let value = U256::from(400);
+        for track_history in [false, true] {
+            let mut db = StateRootDb::new(track_history);
+            assert_eq!(db.basic(address).unwrap(), None);
+            let before = db.current_state();
+            db.set_storage_at(address, slot.into(), value.into()).unwrap();
+
+            assert_eq!(db.basic_ref(address).unwrap(), Some(AccountInfo::default()));
+            let after = db.current_state();
+            assert_eq!(after.storage_ref(address, slot).unwrap(), value);
+            assert_eq!(after.basic_ref(address).unwrap(), db.basic_ref(address).unwrap());
+            assert_eq!(before.basic_ref(address).unwrap(), None);
+            assert_eq!(before.storage_ref(address, slot).unwrap(), U256::ZERO);
+
+            // The on-the-fly overlay used for RPC simulation must behave the same way.
+            let mut overlay =
+                revm::database::CacheDB::new(foundry_evm::backend::EmptyDBWrapper::default());
+            Db::set_storage_at(&mut overlay, address, slot.into(), value.into()).unwrap();
+            assert_eq!(overlay.basic_ref(address).unwrap(), Some(AccountInfo::default()));
+            assert_eq!(overlay.storage_ref(address, slot).unwrap(), value);
+
+            let snapshot = db.read_as_state_snapshot();
+            assert_eq!(snapshot.storage[&address][&slot], value);
+        }
     }
 
     #[test]

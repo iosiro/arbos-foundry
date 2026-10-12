@@ -1,0 +1,30 @@
+;; Mode 0: read key; 1: write key/value; 2: read basefee/gasprice;
+;; 3: flush two key/value pairs; 4: write then revert.
+(module
+    (import "vm_hooks" "read_args" (func $args (param i32)))
+    (import "vm_hooks" "write_result" (func $result (param i32 i32)))
+    (import "vm_hooks" "storage_load_bytes32" (func $load (param i32 i32)))
+    (import "vm_hooks" "storage_cache_bytes32" (func $store (param i32 i32)))
+    (import "vm_hooks" "storage_flush_cache" (func $flush (param i32)))
+    (import "vm_hooks" "block_basefee" (func $basefee (param i32)))
+    (import "vm_hooks" "tx_gas_price" (func $price (param i32)))
+    (memory (export "memory") 1 1)
+    (func (export "user_entrypoint") (param i32) (result i32)
+        (local $mode i32)
+        (call $args (i32.const 0))
+        (local.set $mode (i32.load8_u (i32.const 0)))
+        (if (i32.eq (local.get $mode) (i32.const 2))
+            (then
+                (call $basefee (i32.const 256))
+                (call $price (i32.const 288))
+                (call $result (i32.const 256) (i32.const 64))
+                (return (i32.const 0))))
+        (call $load (i32.const 1) (i32.const 256))
+        (if (local.get $mode)
+            (then
+                (call $store (i32.const 1) (i32.const 33))
+                (if (i32.eq (local.get $mode) (i32.const 3))
+                    (then (call $store (i32.const 65) (i32.const 97))))
+                (call $flush (i32.const 1))))
+        (call $result (i32.const 256) (i32.const 32))
+        (i32.eq (local.get $mode) (i32.const 4))))

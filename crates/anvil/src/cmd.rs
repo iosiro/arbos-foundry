@@ -281,7 +281,8 @@ impl NodeArgs {
             networks.normalize_for_hardfork(hardfork).map_err(eyre::Report::msg)?
         } else {
             networks
-        };
+        }
+        .with_default_arbitrum();
 
         Ok(NodeConfig::default()
             .with_gas_limit(self.evm.gas_limit)
@@ -970,6 +971,21 @@ mod tests {
     }
 
     #[test]
+    fn default_execution_network_is_arbitrum() {
+        for args in [
+            vec!["anvil"],
+            vec!["anvil", "--chain-id", "1"],
+            vec!["anvil", "--fork-url", "http://localhost:8545"],
+        ] {
+            let config = NodeArgs::parse_from(args).into_node_config().unwrap();
+            assert!(config.networks.is_arbitrum());
+        }
+        let config =
+            NodeArgs::parse_from(["anvil", "--network", "ethereum"]).into_node_config().unwrap();
+        assert_eq!(config.networks, NetworkConfigs::with_ethereum());
+    }
+
+    #[test]
     fn can_parse_ethereum_hardfork() {
         let args: NodeArgs = NodeArgs::parse_from(["anvil", "--hardfork", "berlin"]);
         let config = args.into_node_config().unwrap();
@@ -1094,7 +1110,7 @@ mod tests {
 
         let config = args.into_node_config().unwrap();
 
-        assert!(!config.networks.has_network_selection());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 1);
     }
 
@@ -1121,11 +1137,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_chain_id_preserves_ethereum_fallback() {
+    fn unknown_chain_id_preserves_arbitrum_default() {
         let args = NodeArgs::parse_from(["anvil", "--chain-id", "98765432"]);
         let config = args.into_node_config().unwrap();
 
-        assert!(!config.networks.has_network_selection());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 98_765_432);
     }
 
@@ -1197,7 +1213,7 @@ mod tests {
         ]);
         let config = args.into_node_config().unwrap();
 
-        assert!(config.networks.resolved_network().is_none());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 4217);
     }
 

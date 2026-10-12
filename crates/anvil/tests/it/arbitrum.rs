@@ -6,6 +6,7 @@ use alloy_rpc_types::{Authorization, TransactionRequest, anvil::Forking};
 use alloy_signer::SignerSync;
 use alloy_sol_types::{SolCall, SolValue, sol};
 use anvil::{NodeConfig, PrecompileFactory, eth::error::BlockchainError, spawn};
+use clap::Parser;
 use foundry_config::stylus::StylusConfig;
 use foundry_evm_networks::NetworkConfigs;
 use revm::precompile::PrecompileOutput;
@@ -13,12 +14,49 @@ use serde_json::json;
 use std::time::Duration;
 
 sol! {
+    function arbOSVersion() external view returns (uint256);
     function stylusVersion() external view returns (uint16);
     function inkPrice() external view returns (uint32);
     function becomeChainOwner() external;
     function setInkPrice(uint32 price) external;
     function arbBlockNumber() external view returns (uint256);
     function arbBlockHash(uint256 number) external view returns (bytes32);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn default_fork_execution_and_ethereum_opt_in() {
+    let (_source_api, source) = spawn(NodeConfig::test().with_chain_id(Some(1_u64))).await;
+    let endpoint = source.http_endpoint();
+    for fork in [false, true] {
+        for ethereum in [false, true] {
+            let mut args = vec!["anvil", "--port", "0", "--chain-id", "1"];
+            if ethereum {
+                args.extend(["--network", "ethereum"]);
+            }
+            if fork {
+                args.extend(["--fork-url", &endpoint]);
+            }
+            let config =
+                anvil::cmd::NodeArgs::try_parse_from(args).unwrap().into_node_config().unwrap();
+            let (_api, handle) = spawn(config).await;
+            let provider = handle.http_provider();
+            assert_eq!(provider.get_chain_id().await.unwrap(), 1);
+            let output = provider
+                .call(
+                    TransactionRequest::default()
+                        .with_to(address!("0000000000000000000000000000000000000064"))
+                        .with_input(arbOSVersionCall {}.abi_encode())
+                        .into(),
+                )
+                .await
+                .unwrap();
+            if ethereum {
+                assert!(output.is_empty());
+            } else {
+                assert_eq!(U256::abi_decode(&output).unwrap(), U256::from(55 + 61));
+            }
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

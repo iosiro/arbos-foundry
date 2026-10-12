@@ -358,7 +358,7 @@ impl From<ChainId> for NetworkVariant {
 
 #[derive(Clone, Debug, Default, Parser, Deserialize, Copy, PartialEq, Eq, Hash)]
 pub struct NetworkConfigs {
-    /// Enable a specific network family.
+    /// Select an execution network (default: arbitrum). Use ethereum to opt into Ethereum.
     #[arg(help_heading = "Networks", long, short, num_args = 1, value_name = "NETWORK", value_enum, conflicts_with_all = ["celo", "tempo"])]
     #[cfg_attr(feature = "optimism", arg(conflicts_with = "optimism"))]
     #[cfg_attr(feature = "monad", arg(conflicts_with = "monad"))]
@@ -415,6 +415,18 @@ impl Serialize for NetworkConfigs {
 }
 
 impl NetworkConfigs {
+    /// Defaults an unselected user-facing execution profile to Arbitrum.
+    ///
+    /// Apply after merging selectors, not while decoding RPC identities: an unresolved RPC
+    /// profile still represents Ethereum, and must not acquire local execution defaults.
+    pub const fn with_default_arbitrum(self) -> Self {
+        if self.has_network_selection() {
+            self
+        } else {
+            Self { network: Some(NetworkVariant::Arbitrum), ..self }
+        }
+    }
+
     /// Validates that all configured network selectors resolve to the same execution profile.
     ///
     /// Canonical and legacy selectors for the same family remain compatible. Selectors for
@@ -1036,6 +1048,24 @@ mod tests {
             assert!(!NetworkConfigs::with_monad().supports_fork_source(execution));
         }
         assert!(NetworkConfigs::with_monad().supports_fork_source(&NetworkConfigs::with_monad()));
+    }
+
+    #[test]
+    fn execution_default_preserves_explicit_selection_and_rpc_defaults() {
+        let unresolved = NetworkConfigs { bypass_prevrandao: true, ..Default::default() };
+        assert_eq!(unresolved.execution_network(), NetworkVariant::Ethereum);
+        assert!(!unresolved.has_network_selection());
+        let defaulted = unresolved.with_default_arbitrum();
+        assert!(defaulted.is_arbitrum());
+        assert!(defaulted.bypass_prevrandao);
+        for selected in [
+            NetworkConfigs::with_ethereum(),
+            NetworkConfigs::with_arbitrum(),
+            NetworkConfigs::with_celo(),
+            NetworkConfigs::with_tempo(),
+        ] {
+            assert_eq!(selected.with_default_arbitrum(), selected);
+        }
     }
 
     #[test]

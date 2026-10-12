@@ -15,9 +15,9 @@ CARGO_TARGET_DIR ?= target
 # List of features to use when building. Can be overridden via the environment.
 # No jemalloc on Windows
 ifeq ($(OS),Windows_NT)
-    FEATURES ?= aws-kms gcp-kms turnkey cli asm-keccak monad optimism
+    FEATURES ?= aws-kms gcp-kms turnkey cli asm-keccak js-tracer
 else
-    FEATURES ?= jemalloc aws-kms gcp-kms turnkey cli asm-keccak monad optimism
+    FEATURES ?= jemalloc aws-kms gcp-kms turnkey cli asm-keccak js-tracer
 endif
 
 ##@ Help
@@ -30,7 +30,7 @@ help: ## Display this help.
 
 .PHONY: build
 build: ## Build the project.
-	cargo build --locked --features "$(FEATURES)" --profile "$(PROFILE)"
+	cargo build --locked --no-default-features --features "$(FEATURES)" --profile "$(PROFILE)"
 
 .PHONY: build-docker
 build-docker: ## Build the docker image.
