@@ -2,6 +2,7 @@ mod abi;
 mod anvil;
 mod anvil_api;
 mod api;
+mod arbitrum;
 #[cfg(feature = "base")]
 mod base;
 mod beacon_api;
@@ -32,6 +33,7 @@ mod simulate;
 #[cfg(feature = "cmd")]
 mod state;
 mod storage_values;
+mod stylus;
 mod tempo;
 mod tempo_canary;
 mod traces;

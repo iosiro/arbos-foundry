@@ -50,7 +50,10 @@ use foundry_evm::{
     backend::Backend,
     core::{
         Breakpoints, FoundryTransaction,
-        evm::{EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor},
+        evm::{
+            ArbitrumEvmNetwork, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor,
+            TempoEvmNetwork, TxEnvFor,
+        },
         fork::ResolvedFork,
     },
     executors::ExecutorBuilder,
@@ -454,6 +457,12 @@ impl ScriptArgs {
         // Box each branch's future to keep its large async state off `run_script`'s future;
         // otherwise `run_command` trips `clippy::large_stack_frames` by a small margin.
         match evm_opts.networks.execution_network() {
+            NetworkVariant::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
+                Box::pin(self.run_generic_script::<ArbitrumEvmNetwork>(config, evm_opts, builder))
+                    .await
+            }
             NetworkVariant::Tempo => {
                 let batch = self.batch;
                 Box::pin(async move {
@@ -1239,7 +1248,7 @@ impl<FEN: FoundryEvmNetwork> ScriptConfig<FEN> {
         tx_env.set_fee_token(self.tempo.fee_token);
 
         let mut runner = ScriptRunner::new(
-            builder.build(evm_env, tx_env, db, self.evm_opts.networks),
+            builder.try_build(evm_env, tx_env, db, self.evm_opts.networks)?,
             self.evm_opts.clone(),
         )
         .with_debug_bytecodes(debug);

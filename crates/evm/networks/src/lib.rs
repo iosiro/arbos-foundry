@@ -155,6 +155,7 @@ pub const TEMPO_PRECOMPILE_ADDRESSES: &[Address] = &{
 pub enum NetworkVariant {
     #[default]
     Ethereum,
+    Arbitrum,
     #[cfg(feature = "base")]
     Base,
     #[cfg(feature = "optimism")]
@@ -179,6 +180,7 @@ impl std::str::FromStr for NetworkVariant {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "ethereum" => Ok(Self::Ethereum),
+            "arbitrum" => Ok(Self::Arbitrum),
             #[cfg(feature = "base")]
             "base" => Ok(Self::Base),
             #[cfg(feature = "optimism")]
@@ -199,6 +201,9 @@ impl NetworkVariant {
     /// this returns an error rather than silently selecting a different EVM.
     pub fn from_known_chain_id(chain_id: ChainId) -> Result<Option<Self>, String> {
         let chain = Chain::from_id(chain_id);
+        if chain.named().is_some_and(NamedChain::is_arbitrum) {
+            return Ok(Some(Self::Arbitrum));
+        }
         if chain.is_tempo() {
             return Ok(Some(Self::Tempo));
         }
@@ -232,6 +237,7 @@ impl NetworkVariant {
     pub fn from_node_info_name(network: &str) -> Result<Self, String> {
         match network {
             "ethereum" => Ok(Self::Ethereum),
+            "arbitrum" => Ok(Self::Arbitrum),
             #[cfg(feature = "base")]
             "base" => Ok(Self::Base),
             #[cfg(not(feature = "base"))]
@@ -252,8 +258,10 @@ impl NetworkVariant {
     }
 
     /// Parses a hardfork name reported by an RPC endpoint in this network's namespace.
+    /// Arbitrum shares Ethereum opcode names rather than defining a separate hardfork namespace.
     pub fn parse_hardfork(self, hardfork: &str) -> Result<FoundryHardfork, String> {
-        format!("{}:{hardfork}", self.name()).parse()
+        let namespace = self.hardfork_namespace().unwrap_or("ethereum");
+        format!("{namespace}:{hardfork}").parse()
     }
 
     /// Returns this network's hardfork at a historical source-chain timestamp.
@@ -262,7 +270,7 @@ impl NetworkVariant {
     /// shared by multiple execution families cannot select another family's hardfork.
     pub fn historical_hardfork(self, chain_id: ChainId, timestamp: u64) -> Option<FoundryHardfork> {
         match self {
-            Self::Ethereum => {
+            Self::Ethereum | Self::Arbitrum => {
                 EthereumHardfork::from_chain_and_timestamp(Chain::from_id(chain_id), timestamp)
                     .map(Into::into)
             }
@@ -291,7 +299,7 @@ impl NetworkVariant {
     /// the lookup so an explicit network choice is not overridden by the chain ID's family.
     pub fn hardfork_at(self, chain_id: ChainId, timestamp: u64) -> FoundryHardfork {
         self.historical_hardfork(chain_id, timestamp).unwrap_or_else(|| match self {
-            Self::Ethereum => EthereumHardfork::default().into(),
+            Self::Ethereum | Self::Arbitrum => EthereumHardfork::default().into(),
             Self::Tempo => latest_active_tempo_hardfork().into(),
             #[cfg(feature = "optimism")]
             Self::Optimism => OpHardfork::default().into(),
@@ -305,6 +313,10 @@ impl NetworkVariant {
     /// Returns `true` if this is the Ethereum network variant.
     pub const fn is_ethereum(&self) -> bool {
         matches!(self, Self::Ethereum)
+    }
+
+    pub const fn is_arbitrum(&self) -> bool {
+        matches!(self, Self::Arbitrum)
     }
 
     /// Returns `true` if this is the Base network variant.
@@ -346,6 +358,7 @@ impl NetworkVariant {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::Ethereum => "ethereum",
+            Self::Arbitrum => "arbitrum",
             #[cfg(feature = "base")]
             Self::Base => "base",
             #[cfg(feature = "optimism")]
@@ -359,7 +372,7 @@ impl NetworkVariant {
     /// Returns the hardfork namespace used by this network family.
     pub const fn hardfork_namespace(&self) -> Option<&'static str> {
         match self {
-            Self::Ethereum => None,
+            Self::Ethereum | Self::Arbitrum => None,
             #[cfg(feature = "base")]
             Self::Base => Some("base"),
             #[cfg(feature = "optimism")]
@@ -385,7 +398,7 @@ impl From<ChainId> for NetworkVariant {
 
 #[derive(Clone, Debug, Default, Parser, Deserialize, Copy, PartialEq, Eq, Hash)]
 pub struct NetworkConfigs {
-    /// Enable a specific network family.
+    /// Select an execution network (default: arbitrum). Use ethereum to opt into Ethereum.
     #[arg(help_heading = "Networks", long, short, num_args = 1, value_name = "NETWORK", value_enum, conflicts_with_all = ["celo", "tempo"])]
     #[cfg_attr(feature = "optimism", arg(conflicts_with = "optimism"))]
     #[cfg_attr(feature = "monad", arg(conflicts_with = "monad"))]
@@ -441,6 +454,18 @@ impl Serialize for NetworkConfigs {
 }
 
 impl NetworkConfigs {
+    /// Defaults an unselected user-facing execution profile to Arbitrum.
+    ///
+    /// Apply after merging selectors, not while decoding RPC identities: an unresolved RPC
+    /// profile still represents Ethereum, and must not acquire local execution defaults.
+    pub const fn with_default_arbitrum(self) -> Self {
+        if self.has_network_selection() {
+            self
+        } else {
+            Self { network: Some(NetworkVariant::Arbitrum), ..self }
+        }
+    }
+
     /// Validates that all configured network selectors resolve to the same execution profile.
     ///
     /// Canonical and legacy selectors for the same family remain compatible. Selectors for
@@ -480,6 +505,14 @@ impl NetworkConfigs {
 
     pub fn with_ethereum() -> Self {
         Self { network: Some(NetworkVariant::Ethereum), ..Default::default() }
+    }
+
+    pub fn with_arbitrum() -> Self {
+        Self { network: Some(NetworkVariant::Arbitrum), ..Default::default() }
+    }
+
+    pub const fn is_arbitrum(&self) -> bool {
+        if let Some(network) = self.resolved_network() { network.is_arbitrum() } else { false }
     }
 
     pub fn with_celo() -> Self {
@@ -634,11 +667,15 @@ impl NetworkConfigs {
     ///
     /// For OP Stack networks, returns Canyon parameters if the Canyon hardfork is active at the
     /// given timestamp, otherwise returns pre-Canyon parameters.
-    pub fn base_fee_params(&self, timestamp: u64) -> BaseFeeParams {
+    #[cfg_attr(
+        not(any(feature = "base", feature = "optimism")),
+        allow(clippy::missing_const_for_fn, reason = "OP Stack fee calculation is not const")
+    )]
+    pub fn base_fee_params(&self, _timestamp: u64) -> BaseFeeParams {
         #[cfg(feature = "base")]
         if self.is_base() {
             let canyon_active =
-                BaseUpgrade::from_chain_and_timestamp(NamedChain::Base as u64, timestamp)
+                BaseUpgrade::from_chain_and_timestamp(NamedChain::Base as u64, _timestamp)
                     .is_some_and(|upgrade| upgrade >= BaseUpgrade::Canyon);
             return if canyon_active {
                 BaseFeeParams::new(250, 6)
@@ -648,7 +685,7 @@ impl NetworkConfigs {
         }
         #[cfg(feature = "optimism")]
         if self.is_optimism() {
-            return self.op_base_fee_params(timestamp);
+            return self.op_base_fee_params(_timestamp);
         }
         BaseFeeParams::ethereum()
     }
@@ -944,6 +981,7 @@ impl From<NetworkVariant> for NetworkConfigs {
     fn from(network: NetworkVariant) -> Self {
         match network {
             NetworkVariant::Ethereum => Self::with_ethereum(),
+            NetworkVariant::Arbitrum => Self::with_arbitrum(),
             NetworkVariant::Tempo => {
                 Self { network: Some(network), tempo: true, ..Default::default() }
             }
@@ -1154,6 +1192,24 @@ mod tests {
             assert!(!NetworkConfigs::with_monad().supports_fork_source(execution));
         }
         assert!(NetworkConfigs::with_monad().supports_fork_source(&NetworkConfigs::with_monad()));
+    }
+
+    #[test]
+    fn execution_default_preserves_explicit_selection_and_rpc_defaults() {
+        let unresolved = NetworkConfigs { bypass_prevrandao: true, ..Default::default() };
+        assert_eq!(unresolved.execution_network(), NetworkVariant::Ethereum);
+        assert!(!unresolved.has_network_selection());
+        let defaulted = unresolved.with_default_arbitrum();
+        assert!(defaulted.is_arbitrum());
+        assert!(defaulted.bypass_prevrandao);
+        for selected in [
+            NetworkConfigs::with_ethereum(),
+            NetworkConfigs::with_arbitrum(),
+            NetworkConfigs::with_celo(),
+            NetworkConfigs::with_tempo(),
+        ] {
+            assert_eq!(selected.with_default_arbitrum(), selected);
+        }
     }
 
     #[test]
@@ -1568,6 +1624,17 @@ mod tests {
             NetworkVariant::from_node_info_name("unknown").unwrap_err(),
             "unsupported network family `unknown` reported by fork endpoint"
         );
+    }
+
+    #[test]
+    fn arbitrum_endpoint_hardfork_uses_ethereum_opcode_names() {
+        for network in [NetworkVariant::Ethereum, NetworkVariant::Arbitrum] {
+            for hardfork in [EthereumHardfork::Prague, EthereumHardfork::Osaka] {
+                assert_eq!(network.parse_hardfork(&hardfork.to_string()).unwrap(), hardfork.into());
+            }
+            assert!(network.parse_hardfork("Future").is_err());
+            assert!(network.parse_hardfork("tempo:T0").is_err());
+        }
     }
 
     #[test]

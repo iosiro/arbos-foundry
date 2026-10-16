@@ -373,6 +373,7 @@ Error: Transaction failed.
 // the fork RPC, or when a Tempo chain ID is provided explicitly via --chain.
 #[casttest]
 async fn cast_call_trace_selects_tempo_network(cmd: _) {
+    cmd.set_network(Some("tempo"));
     let (_, tempo_handle) = anvil::spawn(NodeConfig::test_tempo()).await;
     let (_, eth_handle) = anvil::spawn(NodeConfig::test()).await;
 

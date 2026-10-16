@@ -119,6 +119,7 @@ create2_library_salt = "0x000000000000000000000000000000000000000000000000000000
 create2_deployer = "0x4e59b44847b379578588920ca78fbf26c0b4956c"
 assertions_revert = true
 legacy_assertions = false
+network = "arbitrum"
 celo = false
 bypass_prevrandao = false
 transaction_timeout = 120
@@ -314,6 +315,8 @@ exclude = []
 // tests all config values that are in use
 #[forgetest]
 fn can_extract_config_values(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set all values
     let input = Config {
         profile: Config::DEFAULT_PROFILE,
@@ -505,11 +508,12 @@ fn can_extract_config_values(prj: _, cmd: _) {
         extra_args: vec![],
         experimental: false,
         via_ssa_cfg: false,
-        networks: Default::default(),
+        networks: foundry_evm_networks::NetworkConfigs::with_arbitrum(),
         transaction_timeout: 120,
         additional_compiler_profiles: Default::default(),
         compilation_restrictions: Default::default(),
         script_execution_protection: true,
+        stylus: Default::default(),
         _non_exhaustive: (),
     };
     prj.write_config(input.clone());
@@ -517,9 +521,57 @@ fn can_extract_config_values(prj: _, cmd: _) {
     similar_asserts::assert_eq!(input, config);
 }
 
+// CLI selection overrides environment and project selection.
+#[forgetest]
+fn can_select_ethereum_execution(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
+    cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "arbitrum"
+...
+"#]]);
+    cmd.forge_fuse().args(["config", "--network", "ethereum"]).assert_success().stdout_eq(str![[
+        r#"
+...
+network = "ethereum"
+...
+"#
+    ]]);
+    prj.update_config(|config| {
+        config.networks = foundry_evm_networks::NetworkConfigs::with_ethereum();
+    });
+    cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "ethereum"
+...
+"#]]);
+    cmd.forge_fuse().args(["config", "--network", "arbitrum"]).assert_success().stdout_eq(str![[
+        r#"
+...
+network = "arbitrum"
+...
+"#
+    ]]);
+    cmd.forge_fuse().env("FOUNDRY_NETWORK", "arbitrum");
+    cmd.args(["config"]).assert_success().stdout_eq(str![[r#"
+...
+network = "arbitrum"
+...
+"#]]);
+    cmd.forge_fuse().env("FOUNDRY_NETWORK", "arbitrum");
+    cmd.args(["config", "--network", "ethereum"]).assert_success().stdout_eq(str![[r#"
+...
+network = "ethereum"
+...
+"#]]);
+}
+
 // tests config gets printed to std out
 #[forgetest]
 fn can_show_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let expected =
         Config::load_with_root(prj.root()).unwrap().to_string_pretty().unwrap().trim().to_string();
     let output = cmd.arg("config").assert_success().get_output().stdout_lossy().trim().to_string();
@@ -528,6 +580,8 @@ fn can_show_config(prj: _, cmd: _) {
 
 #[forgetest]
 fn can_select_profile_with_cli(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.create_file(
         Config::FILE_NAME,
         r#"
@@ -554,6 +608,8 @@ optimizer_runs = 1
 // - config supports overrides from env, and cli
 #[forgetest_init]
 fn can_override_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     cmd.set_current_dir(prj.root());
     let foundry_toml = prj.root().join(Config::FILE_NAME);
@@ -622,6 +678,8 @@ fn can_override_config(prj: _, cmd: _) {
 
 #[forgetest_init]
 fn can_parse_remappings_correctly(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     cmd.set_current_dir(prj.root());
     let foundry_toml = prj.root().join(Config::FILE_NAME);
@@ -689,6 +747,7 @@ Installing solmate in [..] (url: https://github.com/transmissions11/solmate, tag
 
 #[forgetest_init]
 fn can_detect_config_vals(prj: _) {
+    prj.set_network(None);
     prj.initialize_default_contracts();
     let url = "http://127.0.0.1:8545";
     let config = prj.config_from_output(["--no-auto-detect", "--rpc-url", url]);
@@ -711,6 +770,7 @@ fn can_detect_config_vals(prj: _) {
 // checks that `clean` removes dapptools style paths
 #[forgetest_init]
 fn can_get_evm_opts(prj: _) {
+    prj.set_network(None);
     prj.initialize_default_contracts();
     let url = "http://127.0.0.1:8545";
     let config = prj.config_from_output(["--rpc-url", url, "--ffi"]);
@@ -735,6 +795,7 @@ fn can_get_evm_opts(prj: _) {
 // cheatcodes should configure forking.
 #[forgetest_init]
 fn eth_rpc_url_env_does_not_set_fork_url(prj: _) {
+    prj.set_network(None);
     prj.initialize_default_contracts();
     let url = "http://127.0.0.1:8545";
 
@@ -758,6 +819,7 @@ fn eth_rpc_url_env_does_not_set_fork_url(prj: _) {
 // checks that we can set various config values
 #[forgetest_init]
 fn can_set_config_values(prj: _) {
+    prj.set_network(None);
     prj.initialize_default_contracts();
     let config =
         prj.config_from_output(["--via-ir", "--experimental", "--via-ssa-cfg", "--no-metadata"]);
@@ -771,6 +833,8 @@ fn can_set_config_values(prj: _) {
 // tests that solc can be explicitly set
 #[forgetest]
 fn can_set_solc_explicitly(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.add_source(
         "Foo",
         r"
@@ -794,6 +858,8 @@ Compiler run successful!
 // tests that `--use <solc>` works
 #[forgetest]
 fn can_use_solc(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.add_raw_source(
         "Foo",
         r"
@@ -859,6 +925,8 @@ Compiler run successful!
 // test to ensure yul optimizer can be set as intended
 #[forgetest]
 fn can_set_yul_optimizer(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.update_config(|config| config.optimizer = Some(true));
     prj.add_source(
         "foo.sol",
@@ -891,6 +959,7 @@ Error (6553): The msize instruction cannot be used when the Yul optimizer is act
 // tests that the lib triple can be parsed
 #[forgetest_init]
 fn can_parse_dapp_libraries(cmd: _) {
+    cmd.set_network(None);
     cmd.env(
         "DAPP_LIBRARIES",
         "src/DssSpell.sol:DssExecLib:0x8De6DDbCd5053d32292AAA0D2105A32d108484a6",
@@ -905,6 +974,8 @@ fn can_parse_dapp_libraries(cmd: _) {
 // test that optimizer runs works
 #[forgetest]
 fn can_set_optimizer_runs(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set optimizer runs
     prj.update_config(|config| config.optimizer_runs = Some(1337));
 
@@ -918,6 +989,8 @@ fn can_set_optimizer_runs(prj: _, cmd: _) {
 // test that use_literal_content works
 #[forgetest]
 fn can_set_use_literal_content(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set use_literal_content
     prj.update_config(|config| config.use_literal_content = false);
 
@@ -931,6 +1004,8 @@ fn can_set_use_literal_content(prj: _, cmd: _) {
 // <https://github.com/foundry-rs/foundry/issues/9665>
 #[forgetest]
 fn enable_optimizer_when_runs_set(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set optimizer runs
     prj.update_config(|config| config.optimizer_runs = Some(1337));
 
@@ -941,6 +1016,8 @@ fn enable_optimizer_when_runs_set(prj: _, cmd: _) {
 // test `optimizer_runs` set to 200 by default if optimizer enabled
 #[forgetest]
 fn optimizer_runs_default(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set optimizer
     prj.update_config(|config| config.optimizer = Some(true));
 
@@ -951,6 +1028,8 @@ fn optimizer_runs_default(prj: _, cmd: _) {
 // test that gas_price can be set
 #[forgetest]
 fn can_set_gas_price(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // explicitly set gas_price
     prj.update_config(|config| config.gas_price = Some(1337));
 
@@ -964,6 +1043,8 @@ fn can_set_gas_price(prj: _, cmd: _) {
 // test that we can detect remappings from foundry.toml
 #[forgetest_init]
 fn can_detect_lib_foundry_toml(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     let config = cmd.config();
     let remappings = config.remappings.iter().cloned().map(Remapping::from).collect::<Vec<_>>();
@@ -1064,6 +1145,8 @@ fn can_detect_lib_foundry_toml(prj: _, cmd: _) {
 // so that `dep/=lib/a/src` will take precedent over  `dep/=lib/a/lib/b/src`
 #[forgetest_init]
 fn can_prioritise_closer_lib_remappings(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     let config = cmd.config();
 
@@ -1100,6 +1183,8 @@ fn can_prioritise_closer_lib_remappings(prj: _, cmd: _) {
 // See <https://github.com/foundry-rs/foundry/issues/9271>
 #[forgetest_init]
 fn can_prioritise_project_remappings(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     let mut config = cmd.config();
     // Add `@utils/` remapping in project config.
@@ -1150,6 +1235,8 @@ Global:
 
 #[forgetest]
 fn narrow_project_remapping_preserves_broad_dependency_fallback(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.remappings = vec![Remapping::from_str("pkg/sub/=src/local/").unwrap().into()];
     });
@@ -1200,6 +1287,8 @@ pkg/=lib/pkg/src/
 
 #[forgetest]
 fn nested_config_remapping_refines_auto_detected_package_root(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let outer = prj.paths().libraries[0].join("outer");
     let outer_other = prj.paths().libraries[0].join("outer-other");
     let inner = outer.join("lib/inner");
@@ -1247,6 +1336,8 @@ outer/=lib/outer/src/
 
 #[forgetest]
 fn duplicate_transitive_remappings_are_scoped_to_their_owners(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("deps-a/a");
     let b = prj.root().join("deps-b/b");
     pretty_err(&a, fs::create_dir_all(a.join("src")));
@@ -1289,6 +1380,8 @@ shared/=deps-a/a/lib/shared/src/
 
 #[forgetest]
 fn scoped_npm_context_preserves_hoisted_sibling_fallback(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let owner = prj.root().join("node_modules/@bananapus/router-terminal-v6");
     let nested_v3 = owner.join("node_modules/@uniswap/v3-core/src");
     let hoisted_v3 = prj.root().join("node_modules/@uniswap/v3-core/src");
@@ -1324,6 +1417,8 @@ node_modules/@bananapus/router-terminal-v6/:@uniswap/v3-core/=node_modules/@bana
 
 #[forgetest]
 fn contextual_remapping_dedup_uses_context_and_name(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("lib/a");
     let z = prj.root().join("lib/z");
     for dependency in [&a, &z] {
@@ -1371,6 +1466,8 @@ z/=lib/z/src/
 
 #[forgetest]
 fn contextual_auto_remapping_uses_configured_dependency_source(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("lib/a");
     let b = prj.root().join("lib/b");
     let shared_a = a.join("lib/shared");
@@ -1419,6 +1516,8 @@ shared/=lib/b/lib/shared/src/
 
 #[forgetest]
 fn explicit_context_precedes_nested_auto_remapping(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("lib/a");
     let shared_a = a.join("lib/shared/src");
     let x = a.join("lib/x");
@@ -1480,6 +1579,8 @@ fn explicit_context_precedes_nested_auto_remapping(prj: _, cmd: _) {
 
 #[forgetest]
 fn slashless_context_is_a_lexical_prefix(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let abc = prj.root().join("lib/abc");
     let shared = abc.join("lib/shared/src");
     pretty_err(&abc, fs::create_dir_all(abc.join("src")));
@@ -1516,6 +1617,8 @@ fn slashless_context_is_a_lexical_prefix(prj: _, cmd: _) {
 
 #[forgetest]
 fn nested_auto_remapping_preserves_declared_precedence(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("lib/a");
     let pinned_a = a.join("src/pinned");
     let shared_a = a.join("lib/shared/src");
@@ -1562,6 +1665,8 @@ x/=lib/a/lib/x/src/
 
 #[forgetest]
 fn nested_contextual_remapping_precedes_auto_detection(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let a = prj.root().join("lib/a");
     let b = prj.root().join("lib/b");
     pretty_err(&a, fs::create_dir_all(a.join("src/pinned")));
@@ -1612,6 +1717,8 @@ shared/=lib/a/lib/shared/src/
 
 #[forgetest]
 fn external_dependency_uses_contextual_remapping(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let project = prj.root().join("utils");
     let dependency = prj.root().join("node_modules/dependency");
     let library = prj.root().join("node_modules/library/src");
@@ -1698,6 +1805,8 @@ contract Core is DependencyLibrary {}
 
 #[forgetest]
 fn cli_preserves_explicit_contextual_remapping_pair(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let dependency = prj.paths().libraries[0].join("dep");
     pretty_err(&dependency, fs::create_dir_all(dependency.join("src")));
     pretty_err(&dependency, fs::create_dir_all(dependency.join("pkg/contracts")));
@@ -1738,6 +1847,8 @@ fn cli_preserves_explicit_contextual_remapping_pair(prj: _, cmd: _) {
 
 #[forgetest]
 fn root_remapping_precedes_nested_refinement(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     let outer = prj.paths().libraries[0].join("outer");
     let inner = outer.join("lib/inner");
     pretty_err(&outer, fs::create_dir_all(outer.join("src")));
@@ -1782,6 +1893,8 @@ fn root_remapping_precedes_nested_refinement(prj: _, cmd: _) {
 
 #[forgetest]
 fn broad_project_remapping_suppresses_narrow_dependency_override(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.remappings = vec![Remapping::from_str("pkg/=src/local/").unwrap().into()];
     });
@@ -1837,6 +1950,8 @@ dep1/=lib/dep1/src/
 // machine-readable value and must survive `--pretty` mode.
 #[forgetest]
 fn remappings_pretty_keeps_context_on_stdout(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.auto_detect_remappings = false;
         config.remappings = vec![
@@ -1876,6 +1991,8 @@ Context: ctx-b
 // test to check that foundry.toml libs section updates on install
 #[forgetest]
 fn can_update_libs_section(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     // explicitly set gas_price
@@ -1915,6 +2032,8 @@ Installing ds-test in [..] (url: https://github.com/dapphub/ds-test, tag: None)
 // is silent for any libs
 #[forgetest]
 fn config_emit_warnings(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     cmd.args(["install", "foundry-rs/forge-std"]).assert_success().stdout_eq(str![""]).stderr_eq(
@@ -1944,6 +2063,8 @@ Please use [profile.default] instead or run `forge config --fix`.
 
 #[forgetest_init]
 fn can_skip_remappings_auto_detection(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // explicitly set remapping and libraries
     prj.update_config(|config| {
@@ -1960,6 +2081,7 @@ fn can_skip_remappings_auto_detection(prj: _, cmd: _) {
 
 #[forgetest_init]
 fn can_parse_default_fs_permissions(cmd: _) {
+    cmd.set_network(None);
     let config = cmd.config();
 
     assert_eq!(config.fs_permissions.len(), 1);
@@ -1970,6 +2092,8 @@ fn can_parse_default_fs_permissions(cmd: _) {
 
 #[forgetest_init]
 fn can_parse_custom_fs_permissions(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // explicitly set fs permissions
     prj.update_config(|config| {
@@ -2006,6 +2130,8 @@ fn can_parse_custom_fs_permissions(prj: _, cmd: _) {
 #[cfg(not(target_os = "windows"))]
 #[forgetest_init]
 fn can_resolve_symlink_fs_permissions(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // write config in packages/files/config.json
     let config_path = prj.root().join("packages").join("files");
@@ -2060,6 +2186,7 @@ Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
 // tests if evm version is normalized for config output
 #[forgetest]
 fn normalize_config_evm_version(cmd: _) {
+    cmd.set_network(None);
     let output = cmd
         .args(["config", "--use", "0.8.0", "--json"])
         .assert_success()
@@ -2128,6 +2255,8 @@ fn normalize_config_evm_version(cmd: _) {
 // See <https://github.com/foundry-rs/foundry/issues/3440>
 #[forgetest_init]
 fn test_submodule_root_path_remappings(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     prj.add_script(
         "BaseScript.sol",
@@ -2166,6 +2295,8 @@ contract MyScript is BaseScript {
 // <https://github.com/foundry-rs/foundry/issues/9454>
 #[forgetest_init]
 fn test_project_remappings(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     prj.update_config(|config| {
         config.src = "src/contracts".into();
@@ -2193,6 +2324,8 @@ contract CounterTest {
 
 #[forgetest_init]
 fn test_default_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.write_config(Config::default());
     cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(DEFAULT_CONFIG);
 
@@ -2519,7 +2652,7 @@ fn test_default_config(prj: _, cmd: _) {
   "soldeer": null,
   "assertions_revert": true,
   "legacy_assertions": false,
-  "network": null,
+  "network": "arbitrum",
   "celo": false,
   "bypass_prevrandao": false,
   "transaction_timeout": 120,
@@ -2533,6 +2666,8 @@ fn test_default_config(prj: _, cmd: _) {
 
 #[forgetest_init]
 fn test_optimizer_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // Default settings: optimizer disabled, optimizer runs 200.
     cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
@@ -2608,6 +2743,8 @@ optimizer_runs = 0
 
 #[forgetest_init]
 fn test_gas_snapshot_check_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // Default settings: gas_snapshot_check disabled.
     cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
@@ -2798,6 +2935,8 @@ Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
 
 #[forgetest_init]
 fn test_gas_snapshot_emit_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     // Default settings: gas_snapshot_emit enabled.
     cmd.forge_fuse().args(["config"]).assert_success().stdout_eq(str![[r#"
@@ -2912,6 +3051,8 @@ contract GasSnapshotEmitTest is DSTest {
 // before any suite rewrites it.
 #[forgetest]
 fn test_gas_snapshot_check_shared_group(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.insert_ds_test();
 
     let test_contract = |name: &str, value: u32| {
@@ -2975,6 +3116,8 @@ Error: Snapshots differ from previous run
 // Tests compilation restrictions enables optimizer if optimizer runs set to a value higher than 0.
 #[forgetest_init]
 fn test_additional_compiler_profiles(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     prj.add_source(
         "v1/Counter.sol",
@@ -3132,6 +3275,8 @@ contract Counter {
 // <https://github.com/foundry-rs/foundry/issues/11227>
 #[forgetest_init]
 fn test_exclude_lints_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     prj.initialize_default_contracts();
     prj.update_config(|config| {
         config.lint.exclude_lints = vec![
@@ -3151,6 +3296,8 @@ fn test_exclude_lints_config(prj: _, cmd: _) {
 // <https://github.com/foundry-rs/foundry/issues/6529>
 #[forgetest_init]
 fn test_fail_fast_config(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // Skip if we don't have at least 2 CPUs to run both tests in parallel.
     if thread::available_parallelism().map_or(1, |n| n.get()) < 2 {
         return;
@@ -3189,6 +3336,8 @@ Suite result: FAILED. [..] passed; 1 failed; 0 skipped; [ELAPSED]
 
 #[forgetest]
 fn config_deny_warnings_is_deprecated(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     let faulty_toml = DEFAULT_CONFIG.replace(r#"deny = "never""#, "deny_warnings = true");
@@ -3202,6 +3351,8 @@ Warning: Key `deny_warnings` is being deprecated in favor of `deny = warnings`. 
 
 #[forgetest]
 fn config_labels_is_deprecated(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     fs::write(
@@ -3221,6 +3372,8 @@ Warning: Key `[labels]` is being deprecated in favor of `[tracing.labels]`. It w
 // <https://github.com/foundry-rs/foundry/issues/5866>
 #[forgetest]
 fn no_warnings_on_external_sections(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     let toml = r"[profile.default]
@@ -3243,6 +3396,8 @@ fn no_warnings_on_external_sections(prj: _, cmd: _) {
 // <https://github.com/foundry-rs/foundry/issues/10550>
 #[forgetest]
 fn config_warnings_on_unknown_keys(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     cmd.git_init();
 
     let faulty_toml = r"[profile.default]
@@ -3266,6 +3421,8 @@ Warning: Found unknown `foo` config for profile `default` defined in foundry.tom
 
 #[forgetest_init]
 fn test_ignored_file_paths_normalization(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     fn gen_contract(name: &str) -> String {
         let fn_name = name.chars().next().unwrap().to_lowercase().to_string() + &name[1..];
         format!(
@@ -3322,6 +3479,8 @@ Warning (2018): Function state mutability can be restricted to pure
 
 #[forgetest_init]
 fn test_failures_file_normalization(prj: _, cmd: _) {
+    prj.set_network(None);
+    cmd.set_network(None);
     // Update config with custom path containing "./" prefix
     prj.update_config(|config| {
         config.test_failures_file = PathBuf::from("./my-custom-failures");

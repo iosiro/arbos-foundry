@@ -10,11 +10,11 @@ use crate::{
 use alloy_consensus::{SignableTransaction, Signed, transaction::SignerRecoverable};
 use alloy_evm::{Evm, EvmEnv, EvmFactory, FromRecoveredTx, precompiles::PrecompilesMap};
 use alloy_network::Network;
-use alloy_primitives::{Address, Signature, U256};
+use alloy_primitives::{Address, ChainId, Signature, U256, map::AddressSet};
 use alloy_rlp::Decodable;
 use foundry_common::{FoundryReceiptResponse, FoundryTransactionBuilder, fmt::UIfmt};
 use foundry_config::ExecutionSpec;
-use foundry_fork_db::{DatabaseError, ForkBlockEnv};
+use foundry_fork_db::{DatabaseError, ForkBlockEnv, cache::BlockHashMode};
 use revm::{
     Database,
     context::{
@@ -34,6 +34,7 @@ use revm::{
 use serde::{Deserialize, Serialize};
 use std::{fmt::Debug, ops::DerefMut};
 
+pub mod arbitrum;
 #[cfg(feature = "base")]
 pub mod base;
 pub mod eth;
@@ -43,6 +44,7 @@ pub mod monad;
 pub mod op;
 pub mod tempo;
 
+pub use arbitrum::*;
 pub use eth::*;
 pub use tempo::*;
 
@@ -54,6 +56,35 @@ pub use monad::*;
 
 #[cfg(feature = "optimism")]
 pub use op::*;
+
+/// Operations Foundry needs from an execution family's precompile handle.
+pub trait FoundryPrecompiles {
+    fn addresses(&self) -> AddressSet;
+
+    fn configure_for_replay(
+        &mut self,
+        _networks: foundry_evm_networks::NetworkConfigs,
+        _chain_id: ChainId,
+        _timestamp: u64,
+    ) {
+    }
+}
+
+impl FoundryPrecompiles for PrecompilesMap {
+    fn addresses(&self) -> AddressSet {
+        self.addresses().copied().collect()
+    }
+
+    fn configure_for_replay(
+        &mut self,
+        networks: foundry_evm_networks::NetworkConfigs,
+        chain_id: ChainId,
+        timestamp: u64,
+    ) {
+        networks.inject_precompiles(self);
+        foundry_evm_networks::apply_bsc_p256_precompile(self, chain_id, timestamp);
+    }
+}
 
 /// Foundry's compatibility trait associating a [`Network`] with a [`FoundryEvmFactory`].
 pub trait FoundryEvmNetwork: Copy + Debug + Default + 'static {
@@ -79,14 +110,35 @@ pub trait FoundryEvmFactory:
         BlockEnv: FoundryBlock + ForkBlockEnv + Default + Unpin,
         Tx: Clone + Debug + FoundryTransaction + FromAnyRpcTransaction + Default + Send + Sync,
         HaltReason: IntoInstructionResult,
-        Precompiles = PrecompilesMap,
+        Precompiles: FoundryPrecompiles,
     > + Clone
     + Debug
     + Default
+    + Send
+    + Sync
     + 'static
 {
     /// Chain type for EVM's context created by this factory.
     type Chain: FoundryChain<Self::Tx>;
+
+    /// Database hash domain consumed by this factory's context and native precompiles.
+    ///
+    /// This is independent of instance configuration: launch forks are constructed before the
+    /// configured factory is installed, and must use the same domain as later forks.
+    const BLOCK_HASH_MODE: BlockHashMode = BlockHashMode::Evm;
+
+    /// Initializes network-owned state or applies resolved settings to an existing backend.
+    ///
+    /// Most networks do not require database state outside ordinary transactions. Networks with
+    /// system-contract state can override this hook; implementations must preserve already
+    /// initialized fork state.
+    fn initialize_backend<DB: alloy_evm::Database + revm::DatabaseCommit>(
+        &self,
+        _db: DB,
+        _evm_env: &EvmEnv<Self::Spec, Self::BlockEnv>,
+    ) -> eyre::Result<()> {
+        Ok(())
+    }
 
     /// Foundry Context abstraction
     type FoundryContext<'db>: FoundryContextExt<
@@ -107,7 +159,7 @@ pub trait FoundryEvmFactory:
             BlockEnv = Self::BlockEnv,
             Spec = Self::Spec,
             HaltReason = Self::HaltReason,
-            Precompiles = PrecompilesMap,
+            Precompiles = Self::Precompiles,
         > + DerefMut<Target = Self::FoundryContext<'db>>
     where
         Self: 'db;
@@ -176,7 +228,7 @@ pub trait NestedEvm {
     fn chain_mut(&mut self) -> &mut Self::Chain;
 
     /// Returns the precompile map.
-    fn precompiles_mut(&mut self) -> &mut PrecompilesMap;
+    fn precompiles_mut(&mut self) -> &mut dyn FoundryPrecompiles;
 
     /// Returns a mutable reference to the Journal.
     fn journal_mut(&mut self) -> &mut Self::Journal;
@@ -279,7 +331,7 @@ where
     let (evm_env, journaled_state, chain_context) = {
         let (db, journaled_state) = ecx.db_journal_inner_mut();
         let journaled_state = journaled_state.clone();
-        let mut evm = F::default().create_nested_evm_with_inspector(db, evm_env, inspector);
+        let mut evm = db.evm_factory().create_nested_evm_with_inspector(db, evm_env, inspector);
         *evm.chain_mut() = chain_context;
         *evm.journal_inner_mut() = journaled_state;
         #[cfg(feature = "monad")]

@@ -6,7 +6,8 @@ import "utils/Test.sol";
 contract TestContract {}
 
 contract GetDeployedCodeTest is Test {
-    address public constant overrideAddress = 0x0000000000000000000000000000000000000064;
+    // Note: 0x64 is in the Arbitrum precompile range, use a higher address
+    address public constant overrideAddress = 0x0000000000000000000000000000000000006400;
 
     event Payload(address sender, address target, bytes data);
 

@@ -25,6 +25,10 @@ fn is_repl(args: &[String]) -> bool {
 #[allow(dead_code)]
 impl ChiselSession {
     pub fn new(name: &str, flags: &str, init: bool) -> Self {
+        Self::with_network(name, flags, init, Some("ethereum"))
+    }
+
+    pub fn with_network(name: &str, flags: &str, init: bool, network: Option<&str>) -> Self {
         let project = foundry_test_utils::TestProject::new(name, PathStyle::Dapptools);
         if init {
             foundry_test_utils::util::initialize(project.root());
@@ -38,6 +42,11 @@ impl ChiselSession {
         command.current_dir(project.root());
         command.env("NO_COLOR", "1");
         command.env("TERM", "dumb");
+        if let Some(network) = network {
+            command.env("FOUNDRY_NETWORK", network);
+        } else {
+            command.env_remove("FOUNDRY_NETWORK");
+        }
         command.env("EDITOR", "true");
 
         command.env("ETHERSCAN_API_KEY", foundry_test_utils::rpc::next_etherscan_api_key());
@@ -88,6 +97,14 @@ impl ChiselSession {
         if self.is_repl() {
             self.output = Some(self.read_until_prompt());
         }
+    }
+
+    /// Save a session and wait for its acknowledgement, not an earlier buffered prompt.
+    #[track_caller]
+    pub fn save(&mut self, id: &str) {
+        self.sendln_raw(&format!("!save {id}"));
+        self.expect(&format!("Saved session to cache with ID = {id}"));
+        self.expect_prompt();
     }
 
     /// Send a line to the REPL without expecting the prompt to appear.

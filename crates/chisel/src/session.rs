@@ -3,9 +3,12 @@
 //! This module contains the `ChiselSession` struct, which is the top-level
 //! wrapper for a serializable REPL session.
 
-use crate::prelude::{SessionSource, SessionSourceConfig};
+use crate::{
+    evm::ChiselEvmNetwork,
+    prelude::{SessionSource, SessionSourceConfig},
+};
 use eyre::Result;
-use foundry_evm::{core::evm::FoundryEvmNetwork, executors::ExecutorBuilder};
+use foundry_evm::core::evm::FoundryEvmNetwork;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File},
@@ -42,13 +45,14 @@ pub struct ChiselSession<FEN: FoundryEvmNetwork> {
 }
 
 // ChiselSession Common Associated Functions
-impl<FEN: FoundryEvmNetwork> ChiselSession<FEN> {
-    fn deserialize_cached(contents: &str, executor_builder: ExecutorBuilder<FEN>) -> Result<Self> {
+impl<FEN: ChiselEvmNetwork> ChiselSession<FEN> {
+    fn deserialize_cached(contents: &str) -> Result<Self> {
         let mut session: Self = serde_json::from_str(contents)?;
         session.source.config.clear_credentials();
         // A session load must not run project cleanup requested by cached configuration.
         session.source.config.foundry_config.force = false;
-        session.source.config.executor_builder = executor_builder;
+        session.source.config.executor_builder =
+            FEN::executor_builder(&session.source.config.evm_opts);
         Ok(session)
     }
 
@@ -242,19 +246,15 @@ impl<FEN: FoundryEvmNetwork> ChiselSession<FEN> {
     /// ### Returns
     ///
     /// Optionally, an owned instance of the loaded chisel session.
-    pub fn load(id: &str, executor_builder: ExecutorBuilder<FEN>) -> Result<Self> {
-        Self::load_from(id, &Self::cache_dir()?, executor_builder)
+    pub fn load(id: &str) -> Result<Self> {
+        Self::load_from(id, &Self::cache_dir()?)
     }
 
-    fn load_from(
-        id: &str,
-        cache_dir: &str,
-        executor_builder: ExecutorBuilder<FEN>,
-    ) -> Result<Self> {
+    fn load_from(id: &str, cache_dir: &str) -> Result<Self> {
         validate_session_id(id)?;
         Self::secure_cache_dir(cache_dir)?;
         let contents = Self::read_cached_file(Path::new(&format!("{cache_dir}chisel-{id}.json")))?;
-        let mut session = Self::deserialize_cached(&contents, executor_builder)?;
+        let mut session = Self::deserialize_cached(&contents)?;
         // Use the requested ID even if the cached ID is missing or stale.
         session.id = Some(id.to_string());
         Ok(session)
@@ -289,14 +289,14 @@ impl<FEN: FoundryEvmNetwork> ChiselSession<FEN> {
     /// ### Returns
     ///
     /// Optionally, an owned instance of the most recently modified cached session.
-    pub fn latest(executor_builder: ExecutorBuilder<FEN>) -> Result<Self> {
-        Self::latest_from(&Self::cache_dir()?, executor_builder)
+    pub fn latest() -> Result<Self> {
+        Self::latest_from(&Self::cache_dir()?)
     }
 
-    fn latest_from(cache_dir: &str, executor_builder: ExecutorBuilder<FEN>) -> Result<Self> {
+    fn latest_from(cache_dir: &str) -> Result<Self> {
         let last_session = Self::latest_cached_session_in(cache_dir)?;
         let last_session_contents = Self::read_cached_file(Path::new(&last_session))?;
-        let mut session = Self::deserialize_cached(&last_session_contents, executor_builder)?;
+        let mut session = Self::deserialize_cached(&last_session_contents)?;
         // Bind the session to the file that was loaded.
         session.id = Self::session_id_from_cache_file_name(&last_session);
         Ok(session)
@@ -362,16 +362,17 @@ impl<FEN: FoundryEvmNetwork> ChiselSession<FEN> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use foundry_config::{Config, SolcReq};
-    use foundry_evm::core::evm::EthEvmNetwork;
-    use semver::Version;
-
-    #[cfg(unix)]
-    use std::os::unix::fs::symlink;
-
+    use foundry_config::{Config, SolcReq, stylus::StylusConfig};
     #[cfg(feature = "monad")]
     use foundry_evm::core::{constants::MONAD_CHEATCODE_ADDRESS, evm::MonadEvmNetwork};
-
+    use foundry_evm::{
+        core::evm::{ArbitrumEvmNetwork, EthEvmNetwork},
+        opts::EvmOpts,
+    };
+    use foundry_evm_networks::NetworkConfigs;
+    use foundry_test_utils::util::SOLC_VERSION;
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
     /// Deleted sessions must not cause the next ID to collide with an existing file.
     #[test]
     fn next_cached_session_skips_gaps_left_by_deleted_sessions() {
@@ -414,7 +415,7 @@ mod tests {
         let session = ChiselSession::<EthEvmNetwork>::new(SessionSourceConfig {
             foundry_config: Config {
                 force: true,
-                solc: Some(SolcReq::Version(Version::new(0, 8, 29))),
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
                 ..Default::default()
             },
             no_vm: true,
@@ -424,30 +425,84 @@ mod tests {
         assert!(session.source.config.foundry_config.force);
 
         let serialized = serde_json::to_string(&session).unwrap();
-        let session = ChiselSession::<EthEvmNetwork>::deserialize_cached(
-            &serialized,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let session = ChiselSession::<EthEvmNetwork>::deserialize_cached(&serialized).unwrap();
 
         assert!(!session.source.config.foundry_config.force);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn deserialized_arbitrum_session_restores_execution_policy() {
+        let root = tempfile::tempdir().unwrap();
+        let networks = NetworkConfigs::with_arbitrum();
+        let stylus = StylusConfig {
+            ink_price: Some(24_680),
+            disable_stylus_deployment: true,
+            ..Default::default()
+        };
+        let mut evm_opts = EvmOpts {
+            networks,
+            stylus_config: stylus.clone(),
+            memory_limit: Config::default().memory_limit,
+            ..Default::default()
+        };
+        evm_opts.env.gas_limit = 30_000_000u64.into();
+        let mut session = ChiselSession::<ArbitrumEvmNetwork>::new(SessionSourceConfig {
+            foundry_config: Config {
+                root: root.path().to_path_buf(),
+                networks,
+                stylus,
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
+                ..Default::default()
+            },
+            executor_builder: ArbitrumEvmNetwork::executor_builder(&evm_opts),
+            evm_opts,
+            no_vm: true,
+            ..Default::default()
+        })
+        .unwrap();
+        session.source.run_code = r#"
+            (bool ok, bytes memory output) = address(0x71).staticcall(
+                abi.encodeWithSignature("inkPrice()")
+            );
+            require(ok && abi.decode(output, (uint32)) == 24_680, "lost ink-price override");
+            bytes memory initcode = hex"6004600c60003960046000f3eff00000";
+            address deployed;
+            assembly {
+                deployed := create(0, add(initcode, 32), mload(initcode))
+            }
+            require(deployed == address(0), "lost Stylus deployment policy");
+        "#
+        .to_string();
+
+        assert!(session.source.execute().await.unwrap().success);
+        let serialized = serde_json::to_string(&session).unwrap();
+        let mut restored =
+            ChiselSession::<ArbitrumEvmNetwork>::deserialize_cached(&serialized).unwrap();
+        assert!(restored.source.execute().await.unwrap().success);
+
+        // Older cached sessions used the Rust field name for EVM options.
+        let mut legacy = serde_json::to_value(&session).unwrap();
+        let opts = legacy["source"]["config"]["evm_opts"].as_object_mut().unwrap();
+        let stylus = opts.remove("stylus").unwrap();
+        opts.insert("stylus_config".to_string(), stylus);
+        let mut restored = ChiselSession::<ArbitrumEvmNetwork>::deserialize_cached(
+            &serde_json::to_string(&legacy).unwrap(),
+        )
+        .unwrap();
+        assert!(restored.source.execute().await.unwrap().success);
     }
 
     #[cfg(feature = "monad")]
     #[test]
     fn deserialized_sessions_use_active_monad_tooling() {
         let session = ChiselSession::<MonadEvmNetwork>::new(SessionSourceConfig {
-            executor_builder: ExecutorBuilder::<MonadEvmNetwork>::new(),
+            executor_builder: MonadEvmNetwork::executor_builder(&Default::default()),
             ..Default::default()
         })
         .unwrap();
         let serialized = serde_json::to_string(&session).unwrap();
 
-        let session = ChiselSession::<MonadEvmNetwork>::deserialize_cached(
-            &serialized,
-            ExecutorBuilder::<MonadEvmNetwork>::new(),
-        )
-        .unwrap();
+        let session = ChiselSession::<MonadEvmNetwork>::deserialize_cached(&serialized).unwrap();
 
         assert_eq!(
             session.source.config.executor_builder.extra_cheatcode_addresses(),
@@ -485,11 +540,7 @@ mod tests {
 
     #[test]
     fn load_rejects_path_traversal_id() {
-        let err = ChiselSession::<EthEvmNetwork>::load(
-            "../../evil",
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap_err();
+        let err = ChiselSession::<EthEvmNetwork>::load("../../evil").unwrap_err();
         assert!(err.to_string().contains("invalid Chisel session id"), "{err}");
     }
 
@@ -502,7 +553,7 @@ mod tests {
     fn session_for_normalization_tests() -> ChiselSession<EthEvmNetwork> {
         ChiselSession::<EthEvmNetwork>::new(SessionSourceConfig {
             foundry_config: Config {
-                solc: Some(SolcReq::Version(Version::new(0, 8, 29))),
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
                 ..Default::default()
             },
             no_vm: true,
@@ -522,22 +573,12 @@ mod tests {
         let serialized = serde_json::to_string(&session).unwrap();
         std::fs::write(format!("{cache_dir}chisel-5.json"), &serialized).unwrap();
 
-        let loaded = ChiselSession::<EthEvmNetwork>::load_from(
-            "5",
-            &cache_dir,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let loaded = ChiselSession::<EthEvmNetwork>::load_from("5", &cache_dir).unwrap();
         assert_eq!(loaded.id.as_deref(), Some("5"), "must use the requested id, not the stale one");
 
         let without_id = serialized.replacen("\"stale-name\"", "null", 1);
         std::fs::write(format!("{cache_dir}chisel-7.json"), without_id).unwrap();
-        let loaded = ChiselSession::<EthEvmNetwork>::load_from(
-            "7",
-            &cache_dir,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let loaded = ChiselSession::<EthEvmNetwork>::load_from("7", &cache_dir).unwrap();
         assert_eq!(loaded.id.as_deref(), Some("7"), "a null embedded id must not survive the load");
     }
 
@@ -551,11 +592,7 @@ mod tests {
         let serialized = serde_json::to_string(&session).unwrap();
         std::fs::write(format!("{cache_dir}chisel-9.json"), serialized).unwrap();
 
-        let loaded = ChiselSession::<EthEvmNetwork>::latest_from(
-            &cache_dir,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let loaded = ChiselSession::<EthEvmNetwork>::latest_from(&cache_dir).unwrap();
         assert_eq!(loaded.id.as_deref(), Some("9"));
     }
 
@@ -579,7 +616,7 @@ mod tests {
     fn write_rejects_path_traversal_id() {
         let mut session = ChiselSession::<EthEvmNetwork>::new(SessionSourceConfig {
             foundry_config: Config {
-                solc: Some(SolcReq::Version(Version::new(0, 8, 29))),
+                solc: Some(SolcReq::Version(SOLC_VERSION.parse().unwrap())),
                 ..Default::default()
             },
             no_vm: true,
@@ -686,12 +723,7 @@ mod tests {
         fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
 
-        let loaded = ChiselSession::<EthEvmNetwork>::load_from(
-            "legacy",
-            &cache_dir,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let loaded = ChiselSession::<EthEvmNetwork>::load_from("legacy", &cache_dir).unwrap();
 
         assert_eq!(loaded.id.as_deref(), Some("legacy"));
         assert_eq!(fs::metadata(dir.path()).unwrap().permissions().mode() & 0o777, 0o700);
@@ -710,7 +742,6 @@ mod tests {
         let result = ChiselSession::<EthEvmNetwork>::load_from(
             "linked",
             &format!("{}/", dir.path().display()),
-            ExecutorBuilder::<EthEvmNetwork>::new(),
         );
 
         assert_eq!(result.unwrap_err().to_string(), "Chisel session must be a regular file");
@@ -740,11 +771,7 @@ mod tests {
             ChiselSession::<EthEvmNetwork>::latest_cached_session_in(&cache_dir).unwrap(),
             saved
         );
-        let latest = ChiselSession::<EthEvmNetwork>::latest_from(
-            &cache_dir,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        )
-        .unwrap();
+        let latest = ChiselSession::<EthEvmNetwork>::latest_from(&cache_dir).unwrap();
         assert_eq!(latest.id.as_deref(), Some("saved"));
     }
 
@@ -794,17 +821,8 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
 
         for loaded in [
-            ChiselSession::<EthEvmNetwork>::load_from(
-                "legacy",
-                &cache_dir,
-                ExecutorBuilder::<EthEvmNetwork>::new(),
-            )
-            .unwrap(),
-            ChiselSession::<EthEvmNetwork>::latest_from(
-                &cache_dir,
-                ExecutorBuilder::<EthEvmNetwork>::new(),
-            )
-            .unwrap(),
+            ChiselSession::<EthEvmNetwork>::load_from("legacy", &cache_dir).unwrap(),
+            ChiselSession::<EthEvmNetwork>::latest_from(&cache_dir).unwrap(),
         ] {
             let config = &loaded.source.config;
             assert!(config.fork_url_required);

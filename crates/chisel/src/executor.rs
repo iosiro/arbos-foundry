@@ -3,6 +3,7 @@
 //! This module contains the execution logic for the [SessionSource].
 
 use crate::{
+    evm::ChiselEvmNetwork,
     prelude::{ChiselDispatcher, ChiselResult, ChiselRunner, SessionSource, SolidityHelper},
     source::CachedBackend,
 };
@@ -13,7 +14,7 @@ use eyre::{Result, WrapErr};
 use foundry_compilers::Artifact;
 use foundry_evm::{
     backend::Backend,
-    core::evm::{BlockEnvFor, FoundryEvmNetwork, SpecFor, TxEnvFor},
+    core::evm::{BlockEnvFor, SpecFor, TxEnvFor},
     decode::decode_console_logs,
     inspectors::CheatsConfig,
     opts::{ExecutionSpecContext, resolve_execution_spec},
@@ -100,7 +101,7 @@ fn yul_inspection(input: &str, session_source: &str) -> Option<YulInspection> {
 }
 
 /// Executor implementation for [SessionSource]
-impl<FEN: FoundryEvmNetwork> SessionSource<FEN> {
+impl<FEN: ChiselEvmNetwork> SessionSource<FEN> {
     /// Runs the source with the [ChiselRunner]
     pub async fn execute(&mut self) -> Result<ChiselResult> {
         eyre::ensure!(
@@ -364,7 +365,7 @@ impl<FEN: FoundryEvmNetwork> SessionSource<FEN> {
             })
             .gas_limit(self.config.evm_opts.gas_limit())
             .legacy_assertions(self.config.foundry_config.legacy_assertions)
-            .build(evm_env, tx_env, backend, self.config.evm_opts.networks);
+            .try_build(evm_env, tx_env, backend, self.config.evm_opts.networks)?;
 
         Ok(ChiselRunner::new(executor, U256::MAX, Address::ZERO, self.config.calldata.clone()))
     }
@@ -663,13 +664,16 @@ mod tests {
     use crate::source::SessionSourceConfig;
     use foundry_compilers::{error::SolcError, solc::Solc};
     use foundry_config::Config;
-    use foundry_evm::{core::evm::EthEvmNetwork, executors::ExecutorBuilder, opts::EvmOpts};
+    use foundry_evm::{core::evm::EthEvmNetwork, opts::EvmOpts};
     use foundry_evm_networks::{NetworkConfigs, celo::transfer::CELO_TRANSFER_ADDRESS};
     use solar::sema::Compiler;
     use std::sync::Mutex;
 
     #[cfg(feature = "monad")]
-    use foundry_evm::core::{constants::MONAD_CHEATCODE_ADDRESS, evm::MonadEvmNetwork};
+    use foundry_evm::{
+        core::{constants::MONAD_CHEATCODE_ADDRESS, evm::MonadEvmNetwork},
+        executors::ExecutorBuilder,
+    };
 
     type TestSessionSource = SessionSource<EthEvmNetwork>;
 

@@ -982,6 +982,7 @@ Installing forge-std in [..] (url: https://github.com/foundry-rs/forge-std, tag:
 // checks that `forge init --network tempo` works.
 #[forgetest]
 fn can_init_tempo_project(prj: _, cmd: _) {
+    cmd.set_network(None);
     prj.wipe();
 
     cmd.args(["init", "--network", "tempo"])
@@ -1038,6 +1039,7 @@ Installing tempo-std in [..] (url: https://github.com/tempoxyz/tempo-std, tag: N
 // checks that `forge init --network tempo` correctly setup network key in config
 #[forgetest]
 fn can_execute_test_and_script_with_default_tempo_config(prj: _, cmd: _) {
+    cmd.set_network(None);
     prj.wipe();
 
     // Initialize a Tempo project.
@@ -3377,7 +3379,7 @@ Ran 1 test suite [ELAPSED]: 1 tests passed, 0 failed, 0 skipped (1 total tests)
   {
     "contract": "test/FallbackWithCalldataTest.sol:CounterWithFallback",
     "deployment": {
-      "gas": 132471,
+      "gas": 132459,
       "size": 396
     },
     "functions": {

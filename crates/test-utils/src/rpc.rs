@@ -95,15 +95,6 @@ shuffled_list!(
     ],
 );
 
-// List of general purpose DRPC keys to rotate through
-shuffled_list!(
-    DRPC_KEYS,
-    vec![
-        "Agc9NK9-6UzYh-vQDDM80Tv0A5UnBkUR8I3qssvAG40d",
-        "AjUPUPonSEInt2CZ_7A-ai3hMyxxBlsR8I4EssvAG40d",
-    ],
-);
-
 // List of etherscan keys.
 shuffled_list!(
     ETHERSCAN_KEYS,
@@ -195,8 +186,21 @@ pub fn next_ws_archive_rpc_url() -> String {
     next_archive_url(true)
 }
 
+/// Returns an Arbitrum URL that has access to archive state.
+pub fn arbitrum_archive_rpc_url() -> String {
+    ["ARBITRUM_ARCHIVE_RPC", "ARBITRUM_RPC"]
+        .into_iter()
+        .find_map(|name| env::var(name).ok().filter(|url| !url.is_empty()))
+        .unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string())
+}
+
 /// Returns a URL that has access to archive state.
 fn next_archive_url(is_ws: bool) -> String {
+    let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+    if let Some(url) = env_rpc_url(env_var) {
+        test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
+        return url;
+    }
     let domain = if is_ws { &WS_ARCHIVE_DOMAINS } else { &HTTP_ARCHIVE_DOMAINS }.next();
     let url = if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     test_debug!("next_archive_url(is_ws={is_ws}) = {}", debug_url(&url));
@@ -261,22 +265,31 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
     }
 
     if matches!(chain, Arbitrum) {
-        return env_rpc_url("ARBITRUM_RPC").unwrap_or_else(|| (*ARBITRUM_URLS.next()).to_string());
+        return arbitrum_archive_rpc_url();
+    }
+
+    if matches!(chain, Mainnet) {
+        let env_var = if is_ws { "WS_ARCHIVE_URLS" } else { "HTTP_ARCHIVE_URLS" };
+        if let Some(url) = env_rpc_url(env_var) {
+            return url;
+        }
+    }
+
+    let publicnode_domain = match chain {
+        Sepolia => Some("ethereum-sepolia-rpc.publicnode.com"),
+        Polygon => Some("polygon-bor-rpc.publicnode.com"),
+        NamedChain::BinanceSmartChain => Some("bsc-rpc.publicnode.com"),
+        _ => None,
+    };
+    if let Some(domain) = publicnode_domain {
+        return if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") };
     }
 
     let reth_works = true;
     let domain = if reth_works && matches!(chain, Mainnet) {
         *(if is_ws { &WS_DOMAINS } else { &HTTP_DOMAINS }).next()
     } else {
-        // DRPC for other networks used in tests.
-        let key = DRPC_KEYS.next();
-        let network = match chain {
-            Mainnet => "ethereum",
-            Polygon => "polygon",
-            Sepolia => "sepolia",
-            _ => "",
-        };
-        &format!("lb.drpc.org/ogrpc?network={network}&dkey={key}")
+        panic!("no test RPC endpoint configured for {chain:?}")
     };
 
     if is_ws { format!("wss://{domain}") } else { format!("https://{domain}") }
@@ -284,7 +297,9 @@ fn next_url_inner(is_ws: bool, chain: NamedChain) -> String {
 
 /// Returns the RPC URL configured in the `var` environment variable, if it is set and non-empty.
 fn env_rpc_url(var: &str) -> Option<String> {
-    env::var(var).ok().filter(|url| !url.is_empty())
+    env::var(var).ok().and_then(|urls| {
+        urls.split(',').find(|url| !url.trim().is_empty()).map(str::trim).map(str::to_owned)
+    })
 }
 
 /// Basic redaction for debugging RPC URLs.
@@ -425,6 +440,49 @@ pub async fn spawn_rpc_proxy_internal_error_after(
         "internal error",
     )
     .await
+}
+
+/// Spawns an RPC proxy with an independently controlled Arbitrum L1 block number.
+///
+/// RPC block numbers, hashes, parent hashes, and state remain unchanged. Both single and batched
+/// block responses are rewritten so fork discovery and ancestry use the same L1/L2 separation.
+pub async fn spawn_rpc_proxy_with_l1_block_number(endpoint: String, l1_number: u64) -> String {
+    let client = reqwest::Client::new();
+    let router = Router::new().route(
+        "/",
+        post(move |Json(request): Json<Value>| {
+            let client = client.clone();
+            let endpoint = endpoint.clone();
+            async move {
+                let mut response = client
+                    .post(endpoint)
+                    .json(&request)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json::<Value>()
+                    .await
+                    .unwrap();
+                let responses = match &mut response {
+                    Value::Array(items) => items.as_mut_slice(),
+                    single => std::slice::from_mut(single),
+                };
+                for response in responses {
+                    if let Some(block) = response.get_mut("result").and_then(Value::as_object_mut)
+                        && block.contains_key("number")
+                        && block.contains_key("transactions")
+                    {
+                        block.insert("l1BlockNumber".into(), json!(format!("{l1_number:#x}")));
+                    }
+                }
+                Json(response)
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    format!("http://{address}")
 }
 
 /// Spawns an RPC proxy that answers `method` with `result` instead of forwarding it upstream.

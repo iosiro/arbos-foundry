@@ -17,11 +17,8 @@ use alloy_primitives::{
 use alloy_sol_types::{SolCall, sol};
 use eyre::WrapErr;
 use foundry_evm_core::{
-    EvmEnv, FoundryBlock, FoundryChain, FoundryTransaction,
-    backend::{
-        Backend, BackendError, BackendResult, CowBackend, DatabaseError, DatabaseExt,
-        GLOBAL_FAIL_SLOT,
-    },
+    EvmEnv, FoundryBlock, FoundryChain, FoundryContextExt, FoundryTransaction,
+    backend::{Backend, BackendResult, CowBackend, DatabaseError, DatabaseExt, GLOBAL_FAIL_SLOT},
     constants::{
         CALLER, CHEATCODE_ADDRESS, CHEATCODE_CONTRACT_HASH, DEFAULT_CREATE2_DEPLOYER,
         DEFAULT_CREATE2_DEPLOYER_CODE, DEFAULT_CREATE2_DEPLOYER_DEPLOYER,
@@ -293,6 +290,7 @@ impl Executor<MonadEvmNetwork> {
 impl<FEN: FoundryEvmNetwork> Executor<FEN> {
     /// Creates a new `Executor` with the given arguments.
     #[inline]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mut backend: Backend<FEN>,
         evm_env: EvmEnvFor<FEN>,
@@ -301,9 +299,11 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         networks: NetworkConfigs,
         gas_limit: u64,
         legacy_assertions: bool,
+        factory: FEN::EvmFactory,
     ) -> Self {
         inspector.networks(networks);
         backend.set_networks(networks);
+        backend.set_evm_factory(factory);
         let extra_cheatcode_addresses = inspector.extra_cheatcode_addresses();
         backend.extend_persistent_accounts(extra_cheatcode_addresses.iter().copied());
 
@@ -358,6 +358,14 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
             gas_limit,
             legacy_assertions,
         }
+    }
+
+    /// Applies resolved execution settings while preserving the existing backend state.
+    pub fn set_evm_factory(&mut self, factory: FEN::EvmFactory) -> eyre::Result<()> {
+        let env = self.evm_env.clone();
+        factory.initialize_backend(self.backend_mut(), &env)?;
+        self.backend_mut().set_evm_factory(factory);
+        Ok(())
     }
 
     fn clone_with_backend(&self, backend: Backend<FEN>) -> Self {
@@ -460,10 +468,8 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
     /// Creates the default CREATE2 Contract Deployer for local tests and scripts.
     pub fn deploy_create2_deployer(&mut self) -> eyre::Result<()> {
         trace!("deploying local create2 deployer");
-        let create2_deployer_account = self
-            .backend()
-            .basic_ref(DEFAULT_CREATE2_DEPLOYER)?
-            .ok_or_else(|| BackendError::MissingAccount(DEFAULT_CREATE2_DEPLOYER))?;
+        let create2_deployer_account =
+            self.backend().basic_ref(DEFAULT_CREATE2_DEPLOYER)?.unwrap_or_default();
 
         // If the deployer is not currently deployed, deploy the default one.
         if create2_deployer_account.code.is_none_or(|code| code.is_empty()) {
@@ -816,7 +822,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         let inspector = self.inspector().clone();
         let mut state = {
             let mut backend = CowBackend::new_borrowed(self.backend());
-            let mut evm = FEN::EvmFactory::default().create_foundry_evm_with_inspector(
+            let mut evm = backend.evm_factory().create_foundry_evm_with_inspector(
                 &mut backend,
                 evm_env.clone(),
                 inspector,
@@ -934,6 +940,43 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         Ok(result)
     }
 
+    /// Commits a block's prefix and returns its updated context for the target transaction.
+    ///
+    /// Keep one EVM alive so block-local pricing state survives between transactions.
+    pub fn replay_ordinary_block_prefix(
+        &mut self,
+        evm_env: EvmEnvFor<FEN>,
+        replay: Vec<(B256, TxEnvFor<FEN>)>,
+        chain_context: ChainFor<FEN>,
+    ) -> eyre::Result<ChainFor<FEN>> {
+        if replay.is_empty() {
+            return Ok(chain_context);
+        }
+        let block_number = evm_env.block_env.number();
+        let mut stack = self.inspector().clone();
+        let backend = self.backend_mut();
+        let mut evm =
+            backend.evm_factory().create_foundry_evm_with_inspector(backend, evm_env, &mut stack);
+        evm.set_chain_context(chain_context);
+        evm.disable_inspector();
+        for (tx_hash, tx_env) in replay {
+            let created = match tx_env.kind() {
+                TxKind::Create => Some(tx_env.caller().create(tx_env.nonce())),
+                TxKind::Call(_) => None,
+            };
+            let result = evm.transact(tx_env).wrap_err_with(|| {
+                format!("Failed to execute transaction: {tx_hash:?} in block {block_number}")
+            })?;
+            if result.result.is_success()
+                && let Some(address) = created
+            {
+                evm.db_mut().add_persistent_account(address);
+            }
+            evm.db_mut().commit(result.state);
+        }
+        Ok(evm.chain().clone())
+    }
+
     /// Replays ordinary transactions and executes the target against one EVM instance.
     #[instrument(name = "transact_block_replay", level = "debug", skip_all)]
     pub fn transact_with_ordinary_block_replay(
@@ -941,6 +984,7 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
         mut evm_env: EvmEnvFor<FEN>,
         target_tx_env: TxEnvFor<FEN>,
         replay: Vec<(B256, TxEnvFor<FEN>)>,
+        target_chain_context: ChainFor<FEN>,
     ) -> eyre::Result<RawCallResult<FEN>> {
         // EIP-8130 requires phase-aware execution and has no ordinary call/create kind.
         // Check the entire prefix before executing anything or accessing ordinary tx fields.
@@ -971,13 +1015,13 @@ impl<FEN: FoundryEvmNetwork> Executor<FEN> {
                 TxKind::Create => caller.create(target_tx_env.nonce()),
             };
             backend.set_test_contract(target_contract);
-            let target_chain_context = ChainFor::<FEN>::for_transaction(&target_tx_env);
             if !replay.is_empty() {
                 evm_env.cfg_env.disable_balance_check = true;
             }
-            let mut evm = FEN::EvmFactory::default()
+            let mut evm = backend
+                .evm_factory()
                 .create_foundry_evm_with_inspector(backend, evm_env, &mut stack);
-            *evm.chain_mut() = target_chain_context;
+            evm.set_chain_context(target_chain_context);
             evm.disable_inspector();
             for (tx_hash, tx_env) in replay {
                 let created = match tx_env.kind() {
@@ -1938,12 +1982,18 @@ pub fn should_ignore_revert(
 mod tests {
     use super::*;
     use crate::inspectors::{EdgeCovHit, EdgeKey};
+    use arbos_revm::chain::ArbitrumChainTr;
     use foundry_cheatcodes::{
         CheatsConfig,
         Vm::{blobhashesCall, mockCallRevert_1Call, revertToStateCall, snapshotStateCall},
     };
     use foundry_config::Config;
-    use foundry_evm_core::{constants::MAGIC_SKIP, evm::TempoEvmNetwork, opts::EvmOpts};
+    use foundry_evm_core::{
+        FromAnyRpcTransaction,
+        constants::MAGIC_SKIP,
+        evm::{ArbitrumEvmNetwork, TempoEvmNetwork},
+        opts::EvmOpts,
+    };
     use foundry_evm_traces::InternalTraceMode;
     use revm::context::{CfgEnv, TxEnv};
     use std::{sync::mpsc, thread};
@@ -2152,11 +2202,91 @@ mod tests {
                     EvmEnvFor::<BaseEvmNetwork>::default(),
                     target,
                     prefix,
+                    Default::default(),
                 )
                 .unwrap_err();
             assert_eq!(error.to_string(), expected);
             assert_eq!(executor.get_nonce(Address::ZERO).unwrap(), 0);
         }
+    }
+
+    #[test]
+    fn block_prefix_retains_arbitrum_cache_and_gas_context() {
+        let mut env = EvmEnvFor::<ArbitrumEvmNetwork>::default();
+        env.cfg_env.chain_id = 421_614;
+        env.block_env.number = U256::from(999);
+        env.block_env.basefee = 0;
+        let mut executor =
+            ExecutorBuilder::<ArbitrumEvmNetwork>::default().gas_limit(1 << 20).build(
+                env.clone(),
+                TxEnvFor::<ArbitrumEvmNetwork>::default(),
+                Backend::spawn(None).unwrap(),
+                NetworkConfigs::with_arbitrum(),
+            );
+        executor.set_balance(CALLER, U256::MAX).unwrap();
+        let tx = TxEnvFor::<ArbitrumEvmNetwork>::from(TxEnv {
+            caller: CALLER,
+            kind: TxKind::Call(Address::repeat_byte(0x11)),
+            gas_limit: 100_000,
+            chain_id: Some(421_614),
+            ..Default::default()
+        });
+        let parent = B256::repeat_byte(0x42);
+        let wasm = B256::repeat_byte(0x55);
+        let mut context = ChainFor::<ArbitrumEvmNetwork>::for_rpc_block(&tx, 1, parent);
+        assert!(!context.insert_recent_wasm(wasm, 32, 1));
+        let mut context =
+            executor.replay_ordinary_block_prefix(env, vec![(B256::ZERO, tx)], context).unwrap();
+        assert_eq!(context.rpc_block_number(), Some(1));
+        assert_eq!(context.rpc_parent_block_hash(), Some(parent));
+        assert!(context.block_gas_used() > 0);
+        assert!(context.insert_recent_wasm(wasm, 32, 1));
+    }
+
+    #[test]
+    fn block_replay_preserves_arbitrum_rpc_context_through_inspected_target() {
+        let backend = Backend::<ArbitrumEvmNetwork>::spawn(None).unwrap();
+        let mut env = EvmEnvFor::<ArbitrumEvmNetwork>::default();
+        env.cfg_env.chain_id = 421_614;
+        env.block_env.number = U256::from(999);
+        env.block_env.basefee = 0;
+        let mut executor =
+            ExecutorBuilder::<ArbitrumEvmNetwork>::default().gas_limit(1 << 20).build(
+                env.clone(),
+                TxEnvFor::<ArbitrumEvmNetwork>::default(),
+                backend,
+                NetworkConfigs::with_arbitrum(),
+            );
+        executor.set_balance(CALLER, U256::MAX).unwrap();
+        executor.set_trace_requirements(TraceRequirements::none().with_calls(true));
+        let vectors: Vec<alloy_network::AnyRpcTransaction> = serde_json::from_str(include_str!(
+            "../../../core/testdata/arbitrum-native-transactions.json"
+        ))
+        .unwrap();
+        let prefix = TxEnvFor::<ArbitrumEvmNetwork>::from_any_rpc_transaction(&vectors[1]).unwrap();
+        let target = TxEnvFor::<ArbitrumEvmNetwork>::from(TxEnv {
+            caller: CALLER,
+            kind: TxKind::Call(alloy_primitives::address!(
+                "0000F90827F1C53a10cb7A02335B175320002935"
+            )),
+            data: Bytes::from(U256::ZERO.to_be_bytes::<32>()),
+            gas_limit: 100_000,
+            chain_id: Some(421_614),
+            ..Default::default()
+        });
+        let parent_hash = B256::repeat_byte(0x42);
+        let chain_context = ChainFor::<ArbitrumEvmNetwork>::for_rpc_block(&target, 1, parent_hash);
+        let result = executor
+            .transact_with_ordinary_block_replay(
+                env,
+                target,
+                vec![(B256::ZERO, prefix)],
+                chain_context,
+            )
+            .unwrap();
+        assert!(!result.reverted);
+        assert_eq!(result.result, Bytes::copy_from_slice(parent_hash.as_slice()));
+        assert!(!result.traces.unwrap().arena.nodes().is_empty());
     }
 
     #[test]
@@ -2201,6 +2331,7 @@ mod tests {
                 EvmEnv::default(),
                 target,
                 vec![(B256::repeat_byte(1), prefix), (B256::repeat_byte(2), reverted_create)],
+                (),
             )
             .unwrap();
 
@@ -2241,6 +2372,7 @@ mod tests {
                 EvmEnv::default(),
                 target,
                 vec![(B256::repeat_byte(1), prefix)],
+                (),
             )
             .unwrap();
 
@@ -2277,6 +2409,7 @@ mod tests {
                 EvmEnv::default(),
                 target,
                 vec![(B256::repeat_byte(1), prefix)],
+                (),
             )
             .unwrap();
 

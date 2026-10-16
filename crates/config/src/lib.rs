@@ -8,7 +8,7 @@
 #[macro_use]
 extern crate tracing;
 
-use crate::{cache::StorageCachingConfig, etherscan::EtherscanEnvProvider};
+use crate::{cache::StorageCachingConfig, etherscan::EtherscanEnvProvider, stylus::StylusConfig};
 use alloy_primitives::{Address, B256, FixedBytes, U256, address, map::AddressHashMap};
 use eyre::{ContextCompat, WrapErr};
 use figment::{
@@ -150,6 +150,7 @@ mod compilation;
 pub use compilation::{CompilationRestrictions, SettingsOverrides};
 
 mod external_compiler;
+pub mod stylus;
 pub use external_compiler::ExternalCompiler;
 
 pub mod extend;
@@ -630,7 +631,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_args: Vec<String>,
 
-    /// Networks with enabled features.
+    /// Execution network. Loaded configurations default to Arbitrum; use `network = "ethereum"`
+    /// to opt into Ethereum execution.
     #[serde(flatten)]
     pub networks: NetworkConfigs,
 
@@ -651,6 +653,10 @@ pub struct Config {
 
     /// Whether to enable script execution protection.
     pub script_execution_protection: bool,
+
+    /// ArbOS and Stylus execution settings for local Arbitrum backends.
+    #[serde(default, skip_serializing_if = "StylusConfig::is_default")]
+    pub stylus: StylusConfig,
 
     /// PRIVATE: This structure may grow, As such, constructing this structure should
     /// _always_ be done using a public constructor or update syntax:
@@ -995,8 +1001,10 @@ impl Config {
 
     fn normalize_hardfork_settings(&mut self) -> Result<(), Error> {
         self.networks.validate().map_err(Error::from)?;
-        let Some(hardfork) = self.hardfork else { return Ok(()) };
-        self.networks = self.networks.normalize_for_hardfork(hardfork).map_err(Error::from)?;
+        if let Some(hardfork) = self.hardfork {
+            self.networks = self.networks.normalize_for_hardfork(hardfork).map_err(Error::from)?;
+        }
+        self.networks = self.networks.with_default_arbitrum();
         Ok(())
     }
 
@@ -2518,20 +2526,34 @@ impl Config {
     /// Returns warnings for any non-fatal deletion failures.
     pub fn clean_foundry_block_cache(chain: Chain, block: u64) -> eyre::Result<Vec<String>> {
         if let Some(cache_dir) = Self::foundry_block_cache_dir(chain, block) {
-            let path = cache_dir.as_path();
-            if let Err(err) = fs::remove_dir_all(path)
+            Ok(Self::remove_block_cache(&cache_dir)
+                .into_iter()
+                .map(|(path, err)| {
+                    format!(
+                        "failed to remove foundry cache for chain {chain} block {block} at {}: {err}",
+                        path.display()
+                    )
+                })
+                .collect())
+        } else {
+            eyre::bail!("failed to get foundry_block_cache_dir")
+        }
+    }
+
+    /// Removes both the canonical block cache and its legacy-file compatibility directory.
+    fn remove_block_cache(cache_dir: &Path) -> Vec<(PathBuf, io::Error)> {
+        let mut failures = Vec::new();
+        for path in [cache_dir.to_path_buf(), cache_dir.with_extension("cache")] {
+            let result = fs::symlink_metadata(&path).and_then(|metadata| {
+                if metadata.is_dir() { fs::remove_dir_all(&path) } else { fs::remove_file(&path) }
+            });
+            if let Err(err) = result
                 && err.kind() != io::ErrorKind::NotFound
             {
-                return Ok(vec![format!(
-                    "failed to remove foundry cache for chain {chain} block {block} at {}: {err}",
-                    path.display()
-                )]);
+                failures.push((path, err));
             }
-        } else {
-            eyre::bail!("failed to get foundry_block_cache_dir");
         }
-
-        Ok(vec![])
+        failures
     }
 
     /// Clears the foundry etherscan cache.
@@ -2677,6 +2699,7 @@ impl Config {
         };
         let cache_file_name = cache_file.file_name();
         let cache_file_name = cache_file_name.to_string_lossy();
+        let cache_file_name = cache_file_name.strip_prefix("rpc-").unwrap_or(&cache_file_name);
         if !metadata.is_file()
             || (cache_file_name != "storage.json"
                 && !cache_file_name
@@ -3147,6 +3170,7 @@ impl Default for Config {
             additional_compiler_profiles: Default::default(),
             compilation_restrictions: Default::default(),
             script_execution_protection: true,
+            stylus: Default::default(),
             _non_exhaustive: (),
         }
     }
@@ -3650,7 +3674,13 @@ mod tests {
             let roundtrip = Figment::from(Config::from_provider(&original).unwrap());
             for figment in &[original, roundtrip] {
                 let config = Config::from_provider(figment).unwrap();
-                assert_eq!(config, Config::default().normalized_optimizer_settings());
+                assert_eq!(
+                    config,
+                    Config {
+                        networks: NetworkConfigs::with_arbitrum(),
+                        ..Config::default().normalized_optimizer_settings()
+                    }
+                );
             }
             Ok(())
         });
@@ -3949,6 +3979,7 @@ mod tests {
                 config,
                 Config {
                     gas_limit: gas.into(),
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4686,6 +4717,7 @@ mod tests {
                     ]),
                     build_info_path: Some("build-info".into()),
                     always_use_create_2_factory: true,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4924,6 +4956,7 @@ mod tests {
                     eth_rpc_url: Some("https://example.com/".to_string()),
                     auto_detect_solc: false,
                     evm_version: EvmVersion::Berlin,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4976,6 +5009,7 @@ mod tests {
                     src: "mysrc".into(),
                     out: "myout".into(),
                     verbosity: 3,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -4988,6 +5022,7 @@ mod tests {
                     src: "other-src".into(),
                     out: "myout".into(),
                     verbosity: 3,
+                    networks: NetworkConfigs::with_arbitrum(),
                     ..Config::default().normalized_optimizer_settings()
                 }
             );
@@ -5028,7 +5063,7 @@ mod tests {
                     out: "myout".into(),
                     libs: default.libs.clone(),
                     remappings: default.remappings.clone(),
-                    network: None,
+                    network: Some("arbitrum".into()),
                 }
             );
             jail.set_env("FOUNDRY_PROFILE", r"other");
@@ -5347,7 +5382,10 @@ mod tests {
     #[test]
     fn config_roundtrip() {
         figment::Jail::expect_with(|jail| {
-            let default = Config::default().normalized_optimizer_settings();
+            let default = Config {
+                networks: NetworkConfigs::with_arbitrum(),
+                ..Config::default().normalized_optimizer_settings()
+            };
             let basic = default.clone().into_basic();
             jail.create_file("foundry.toml", &basic.to_string_pretty().unwrap())?;
 
@@ -6296,6 +6334,50 @@ mod tests {
     }
 
     #[test]
+    fn fork_cache_clean_removes_both_block_layouts() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let unrelated = chain_dir.path().join("99");
+        fs::write(&unrelated, b"keep")?;
+        for legacy in [false, true] {
+            let block = chain_dir.path().join(if legacy { "42" } else { "43" });
+            if legacy {
+                fs::write(&block, b"legacy cache")?;
+            } else {
+                fs::create_dir(&block)?;
+                fs::write(block.join("storage.json"), b"evm cache")?;
+                fs::write(block.join("rpc-storage.json"), b"rpc cache")?;
+            }
+            let compatibility_dir = block.with_extension("cache");
+            fs::create_dir(&compatibility_dir)?;
+            fs::write(compatibility_dir.join("rpc-storage.json"), b"new cache")?;
+
+            assert!(Config::remove_block_cache(&block).is_empty());
+            assert!(!block.try_exists()?);
+            assert!(!compatibility_dir.try_exists()?);
+            assert!(Config::remove_block_cache(&block).is_empty());
+            assert_eq!(fs::read(&unrelated)?, b"keep");
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fork_cache_clean_does_not_follow_symlinks() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        let target = tempdir()?;
+        let block = chain_dir.path().join("42");
+        fs::write(target.path().join("storage.json"), b"keep")?;
+        std::os::unix::fs::symlink(target.path(), &block)?;
+        std::os::unix::fs::symlink(target.path(), block.with_extension("cache"))?;
+
+        assert!(Config::remove_block_cache(&block).is_empty());
+        assert!(fs::symlink_metadata(&block).is_err());
+        assert!(fs::symlink_metadata(block.with_extension("cache")).is_err());
+        assert_eq!(fs::read(target.path().join("storage.json"))?, b"keep");
+        Ok(())
+    }
+
+    #[test]
     fn list_cached_blocks() -> eyre::Result<()> {
         fn fake_block_cache(chain_path: &Path, block_number: &str, size_bytes: usize) {
             let block_path = chain_path.join(block_number);
@@ -6358,6 +6440,23 @@ mod tests {
         assert_eq!(block3.1, 900);
 
         chain_dir.close()?;
+        Ok(())
+    }
+
+    #[test]
+    fn fork_cache_listing_includes_hash_domains() -> eyre::Result<()> {
+        let chain_dir = tempdir()?;
+        for directory in ["42", "43.cache"] {
+            let block = chain_dir.path().join(directory);
+            fs::create_dir(&block)?;
+            fs::write(block.join("storage.json"), [0; 10])?;
+            fs::write(block.join("rpc-storage.json"), [0; 20])?;
+            fs::write(block.join(format!("rpc-storage-{}.json", "0".repeat(64))), [0; 30])?;
+            fs::write(block.join("rpc-storage-backup.json"), [0; 100])?;
+        }
+        let mut blocks = Config::get_cached_blocks(chain_dir.path())?;
+        blocks.sort();
+        assert_eq!(blocks, vec![("42".to_string(), 60), ("43.cache".to_string(), 60)]);
         Ok(())
     }
 
@@ -8484,6 +8583,107 @@ mod tests {
             assert!(cfg.warnings.iter().any(
                 |w| matches!(w, crate::Warning::UnknownKey { key, .. } if key == "unknown_key_xyz")
             ));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn stylus_config_keys_parse_without_unknown_key_warnings() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                "foundry.toml",
+                r#"
+                [profile.default.stylus]
+                arbos_version = 61
+                stylus_version = 3
+                ink_price = 24680
+                max_stack_depth = 32768
+                free_pages = 2
+                page_gas = 1000
+                page_ramp = 620674314
+                page_limit = 128
+                max_fragment_count = 4
+                min_init_gas = 72
+                min_cached_init_gas = 11
+                init_cost_scalar = 2
+                cached_cost_scalar = 2
+                expiry_days = 365
+                keepalive_days = 31
+                block_cache_size = 32
+                max_wasm_size = 131072
+                disable_auto_cache_stylus = true
+                disable_auto_activate_stylus = true
+                debug_mode_stylus = true
+                deployer_address = "0x0000000000000000000000000000000000001234"
+                disable_stylus_deployment = true
+
+                [profile.custom.stylus]
+                ink_price = 13579
+                "#,
+            )?;
+
+            let cfg = Config::load().unwrap();
+            assert!(cfg.warnings.is_empty(), "unexpected warnings: {:?}", cfg.warnings);
+            assert_eq!(cfg.stylus.ink_price, Some(24_680));
+            assert_eq!(cfg.stylus.max_fragment_count, Some(4));
+            assert!(cfg.stylus.debug_mode_stylus);
+            assert!(cfg.stylus.disable_stylus_deployment);
+            assert_eq!(
+                serde_json::from_value::<StylusConfig>(serde_json::to_value(&cfg.stylus).unwrap())
+                    .unwrap(),
+                cfg.stylus
+            );
+
+            jail.set_env("FOUNDRY_PROFILE", "custom");
+            let custom = Config::load().unwrap();
+            assert!(custom.warnings.is_empty(), "unexpected warnings: {:?}", custom.warnings);
+            assert_eq!(custom.stylus.ink_price, Some(13_579));
+            assert_eq!(custom.stylus.max_fragment_count, Some(4));
+            assert!(custom.stylus.debug_mode_stylus);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn stylus_config_warns_on_unknown_nested_keys() {
+        figment::Jail::expect_with(|jail| {
+            jail.create_file(
+                "foundry.toml",
+                r#"
+                [profile.default.stylus]
+                ink_price = 24680
+                ink_prcie = 13579
+                "#,
+            )?;
+
+            let cfg = Config::load().unwrap();
+            assert_eq!(cfg.stylus.ink_price, Some(24_680));
+            assert_eq!(cfg.warnings.len(), 1, "unexpected warnings: {:?}", cfg.warnings);
+            assert!(matches!(
+                &cfg.warnings[0],
+                Warning::UnknownSectionKey { key, section, .. }
+                    if key == "ink_prcie" && section == "stylus"
+            ));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn execution_network_defaults_to_arbitrum() {
+        figment::Jail::expect_with(|jail| {
+            let config = Config::load().unwrap();
+            assert!(config.networks.is_arbitrum());
+            assert_eq!(serde_json::to_value(&config).unwrap()["network"], "arbitrum");
+
+            jail.create_file(
+                "foundry.toml",
+                "[profile.default]\nnetwork = 'ethereum'\n[profile.arbitrum]\nnetwork = 'arbitrum'\n",
+            )?;
+            assert_eq!(Config::load().unwrap().networks, NetworkConfigs::with_ethereum());
+            jail.set_env("FOUNDRY_PROFILE", "arbitrum");
+            assert!(Config::load().unwrap().networks.is_arbitrum());
+            jail.set_env("FOUNDRY_NETWORK", "ethereum");
+            assert_eq!(Config::load().unwrap().networks, NetworkConfigs::with_ethereum());
             Ok(())
         });
     }

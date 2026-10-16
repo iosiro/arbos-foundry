@@ -11,7 +11,7 @@ use anvil_server::ServerConfig;
 use clap::Parser;
 use core::fmt;
 use foundry_common::shell;
-use foundry_config::{Chain, Config, FigmentProviders};
+use foundry_config::{Chain, Config, FigmentProviders, stylus::StylusConfig};
 use foundry_evm::hardfork::FoundryHardfork;
 use foundry_evm_networks::NetworkConfigs;
 use foundry_primitives::FoundryReceiptEnvelope;
@@ -288,7 +288,8 @@ impl NodeArgs {
             networks.normalize_for_hardfork(hardfork).map_err(eyre::Report::msg)?
         } else {
             networks
-        };
+        }
+        .with_default_arbitrum();
 
         let config = NodeConfig::default()
             .with_gas_limit(self.evm.gas_limit)
@@ -355,6 +356,7 @@ impl NodeArgs {
             .with_slots_in_an_epoch(self.slots_in_an_epoch)
             .with_memory_limit(self.evm.memory_limit)
             .with_cache_path(self.cache_path)
+            .with_stylus_config(self.evm.stylus)
             .with_funded_accounts(funded_accounts);
         #[cfg(feature = "base")]
         let config = config.with_base_activation_admin(base_activation_admin);
@@ -737,6 +739,10 @@ pub struct AnvilEvmArgs {
 
     #[command(flatten)]
     pub networks: NetworkConfigs,
+
+    /// Stylus configuration options.
+    #[command(flatten)]
+    pub stylus: StylusConfig,
 }
 
 /// Resolves an alias passed as fork-url to the matching url defined in the rpc_endpoints section
@@ -1070,6 +1076,21 @@ mod tests {
     }
 
     #[test]
+    fn default_execution_network_is_arbitrum() {
+        for args in [
+            vec!["anvil"],
+            vec!["anvil", "--chain-id", "1"],
+            vec!["anvil", "--fork-url", "http://localhost:8545"],
+        ] {
+            let config = NodeArgs::parse_from(args).into_node_config().unwrap();
+            assert!(config.networks.is_arbitrum());
+        }
+        let config =
+            NodeArgs::parse_from(["anvil", "--network", "ethereum"]).into_node_config().unwrap();
+        assert_eq!(config.networks, NetworkConfigs::with_ethereum());
+    }
+
+    #[test]
     fn can_parse_ethereum_hardfork() {
         let args: NodeArgs = NodeArgs::parse_from(["anvil", "--hardfork", "berlin"]);
         let config = args.into_node_config().unwrap();
@@ -1304,7 +1325,7 @@ mod tests {
 
         let config = args.into_node_config().unwrap();
 
-        assert!(!config.networks.has_network_selection());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 1);
     }
 
@@ -1368,11 +1389,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_chain_id_preserves_ethereum_fallback() {
+    fn unknown_chain_id_preserves_arbitrum_default() {
         let args = NodeArgs::parse_from(["anvil", "--chain-id", "98765432"]);
         let config = args.into_node_config().unwrap();
 
-        assert!(!config.networks.has_network_selection());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 98_765_432);
     }
 
@@ -1444,7 +1465,7 @@ mod tests {
         ]);
         let config = args.into_node_config().unwrap();
 
-        assert!(config.networks.resolved_network().is_none());
+        assert!(config.networks.is_arbitrum());
         assert_eq!(config.get_chain_id(), 4217);
     }
 

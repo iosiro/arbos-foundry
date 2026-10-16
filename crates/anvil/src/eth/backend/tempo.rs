@@ -112,14 +112,15 @@ impl PrecompileStorageProvider for AnvilStorageProvider<'_> {
         address: Address,
         f: &mut dyn FnMut(&AccountInfo),
     ) -> Result<(), TempoPrecompileError> {
-        if let Some(info) =
-            self.db.basic_ref(address).map_err(|e| TempoPrecompileError::Fatal(e.to_string()))?
-        {
-            f(&info);
-            Ok(())
-        } else {
-            Err(TempoPrecompileError::Fatal(format!("account '{address}' not found")))
-        }
+        // Match the EVM storage provider: an unloaded account has default fields,
+        // but reading those fields must not create the account in the database.
+        let info = self
+            .db
+            .basic_ref(address)
+            .map_err(|e| TempoPrecompileError::Fatal(e.to_string()))?
+            .unwrap_or_default();
+        f(&info);
+        Ok(())
     }
 
     fn account_code(&mut self, address: Address) -> Result<(B256, Bytecode), TempoPrecompileError> {

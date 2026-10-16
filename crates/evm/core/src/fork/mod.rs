@@ -2,6 +2,12 @@ use super::opts::EvmOpts;
 
 pub mod database;
 
+mod remote_db;
+pub use remote_db::RemoteAccountDB;
+
+mod cache;
+pub use cache::fork_cache_file;
+
 mod multi;
 pub use multi::{ForkId, ForkResult, MultiFork, MultiForkHandler};
 

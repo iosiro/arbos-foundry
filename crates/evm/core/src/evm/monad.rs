@@ -156,8 +156,8 @@ impl<'db, I: FoundryInspectorExt<MonadContext<&'db mut dyn DatabaseExt<MonadEvmF
         &mut self.ctx_mut().chain
     }
 
-    fn precompiles_mut(&mut self) -> &mut alloy_evm::precompiles::PrecompilesMap {
-        &mut self.0.precompiles
+    fn precompiles_mut(&mut self) -> &mut dyn super::FoundryPrecompiles {
+        &mut *self.0.precompiles
     }
 
     fn journal_mut(&mut self) -> &mut Self::Journal {

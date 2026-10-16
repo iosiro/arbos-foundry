@@ -121,7 +121,7 @@ impl ExtTester {
         // Clone the external repository.
         let repo_url = format!("https://github.com/{}/{}.git", self.org, self.name);
         let root = prj.root().to_str().unwrap();
-        clone_remote(&repo_url, root, recursive);
+        clone_remote(&repo_url, root, false);
 
         // Checkout the revision.
         if self.rev.is_empty() {
@@ -135,6 +135,23 @@ impl ExtTester {
             panic!("pin to latest commit: {commit}");
         }
         checkout_revision(root, self.rev, recursive);
+
+        if recursive {
+            // Keep branch refs available for fixtures that exercise dependency updates.
+            let mut git = Command::new("git");
+            git.current_dir(root).args([
+                "submodule",
+                "update",
+                "--init",
+                "--recursive",
+                "--no-single-branch",
+                "--depth",
+                "1",
+            ]);
+            test_debug!("$ {git:?}");
+            let status = git.status().unwrap();
+            assert!(status.success(), "git submodule update failed: {status}");
+        }
 
         // Export fixture-local Python packages, vyper, and forge in the test command.
         let mut new_paths = Vec::new();

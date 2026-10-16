@@ -15,7 +15,6 @@ use alloy_evm::{
         BalIndexedDatabase, BlockExecutionError, BlockExecutionResult, BlockExecutor, StateDB,
         TxResult,
     },
-    precompiles::PrecompilesMap,
 };
 use alloy_network::{BlockResponse, TransactionResponse};
 use alloy_primitives::B256;
@@ -176,7 +175,7 @@ where
     E: Evm<
             DB: StateDB + BalIndexedDatabase,
             Inspector = AnvilInspector,
-            Precompiles = PrecompilesMap,
+            Precompiles: foundry_evm::core::evm::FoundryPrecompiles,
             Tx: FromRecoveredTx<FoundryTxEnvelope> + FromTxWithEncoded<FoundryTxEnvelope>,
         >,
     E::HaltReason: Clone + IntoInstructionResult,
@@ -202,7 +201,7 @@ where
     E: Evm<
             DB: StateDB + BalIndexedDatabase,
             Inspector = AnvilInspector,
-            Precompiles = PrecompilesMap,
+            Precompiles: foundry_evm::core::evm::FoundryPrecompiles,
             Tx: FromRecoveredTx<FoundryTxEnvelope> + FromTxWithEncoded<FoundryTxEnvelope>,
         >,
     E::HaltReason: Clone + IntoInstructionResult,

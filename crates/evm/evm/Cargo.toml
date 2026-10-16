@@ -65,6 +65,10 @@ uuid.workspace = true
 rayon.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+alloy-network.workspace = true
+arbos-revm.workspace = true
+
 [features]
 default = ["optimism"]
 monad = [

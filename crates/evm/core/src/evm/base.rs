@@ -163,7 +163,7 @@ impl<'db, I: FoundryInspectorExt<BaseContext<&'db mut dyn DatabaseExt<BaseEvmFac
         &mut self.ctx_mut().journaled_state
     }
 
-    fn precompiles_mut(&mut self) -> &mut PrecompilesMap {
+    fn precompiles_mut(&mut self) -> &mut dyn super::FoundryPrecompiles {
         Evm::precompiles_mut(self)
     }
 

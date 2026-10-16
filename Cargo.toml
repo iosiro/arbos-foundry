@@ -33,17 +33,18 @@ members = [
     "crates/test-utils/macros/",
     "crates/cli-markdown/",
     "crates/tui/",
+    "vendor/foundry-fork-db/",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.8.5"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.98"
 authors = ["Foundry Contributors"]
 license = "MIT OR Apache-2.0"
 homepage = "https://getfoundry.sh"
-repository = "https://github.com/foundry-rs/foundry"
+repository = "https://github.com/iosiro/arbos-foundry"
 exclude = ["benches/", "tests/", "test-data/", "testdata/"]
 
 [workspace.lints.clippy]
@@ -334,6 +335,9 @@ foundry-test-utils = { path = "crates/test-utils", default-features = false }
 foundry-test-macros = { path = "crates/test-utils/macros" }
 foundry-wallets = { version = "0.1.0", default-features = false }
 foundry-linking = { path = "crates/linking" }
+
+# Arbitrum execution
+arbos-revm = { git = "https://github.com/iosiro/arbos-revm", rev = "3b733b015b05689c0accb613b98432d53889e963", version = "0.3.1", default-features = false, features = ["alloy"] }
 foundry-primitives = { path = "crates/primitives", default-features = false }
 foundry-tui = { path = "crates/tui", default-features = false }
 
@@ -438,6 +442,7 @@ tikv-jemallocator = "0.7"
 auto_impl = "1"
 bytes = "1.11"
 walkdir = "2"
+wat = "1.245.0"
 which = "8"
 wait-timeout = "0.2"
 prettyplease = "0.2"
@@ -581,7 +586,7 @@ solar-lint = { git = "https://github.com/paradigmxyz/solar", rev = "83214bb3a96e
 foundry-wallets = { git = "https://github.com/foundry-rs/foundry-core", rev = "39c03a49ade2f74a6e97e2af308283a42d78d302" }
 foundry-compilers = { git = "https://github.com/foundry-rs/foundry-core", rev = "39c03a49ade2f74a6e97e2af308283a42d78d302" }
 foundry-block-explorers = { git = "https://github.com/foundry-rs/foundry-core", rev = "39c03a49ade2f74a6e97e2af308283a42d78d302" }
-foundry-fork-db = { git = "https://github.com/foundry-rs/foundry-core", rev = "39c03a49ade2f74a6e97e2af308283a42d78d302" }
+foundry-fork-db = { path = "vendor/foundry-fork-db" }
 
 ## alloy-core
 # alloy-dyn-abi = { path = "../../alloy-rs/core/crates/dyn-abi" }

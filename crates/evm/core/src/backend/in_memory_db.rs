@@ -55,7 +55,6 @@ impl Database for MemDb {
     type Error = DatabaseError;
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        // Note: this will always return `Some(AccountInfo)`, See `EmptyDBWrapper`
         Database::basic(&mut self.inner, address)
     }
 
@@ -83,27 +82,17 @@ impl DatabaseCommit for MemDb {
 /// This is just a simple wrapper for `revm::EmptyDB` but implements `DatabaseError` instead, this
 /// way we can unify all different `Database` impls
 ///
-/// This will also _always_ return `Some(AccountInfo)`:
-///
-/// The [`Database`] implementation for `CacheDB` manages an `AccountState` for the
-/// `DbAccount`, this will be set to `AccountState::NotExisting` if the account does not exist yet.
-/// This is because there's a distinction between "non-existing" and "empty",
-/// see <https://github.com/bluealloy/revm/blob/8f4348dc93022cffb3730d9db5d3ab1aad77676a/crates/revm/src/db/in_memory_db.rs#L81-L83>.
-/// If an account is `NotExisting`, `Database::basic_ref` will always return `None` for the
-/// requested `AccountInfo`.
-///
-/// To prevent this, we ensure that a missing account is never marked as `NotExisting` by always
-/// returning `Some` with this type, which will then insert a default [`AccountInfo`] instead
-/// of one marked as `AccountState::NotExisting`.
+/// Missing accounts remain absent. Returning a default account would make Stylus
+/// `account_codehash` confuse a nonexistent account with an existing empty account.
+/// `CacheDB::insert_account_info` clears `NotExisting` when an account is inserted later.
 #[derive(Clone, Debug, Default)]
 pub struct EmptyDBWrapper(EmptyDB);
 
 impl DatabaseRef for EmptyDBWrapper {
     type Error = DatabaseError;
 
-    fn basic_ref(&self, _address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        // Note: this will always return `Some(AccountInfo)`, for the reason explained above
-        Ok(Some(AccountInfo::default()))
+    fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+        Ok(self.0.basic_ref(address)?)
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
@@ -165,7 +154,7 @@ mod tests {
         assert_eq!(loaded.unwrap(), info)
     }
 
-    /// Demonstrates that `Database::basic` for `MemDb` will always return the `AccountInfo`
+    /// Loading a missing account does not prevent inserting it later.
     #[test]
     fn mem_db_insert_basic_default() {
         let mut db = MemDb::default();
@@ -174,10 +163,9 @@ mod tests {
         ));
 
         let info = Database::basic(&mut db, address).unwrap();
-        // We know info exists, as MemDb always returns `Some(AccountInfo)` due to the
-        // `EmptyDbWrapper`.
-        assert!(info.is_some());
-        let mut info = info.unwrap();
+        assert!(info.is_none());
+        assert!(DatabaseRef::basic_ref(&db, address).unwrap().is_none());
+        let mut info = info.unwrap_or_default();
         info.balance = U256::from(500u64);
 
         // insert the modified account info
@@ -186,5 +174,15 @@ mod tests {
         let loaded = Database::basic(&mut db, address).unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap(), info)
+    }
+
+    #[test]
+    fn mem_db_distinguishes_missing_and_existing_empty() {
+        let mut db = MemDb::default();
+        let address = Address::random();
+        assert!(Database::basic(&mut db, address).unwrap().is_none());
+        db.inner.insert_account_info(address, AccountInfo::default());
+        assert_eq!(Database::basic(&mut db, address).unwrap(), Some(AccountInfo::default()));
+        assert_eq!(DatabaseRef::basic_ref(&db, address).unwrap(), Some(AccountInfo::default()));
     }
 }

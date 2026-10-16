@@ -1113,7 +1113,7 @@ async fn can_replay_arbitrum_transaction_with_priority_fee_above_max_fee() {
         value,
         max_priority_fee_per_gas: 3_000_000_000,
         max_fee_per_gas: 2_000_000_000,
-        gas_limit: 21_000,
+        gas_limit: 1_000_000,
         ..Default::default()
     };
     let signature = accounts[0].sign_transaction_sync(&mut tx).unwrap();
@@ -1146,7 +1146,7 @@ async fn can_replay_arbitrum_transaction_with_priority_fee_above_max_fee() {
         to: TxKind::Call(recipient),
         max_priority_fee_per_gas: 3_000_000_000,
         max_fee_per_gas: 2_000_000_000,
-        gas_limit: 21_000,
+        gas_limit: 1_000_000,
         ..Default::default()
     };
     let signature = accounts[0].sign_transaction_sync(&mut tx).unwrap();
@@ -1169,7 +1169,7 @@ async fn can_replay_arbitrum_transaction_with_priority_fee_above_max_fee() {
         value: U256::ONE,
         max_priority_fee_per_gas: 3_000_000_000,
         max_fee_per_gas: 2_000_000_000,
-        gas_limit: 21_000,
+        gas_limit: 1_000_000,
         ..Default::default()
     };
     let signature = accounts[1].sign_transaction_sync(&mut tx).unwrap();

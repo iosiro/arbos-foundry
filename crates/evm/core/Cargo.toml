@@ -44,6 +44,7 @@ alloy-rpc-types = { workspace = true, features = ["anvil"] }
 alloy-sol-types.workspace = true
 alloy-rlp.workspace = true
 foundry-fork-db.workspace = true
+arbos-revm.workspace = true
 
 # Base
 base-common-chains = { workspace = true, optional = true, features = ["std"] }
@@ -105,7 +106,11 @@ tokio = { workspace = true, features = ["time", "macros"] }
 tracing.workspace = true
 url.workspace = true
 
+[build-dependencies]
+wat.workspace = true
+
 [dev-dependencies]
+tempfile.workspace = true
 alloy-serde.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
@@ -141,6 +146,7 @@ base = [
     "foundry-evm-networks/base",
 ]
 optimism = [
+    "anvil/optimism",
     "dep:op-alloy-consensus",
     "dep:op-alloy-network",
     "dep:op-alloy-rpc-types",

@@ -6,6 +6,7 @@
 use crate::{
     MultiContractRunnerBuilder,
     cmd::test::{FilterArgs, RerunFailure, dispatch_network},
+    execution_config::TestExecutorBuilder,
     mutation::{
         SurvivedSpans,
         mutant::{Mutant, MutationResult},
@@ -16,13 +17,13 @@ use crate::{
 };
 use eyre::Result;
 use foundry_common::{compile::ProjectCompiler, sh_eprintln, sh_println};
-use foundry_compilers::compilers::multi::MultiCompiler;
+use foundry_compilers::{ProjectCompileOutput, compilers::multi::MultiCompiler};
 use foundry_config::{Config, InlineConfig};
 use foundry_evm::{
     core::evm::{
-        BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
+        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor,
+        TempoEvmNetwork, TxEnvFor,
     },
-    executors::ExecutorBuilder,
     fork::ResolvedFork,
     opts::EvmOpts,
 };
@@ -683,7 +684,7 @@ fn compile_and_test(
         rerun_failures,
         selected_sources_relative,
         isolate,
-        ExecutorBuilder::<Net>::new(),
+        TestExecutorBuilder::<Net>::configured,
     ))
 }
 
@@ -694,7 +695,12 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
     rerun_failures: Option<&[RerunFailure]>,
     selected_sources_relative: &[PathBuf],
     isolate: bool,
-    executor_builder: ExecutorBuilder<FEN>,
+    configure: fn(
+        &Config,
+        &InlineConfig,
+        &ProjectCompileOutput,
+        &EvmOpts,
+    ) -> Result<TestExecutorBuilder<FEN>>,
 ) -> Result<bool> {
     let evm_opts = &evm.opts;
     let resolved_fork = evm.resolved_fork.as_ref();
@@ -711,6 +717,7 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
 
     let compile_output = compiler.compile(&config.project()?)?;
     let inline_config = Arc::new(InlineConfig::new_parsed(&compile_output, config)?);
+    let executor_builder = configure(config, &inline_config, &compile_output, evm_opts)?;
 
     // Rebuild the per-mutant test filter so `--match-test`, `--match-contract`,
     // `--match-path`, ... are honored against the temp workspace's paths
@@ -757,9 +764,10 @@ fn compile_and_test_inner<FEN: FoundryEvmNetwork>(
                 evm_env,
                 tx_env,
                 evm_opts.clone(),
-                executor_builder,
+                executor_builder.executor,
             )?;
 
+        runner.tcfg.execution_factories = executor_builder.inline_factories;
         runner.test_collect(&filter)
     })?;
 

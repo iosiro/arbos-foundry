@@ -4,6 +4,7 @@
 //! of both builtin commands and Solidity snippets.
 
 use crate::{
+    evm::ChiselEvmNetwork,
     executor::InspectResult,
     prelude::{ChiselCommand, ChiselResult, ChiselSession, SessionSourceConfig, SolidityHelper},
     source::{InvocationRpc, SessionSource},
@@ -16,7 +17,6 @@ use foundry_config::{Chain, Config, RpcEndpointUrl};
 use foundry_evm::{
     core::evm::{EthEvmNetwork, FoundryEvmNetwork},
     decode::decode_console_logs,
-    executors::ExecutorBuilder,
     traces::{
         CallTraceDecoder, CallTraceDecoderBuilder, TraceKind, decode_trace_arena,
         identifier::{SignaturesIdentifier, TraceIdentifiers},
@@ -66,7 +66,7 @@ pub fn format_source(source: &str, config: FormatterConfig) -> eyre::Result<Stri
     Ok(formatted)
 }
 
-impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
+impl<FEN: ChiselEvmNetwork> ChiselDispatcher<FEN> {
     /// Associated public function to create a new Dispatcher instance
     pub fn new(config: SessionSourceConfig<FEN>) -> eyre::Result<Self> {
         let invocation_rpc = InvocationRpc::capture(&config.foundry_config, &config.evm_opts);
@@ -265,7 +265,7 @@ impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
 }
 
 /// [`ChiselCommand`] implementations.
-impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
+impl<FEN: ChiselEvmNetwork> ChiselDispatcher<FEN> {
     /// Dispatches a [`ChiselCommand`].
     pub async fn dispatch_command(&mut self, cmd: ChiselCommand) -> Result<ControlFlow<()>> {
         match cmd {
@@ -346,10 +346,9 @@ impl<FEN: FoundryEvmNetwork> ChiselDispatcher<FEN> {
             sh_println!("{}", "Saved current session!".green())?;
         }
 
-        let executor_builder = self.session.source.config.executor_builder.clone();
         let mut new_session = match id {
-            "latest" => ChiselSession::<FEN>::latest(executor_builder),
-            id => ChiselSession::<FEN>::load(id, executor_builder),
+            "latest" => ChiselSession::<FEN>::latest(),
+            id => ChiselSession::<FEN>::load(id),
         }
         .wrap_err("failed to load session")?;
 
@@ -718,10 +717,9 @@ fn preprocess<'a>(input: &'a str, last_result: Option<&str>) -> Result<(bool, Co
 /// Displays cached source without restoring credentials or building an execution environment.
 pub(crate) fn view_session(id: &str) -> Result<()> {
     // Source rendering is independent of the session's execution network.
-    let executor_builder = ExecutorBuilder::<EthEvmNetwork>::new();
     let session = match id {
-        "latest" => ChiselSession::latest(executor_builder),
-        id => ChiselSession::load(id, executor_builder),
+        "latest" => ChiselSession::<EthEvmNetwork>::latest(),
+        id => ChiselSession::<EthEvmNetwork>::load(id),
     }
     .wrap_err("failed to load session")?;
     sh_println!("Loaded Chisel session! (ID = {})", session.id.as_deref().unwrap_or("<unknown>"))?;

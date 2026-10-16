@@ -13,6 +13,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+arbos-revm.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true

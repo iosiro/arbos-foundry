@@ -11,6 +11,7 @@ use foundry_config::{
         error::Kind::InvalidType,
         value::{Dict, Map, Value},
     },
+    stylus::StylusConfig,
 };
 use foundry_evm_networks::NetworkConfigs;
 use serde::Serialize;
@@ -151,6 +152,11 @@ pub struct EvmArgs {
     #[command(flatten)]
     #[serde(skip)]
     pub networks: NetworkConfigs,
+
+    /// ArbOS and Stylus execution options.
+    #[command(flatten)]
+    #[serde(default)]
+    pub stylus: StylusConfig,
 }
 
 // Make this set of options a `figment::Provider` so that it can be merged into the `Config`
@@ -206,16 +212,28 @@ impl Provider for EvmArgs {
             dict.insert("eth_rpc_no_proxy".to_string(), true.into());
         }
 
-        // Only insert network flags when explicitly set via CLI to avoid overriding
-        // values from foundry.toml (NetworkConfigs is flattened in Config).
+        // Environment settings live in Figment's global profile, which takes precedence over
+        // named profiles. Explicit CLI selectors must be global too to override them.
+        // Leave this empty when no selector was supplied, preserving config and env selection.
+        let mut network_overrides = Dict::new();
         if let Some(network) = self.networks.resolved_network() {
-            dict.insert("network".to_string(), network.name().into());
+            network_overrides.insert("network".to_string(), network.name().into());
         }
         if self.networks.is_celo() {
-            dict.insert("celo".to_string(), true.into());
+            network_overrides.insert("celo".to_string(), true.into());
+        }
+
+        let stylus = Value::serialize(&self.stylus)?;
+        let actual = stylus.to_actual();
+        let stylus = stylus.into_dict().ok_or(InvalidType(actual, "map".into()))?;
+        if !stylus.is_empty() {
+            dict.insert("stylus".to_string(), stylus.into());
         }
 
         let mut data = Map::from([(Config::selected_profile(), dict)]);
+        if !network_overrides.is_empty() {
+            data.entry(Profile::Global).or_default().extend(network_overrides);
+        }
         if self.fork_state_by_number {
             data.entry(Profile::Global)
                 .or_default()
@@ -328,6 +346,20 @@ mod tests {
     };
 
     #[test]
+    fn cli_network_overrides_global_environment_selection() {
+        for profile in ["default", "ci"] {
+            let figment =
+                figment::Figment::from(Serialized::globals(Map::from([("network", "arbitrum")])))
+                    .select(profile);
+            let inherited = figment.clone().merge(EvmArgs::default());
+            assert_eq!(inherited.extract_inner::<String>("network").unwrap(), "arbitrum");
+            let overridden = figment
+                .merge(EvmArgs { networks: NetworkConfigs::with_ethereum(), ..Default::default() });
+            assert_eq!(overridden.extract_inner::<String>("network").unwrap(), "ethereum");
+        }
+    }
+
+    #[test]
     fn fork_state_by_number_cli_preserves_config_unless_explicit() {
         for profile in ["default", "ci"] {
             for configured in [false, true] {
@@ -414,7 +446,7 @@ mod tests {
     fn celo_network_is_included_in_provider_data() {
         let args = EvmArgs { networks: NetworkConfigs::with_celo(), ..Default::default() };
         let data = args.data().expect("provider data");
-        let dict = data.get(&Config::selected_profile()).expect("profile dict");
+        let dict = data.get(&Profile::Global).expect("global CLI overrides");
 
         assert_eq!(dict.get("celo"), Some(&Value::from(true)));
         assert!(!dict.contains_key("network"));
@@ -424,7 +456,7 @@ mod tests {
     fn explicit_ethereum_network_is_included_in_provider_data() {
         let args = EvmArgs { networks: NetworkConfigs::with_ethereum(), ..Default::default() };
         let data = args.data().expect("provider data");
-        let dict = data.get(&Config::selected_profile()).expect("profile dict");
+        let dict = data.get(&Profile::Global).expect("global CLI overrides");
 
         assert_eq!(dict.get("network"), Some(&Value::from("ethereum")));
         assert!(!dict.contains_key("celo"));

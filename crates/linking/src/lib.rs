@@ -1472,7 +1472,7 @@ mod tests {
                     "default/linking/nested/Nested.t.sol:NestedLib",
                     &[(
                         "default/linking/nested/Nested.t.sol:Lib",
-                        address!("0x773253227cce756e50c3993ec6366b3ec27786f9"),
+                        address!("0x99b799b8a4846a5c1b5a99c84a6f03ebb7c87f37"),
                     )],
                 )
                 .assert_dependencies(

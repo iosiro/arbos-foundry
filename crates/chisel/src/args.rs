@@ -1,5 +1,6 @@
 use crate::{
     dispatcher::view_session,
+    evm::ChiselEvmNetwork,
     opts::{Chisel, ChiselSubcommand},
     prelude::{ChiselCommand, ChiselDispatcher, SolidityHelper},
 };
@@ -9,8 +10,7 @@ use foundry_cli::utils::{self, LoadConfig};
 use foundry_common::fs;
 use foundry_config::Config;
 use foundry_evm::{
-    core::evm::{EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork},
-    executors::ExecutorBuilder,
+    core::evm::{ArbitrumEvmNetwork, EthEvmNetwork, TempoEvmNetwork},
     opts::EvmOpts,
 };
 use foundry_evm_networks::{NetworkConfigs, NetworkVariant};
@@ -76,12 +76,21 @@ pub async fn run_command(args: Chisel) -> Result<()> {
     let local_chain_id = evm_opts.env.chain_id.or(config.chain.map(|chain| chain.id()));
 
     match evm_opts.networks.execution_network() {
+        NetworkVariant::Arbitrum => {
+            Box::pin(run_command_with_network::<ArbitrumEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
         NetworkVariant::Tempo => {
             Box::pin(run_command_with_network::<TempoEvmNetwork>(
                 args,
                 config,
                 evm_opts,
-                ExecutorBuilder::<TempoEvmNetwork>::new(),
                 local_networks,
                 local_chain_id,
             ))
@@ -93,7 +102,6 @@ pub async fn run_command(args: Chisel) -> Result<()> {
                 args,
                 config,
                 evm_opts,
-                ExecutorBuilder::<BaseEvmNetwork>::new(),
                 local_networks,
                 local_chain_id,
             ))
@@ -105,7 +113,6 @@ pub async fn run_command(args: Chisel) -> Result<()> {
                 args,
                 config,
                 evm_opts,
-                ExecutorBuilder::<MonadEvmNetwork>::new(),
                 local_networks,
                 local_chain_id,
             ))
@@ -117,7 +124,6 @@ pub async fn run_command(args: Chisel) -> Result<()> {
                 args,
                 config,
                 evm_opts,
-                ExecutorBuilder::<OpEvmNetwork>::new(),
                 local_networks,
                 local_chain_id,
             ))
@@ -128,7 +134,6 @@ pub async fn run_command(args: Chisel) -> Result<()> {
                 args,
                 config,
                 evm_opts,
-                ExecutorBuilder::<EthEvmNetwork>::new(),
                 local_networks,
                 local_chain_id,
             ))
@@ -148,14 +153,14 @@ fn infer_network_from_chain_id(
     }
 }
 
-async fn run_command_with_network<FEN: FoundryEvmNetwork>(
+async fn run_command_with_network<FEN: ChiselEvmNetwork>(
     args: Chisel,
     config: Config,
     evm_opts: EvmOpts,
-    executor_builder: ExecutorBuilder<FEN>,
     local_networks: NetworkConfigs,
     local_chain_id: Option<u64>,
 ) -> Result<()> {
+    let executor_builder = FEN::executor_builder(&evm_opts);
     let fork_network_is_inferred = evm_opts.fork_network_is_inferred;
     let fork_chain_id_is_inferred = evm_opts.fork_chain_id_is_inferred;
     // Create a new cli dispatcher
@@ -240,7 +245,7 @@ async fn run_command_with_network<FEN: FoundryEvmNetwork>(
 
 /// Evaluate multiple Solidity source files contained within a
 /// Chisel prelude directory.
-async fn evaluate_prelude<FEN: FoundryEvmNetwork>(
+async fn evaluate_prelude<FEN: ChiselEvmNetwork>(
     dispatcher: &mut ChiselDispatcher<FEN>,
     maybe_prelude: Option<PathBuf>,
 ) -> Result<()> {
@@ -266,7 +271,7 @@ async fn evaluate_prelude<FEN: FoundryEvmNetwork>(
 }
 
 /// Loads a single Solidity file into the prelude.
-async fn load_prelude_file<FEN: FoundryEvmNetwork>(
+async fn load_prelude_file<FEN: ChiselEvmNetwork>(
     dispatcher: &mut ChiselDispatcher<FEN>,
     file: PathBuf,
 ) -> Result<ControlFlow<()>> {
@@ -275,7 +280,7 @@ async fn load_prelude_file<FEN: FoundryEvmNetwork>(
     dispatcher.dispatch_solidity(&prelude).await
 }
 
-async fn handle_cli_command<FEN: FoundryEvmNetwork>(
+async fn handle_cli_command<FEN: ChiselEvmNetwork>(
     d: &mut ChiselDispatcher<FEN>,
     cmd: ChiselSubcommand,
 ) -> Result<ControlFlow<()>> {

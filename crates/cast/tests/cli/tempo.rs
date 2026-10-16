@@ -683,6 +683,7 @@ async fn storage_credits_require_t7(cmd: _) {
 
 #[casttest]
 async fn current_committee_cast_run_decoding(cmd: _) {
+    cmd.set_network(Some("tempo"));
     let (_, handle) =
         anvil::spawn(NodeConfig::test_tempo().with_hardfork(Some(TempoHardfork::T8.into()))).await;
     let provider = handle.http_provider();

@@ -1335,7 +1335,9 @@ pub async fn run_command(args: CastArgs) -> Result<()> {
                 Some(NetworkVariant::Tempo) => decode_raw_transaction::<TempoNetwork>(&tx)?,
                 #[cfg(feature = "base")]
                 Some(NetworkVariant::Base) => decode_raw_transaction::<BaseNetwork>(&tx)?,
-                Some(NetworkVariant::Ethereum) => decode_raw_transaction::<Ethereum>(&tx)?,
+                Some(NetworkVariant::Ethereum | NetworkVariant::Arbitrum) => {
+                    decode_raw_transaction::<Ethereum>(&tx)?
+                }
                 #[cfg(feature = "monad")]
                 Some(NetworkVariant::Monad) => decode_raw_transaction::<Ethereum>(&tx)?,
                 // Without an explicit `--network` override, decode with the Foundry envelope,

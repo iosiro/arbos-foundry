@@ -29,7 +29,6 @@ mod lsp;
 mod json;
 mod lint;
 mod multi_script;
-mod precompiles;
 mod script;
 mod selectors;
 mod soldeer;

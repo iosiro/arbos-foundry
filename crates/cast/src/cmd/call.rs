@@ -54,7 +54,7 @@ use foundry_evm::{
     core::{
         FoundryBlock, FoundryTransaction,
         decode::RevertDecoder,
-        evm::{EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork},
+        evm::{ArbitrumEvmNetwork, EthEvmNetwork, FoundryEvmNetwork, TempoEvmNetwork},
     },
     executors::{ExecutorBuilder, TracingExecutor},
     opts::EvmOpts,
@@ -297,6 +297,17 @@ impl CallArgs {
         }
 
         match evm_opts.networks.execution_network() {
+            NetworkVariant::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
+                self.run_with_network_and_opts::<ArbitrumEvmNetwork>(
+                    config,
+                    evm_opts,
+                    auth_preflight,
+                    builder,
+                )
+                .await
+            }
             NetworkVariant::Tempo => {
                 self.run_with_network_and_opts::<TempoEvmNetwork>(
                     config,

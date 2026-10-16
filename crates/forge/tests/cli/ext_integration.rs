@@ -80,6 +80,7 @@ fn snekmate() {
         .fuzz_runs(256)
         .python_package("git+https://github.com/vyperlang/vyper@v0.5.0a3")
         .install_command(&["pnpm", "install", "--frozen-lockfile"])
+        .arg("--stylus-disable-deployment") // Enforce EIP-3541.
         .run();
 }
 

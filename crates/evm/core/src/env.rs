@@ -1,4 +1,3 @@
-use crate::backend::JournaledState;
 use alloy_chains::NamedChain;
 use alloy_consensus::{Transaction as _, Typed2718};
 use alloy_evm::FromRecoveredTx;
@@ -20,6 +19,11 @@ use std::fmt::Debug;
 use tempo_alloy::primitives::{TEMPO_TX_TYPE_ID, TempoTxEnvelope};
 use tempo_revm::{TempoBlockEnv, TempoTxEnv};
 
+use crate::{
+    backend::{DatabaseExt, JournaledState},
+    eip2935,
+    evm::FoundryEvmFactory,
+};
 #[cfg(feature = "optimism")]
 use op_revm::transaction::deposit::DEPOSIT_TRANSACTION_TYPE;
 
@@ -433,6 +437,11 @@ pub trait FoundryChain<Tx>: Clone + Debug + Default + Send + Sync {
         Self::default()
     }
 
+    /// Builds transaction context from a verified RPC block's height and parent hash.
+    fn for_rpc_block(tx: &Tx, _block_number: u64, _parent_hash: B256) -> Self {
+        Self::for_transaction(tx)
+    }
+
     /// Builds chain context for a transaction at an exact block position.
     fn for_block(
         _grandparent: &[Tx],
@@ -478,6 +487,15 @@ impl<SPEC: Into<SpecId> + Copy + Debug> FoundryCfg for CfgEnv<SPEC> {
         self
     }
 }
+
+// Configurations whose contexts use the standard environment and block-history lifecycle.
+// Arbitrum implements FoundryContextExt separately for its native history and activation hooks.
+trait StandardContextCfg: FoundryCfg {}
+
+impl<SPEC: Into<SpecId> + Copy + Debug> StandardContextCfg for CfgEnv<SPEC> {}
+
+#[cfg(feature = "monad")]
+impl StandardContextCfg for monad_revm::MonadCfgEnv {}
 
 #[cfg(feature = "monad")]
 impl FoundryCfg for monad_revm::MonadCfgEnv {
@@ -621,6 +639,53 @@ pub trait FoundryContextExt:
         self.journal().journal_inner()
     }
 
+    /// Rolls the execution height and updates the execution family's block history.
+    fn roll_block_number(&mut self, new_height: U256) -> eyre::Result<()>
+    where
+        Self: Sized,
+    {
+        let current_height = self.block().number();
+        if self.cfg().spec().into() >= SpecId::PRAGUE && new_height > current_height {
+            let mut number = eip2935::forward_fill_start(current_height, new_height);
+            while number < new_height {
+                let hash = self.db_mut().block_hash(number.saturating_to()).unwrap_or_default();
+                eip2935::set_blockhash(self, number, hash)?;
+                number += U256::from(1);
+            }
+        }
+        self.block_mut().set_number(new_height);
+        Ok(())
+    }
+
+    /// Records a BLOCKHASH override and updates the family's backing history where appropriate.
+    /// The inspector owns `overrides` and restores it across forks and state snapshots.
+    fn set_blockhash<F: FoundryEvmFactory>(
+        &mut self,
+        number: U256,
+        hash: B256,
+        overrides: &mut alloy_primitives::map::HashMap<u64, B256>,
+    ) -> eyre::Result<()>
+    where
+        Self: Sized,
+        Self::Db: DatabaseExt<F>,
+    {
+        overrides.insert(number.try_into()?, hash);
+        self.db_mut().set_blockhash(number, hash);
+        let current = self.block().number();
+        if self.cfg().spec().into() >= SpecId::PRAGUE
+            && number < current
+            && current - number <= U256::from(eip2935::HISTORY_SERVE_WINDOW)
+        {
+            eip2935::set_blockhash(self, number, hash)?;
+        }
+        Ok(())
+    }
+
+    /// Activates deployed Stylus bytecode when supported by the active execution family.
+    fn activate_stylus_program(&mut self, _address: Address) -> eyre::Result<()> {
+        eyre::bail!("Stylus activation requires the Arbitrum execution network")
+    }
+
     /// Sets the spec and refreshes gas params for the concrete EVM family.
     fn set_spec_and_gas_params(&mut self, spec: Self::Spec) {
         self.cfg_mut().set_spec_and_gas_params(spec);
@@ -641,6 +706,11 @@ pub trait FoundryContextExt:
         *self.cfg_mut() = cfg;
     }
 
+    /// Replaces chain-position state while preserving local execution configuration.
+    fn set_chain_context(&mut self, chain: Self::Chain) {
+        *self.chain_mut() = chain;
+    }
+
     /// Sets journal inner.
     fn set_journal_inner(&mut self, journal_inner: JournaledState) {
         *self.db_journal_inner_mut().1 = journal_inner;
@@ -648,7 +718,9 @@ pub trait FoundryContextExt:
 
     /// Sets EVM environment.
     fn set_evm(&mut self, evm_env: EvmEnv<Self::Spec, Self::Block>) {
-        *self.cfg_mut() = evm_env.cfg_env.into();
+        // Update the shared environment without replacing network-owned
+        // configuration that is not represented by Alloy's CfgEnv.
+        *self.cfg_env_mut() = evm_env.cfg_env;
         *self.block_mut() = evm_env.block_env;
     }
 
@@ -666,7 +738,7 @@ pub trait FoundryContextExt:
 impl<
     BLOCK: FoundryBlock + Clone,
     TX: FoundryTransaction + Clone,
-    CFG: FoundryCfg,
+    CFG: StandardContextCfg,
     DB: Database,
     J: FoundryJournal<Database = DB>,
     C: FoundryChain<TX>,

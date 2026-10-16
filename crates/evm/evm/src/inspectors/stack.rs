@@ -548,11 +548,8 @@ impl<FEN: FoundryEvmNetwork> CheatcodesExecutor<FEN> for InspectorStackInner {
             evm_env.cfg_env.disable_fee_charge = disable_fee_charge;
         }
         let mut inspector = InspectorStackRefMut { cheatcodes: Some(cheats), inner: self };
-        let mut evm = FEN::EvmFactory::default().create_nested_evm_with_inspector(
-            db,
-            evm_env,
-            &mut inspector,
-        );
+        let mut evm =
+            db.evm_factory().create_nested_evm_with_inspector(db, evm_env, &mut inspector);
         *evm.chain_mut() = chain_context;
         f(&mut *evm)?;
         let mut evm_env = evm.to_evm_env();
@@ -1100,7 +1097,7 @@ impl<FEN: FoundryEvmNetwork> InspectorStackRefMut<'_, FEN> {
 
         let evm_env = ecx.evm_clone();
         let tx_env = ecx.tx_clone();
-        let factory = FEN::EvmFactory::default();
+        let factory = ecx.db().evm_factory();
         let chain_context = ecx.chain().clone();
 
         let isolated_state = prepare_child_state(ecx.journal_inner());
@@ -2088,6 +2085,11 @@ fn handle_arbitrum_system_call<FEN: FoundryEvmNetwork>(
     ecx: &mut FoundryContextFor<'_, FEN>,
     call: &CallInputs,
 ) -> Option<CallOutcome> {
+    // Compatibility fallbacks must never intercept an installed precompile: its provider owns
+    // validation, gas, value handling, and execution-family-specific block metadata.
+    if ecx.journal().precompile_addresses().contains(&call.bytecode_address) {
+        return None;
+    }
     if call.target_address != arbitrum::ARB_SYS_ADDRESS
         || call.bytecode_address != arbitrum::ARB_SYS_ADDRESS
         || !arbitrum::is_arbitrum_chain(ecx.cfg().chain_id())
@@ -2096,7 +2098,7 @@ fn handle_arbitrum_system_call<FEN: FoundryEvmNetwork>(
     }
 
     let input = call.input.bytes(ecx);
-    if input.get(..4) != Some(&arbitrum::ARB_BLOCK_NUMBER_SELECTOR) {
+    if input.get(..4) != Some(arbitrum::ARB_BLOCK_NUMBER_SELECTOR.as_slice()) {
         return None;
     }
 

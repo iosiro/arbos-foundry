@@ -33,6 +33,7 @@ mod mutation;
 mod repros;
 mod showmap;
 mod spec;
+mod stylus_codehash;
 mod symbolic;
 mod symbolic_calls;
 mod symbolic_cheatcodes;
@@ -134,6 +135,10 @@ const FLAKY_TESTDATA_CONTRACTS: &str = "Issue4232Test|Issue4640Test|Issue14212Te
 // transaction lookups that are not reliably served by the public Base RPC endpoint used in CI.
 const FLAKY_TESTDATA_RUN_CONTRACTS: &str = "Issue4232Test|Issue4640Test";
 
+/// Contracts whose execution requires Arbitrum precompiles or Stylus bytecode support.
+/// Covered by the required `arbitrum_testdata` run below.
+const ARBITRUM_TESTDATA_CONTRACTS: &str = "ArbosStateTest|StylusTest|StylusConfigTest|StylusConfigInlineTest|StylusConfigFunctionLevelTest|GetStylusCodeTest|GetStylusInitCodeTest";
+
 // Run `forge test` on `/testdata`.
 #[forgetest]
 fn testdata(cmd: _) {
@@ -141,7 +146,7 @@ fn testdata(cmd: _) {
 
     let mut args = vec!["test"];
     let nmc_isolate = format!(
-        "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS})",
+        "--nmc=(LastCallGasDefaultTest|MockFunctionTest|WithSeed|StateDiff|GetStorageSlotsTest|RecordAccount|{FLAKY_TESTDATA_CONTRACTS}|{ARBITRUM_TESTDATA_CONTRACTS})",
     );
     args.push(&nmc_isolate);
 
@@ -174,6 +179,13 @@ fn testdata(cmd: _) {
     orig_assert.success();
 }
 
+#[forgetest]
+fn arbitrum_testdata(cmd: _) {
+    setup_testdata_cmd(&mut cmd);
+    let mc = format!("--mc=({ARBITRUM_TESTDATA_CONTRACTS})");
+    cmd.args(["test", "--network", "arbitrum", &mc]).assert_success();
+}
+
 #[cfg(feature = "monad")]
 #[forgetest]
 fn monad_testdata(cmd: _) {
@@ -183,7 +195,7 @@ fn monad_testdata(cmd: _) {
 }
 
 // Run flaky testdata contracts excluded from the main `testdata` test above.
-// Picked up by the nightly `test-flaky` workflow via `cargo nextest run --profile flaky`.
+// Picked up by the manual `test-flaky` workflow via `cargo nextest run --profile flaky`.
 #[forgetest]
 fn flaky_testdata(cmd: _) {
     setup_testdata_cmd(&mut cmd);
@@ -195,6 +207,7 @@ fn flaky_testdata(cmd: _) {
 // nested frame execution path which is only reachable through this cheatcode.
 #[forgetest_init]
 fn deploy_code_cheatcode_on_optimism_network(prj: _, cmd: _) {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = foundry_evm_networks::NetworkConfigs::with_optimism();
     });
@@ -2011,7 +2024,7 @@ contract ArbitrumForkTest is Test {
         .replace("<url>", endpoint),
     );
 
-    cmd.arg("test").assert_success();
+    cmd.args(["test", "--network", "arbitrum"]).assert_success();
 }
 
 // https://github.com/foundry-rs/foundry/issues/6579
@@ -4887,6 +4900,7 @@ contract PrecompileDebugTest {
 
 #[forgetest]
 fn debug_dump_marks_tempo_precompile_call_steps(prj: _, cmd: _) {
+    cmd.set_network(None);
     prj.update_config(|config| {
         config.networks = foundry_evm_networks::NetworkConfigs::with_tempo();
         config.hardfork = Some("tempo:T5".parse::<foundry_config::FoundryHardfork>().unwrap());

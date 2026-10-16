@@ -292,6 +292,7 @@ fn test_library_backtrace(prj: _, cmd: _) {
 
     // Configure the linked library.
     let config = foundry_config::Config {
+        solc: Some(foundry_test_utils::util::OTHER_SOLC_VERSION.into()),
         libraries: vec!["src/libraries/ExternalMathLib.sol:ExternalMathLib:0x1234567890123456789012345678901234567890".to_string()],
         ..Default::default()
     };

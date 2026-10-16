@@ -2,6 +2,7 @@ use super::{fuzz::FuzzRunArgs, watch::WatchArgs};
 use crate::{
     MultiContractRunner, MultiContractRunnerBuilder, brutalizer,
     decode::decode_console_logs,
+    execution_config::TestExecutorBuilder,
     gas_report::GasReport,
     multi_runner::{
         FuzzFailureReplayConfig, FuzzMinimizeConfig, FuzzMinimizeEdgeIndices, FuzzMinimizeMode,
@@ -67,9 +68,10 @@ use foundry_config::{
 use foundry_debugger::{Debugger, DebuggerLayout};
 use foundry_evm::{
     core::evm::{
-        BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
+        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, FoundryEvmNetwork, SpecFor,
+        TempoEvmNetwork, TxEnvFor,
     },
-    executors::{ExecutorBuilder, ShowmapDomain},
+    executors::ShowmapDomain,
     fork::ResolvedFork,
     fuzz::{BaseCounterExample, BasicTxDetails, CounterExample},
     opts::EvmOpts,
@@ -223,6 +225,10 @@ fn count_fuzz_minimize_targets<FEN: FoundryEvmNetwork>(
 macro_rules! dispatch_network {
     ($evm_opts:expr, | $fen:ident | $body:expr) => {
         match $evm_opts.networks.execution_network() {
+            NetworkVariant::Arbitrum => {
+                type $fen = ArbitrumEvmNetwork;
+                $body
+            }
             #[cfg(feature = "base")]
             NetworkVariant::Base => {
                 type $fen = BaseEvmNetwork;
@@ -1775,15 +1781,14 @@ impl TestArgs {
             };
             let config = Arc::new(config);
             passes.push(dispatch_network!(&evm_opts, |Net| {
+                let builder = TestExecutorBuilder::<Net>::configured(
+                    &config,
+                    &execution.inline_config,
+                    &output,
+                    &evm_opts,
+                )?;
                 let runner = self
-                    .build_runner::<Net>(
-                        config,
-                        evm_opts,
-                        &output,
-                        execution,
-                        None,
-                        ExecutorBuilder::<Net>::new(),
-                    )
+                    .build_runner::<Net>(config, evm_opts, &output, execution, None, builder)
                     .await?;
                 fuzz_minimize_pass(runner, &filter)
             }));
@@ -2150,7 +2155,7 @@ impl TestArgs {
         output: &ProjectCompileOutput,
         execution: TestExecutionOptions,
         resolved_fork: Option<&ResolvedFork>,
-        executor_builder: ExecutorBuilder<FEN>,
+        executor_builder: TestExecutorBuilder<FEN>,
     ) -> Result<MultiContractRunner<FEN>> {
         let (evm_env, tx_env, fork) = if let Some(fork) = resolved_fork {
             let (evm_env, tx_env) = evm_opts
@@ -2164,7 +2169,7 @@ impl TestArgs {
         let create2_deployer_available =
             evm_opts.can_use_create2_deployer_resolved(fork.as_ref()).await?;
 
-        MultiContractRunnerBuilder::new(config.clone(), execution.inline_config)
+        let mut runner = MultiContractRunnerBuilder::new(config.clone(), execution.inline_config)
             .set_debug(self.debug)
             .set_decode_internal(execution.decode_internal)
             .set_record_all_steps(self.evm_profile.is_some())
@@ -2183,7 +2188,15 @@ impl TestArgs {
             .with_fuzz_input(execution.fuzz_input)
             .with_symbolic_artifact_replay(execution.replay_symbolic_artifact)
             .with_create2_deployer_available(create2_deployer_available)
-            .build::<FEN, MultiCompiler>(output, evm_env, tx_env, evm_opts, executor_builder)
+            .build::<FEN, MultiCompiler>(
+                output,
+                evm_env,
+                tx_env,
+                evm_opts,
+                executor_builder.executor,
+            )?;
+        runner.tcfg.execution_factories = executor_builder.inline_factories;
+        Ok(runner)
     }
 
     /// Builds the runner for one network pass and runs its tests.
@@ -2200,6 +2213,12 @@ impl TestArgs {
         let verbosity = evm_opts.verbosity;
         let config = Arc::new(config);
         dispatch_network!(&evm_opts, |Net| {
+            let builder = TestExecutorBuilder::<Net>::configured(
+                &config,
+                &execution.inline_config,
+                output,
+                &evm_opts,
+            )?;
             let runner = self
                 .build_runner::<Net>(
                     config.clone(),
@@ -2207,7 +2226,7 @@ impl TestArgs {
                     output,
                     execution,
                     resolved_fork,
-                    ExecutorBuilder::<Net>::new(),
+                    builder,
                 )
                 .await?;
             let libraries = runner.libraries.clone();

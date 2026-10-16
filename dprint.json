@@ -12,6 +12,7 @@
     "**/*.min.*",
     "**/dist/**",
     "testdata/**",
+    "vendor/**",
     "**/tests/**",
     "node_modules",
     "changelog.json",

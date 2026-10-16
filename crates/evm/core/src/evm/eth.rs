@@ -104,7 +104,7 @@ impl<'db, I: FoundryInspectorExt<EthEvmContext<&'db mut dyn DatabaseExt<EthEvmFa
         &mut self.ctx_mut().chain
     }
 
-    fn precompiles_mut(&mut self) -> &mut alloy_evm::precompiles::PrecompilesMap {
+    fn precompiles_mut(&mut self) -> &mut dyn super::FoundryPrecompiles {
         &mut self.precompiles
     }
 

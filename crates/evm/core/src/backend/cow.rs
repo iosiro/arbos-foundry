@@ -2,7 +2,7 @@
 
 use super::BackendError;
 use crate::{
-    FoundryInspectorExt,
+    FoundryContextExt, FoundryInspectorExt,
     backend::{
         Backend, ContextUpdateFor, DatabaseExt, ForkAccountField, JournaledState, LocalForkId,
         RevertStateSnapshotAction, diagnostic::RevertDiagnostic, existing_account,
@@ -107,9 +107,9 @@ impl<'a, FEN: FoundryEvmNetwork> CowBackend<'a, FEN> {
         // already, we reset the initialized state
         self.pending_init = Some((evm_env.cfg_env.spec, tx_env.caller(), tx_env.kind()));
 
-        let factory = FEN::EvmFactory::default();
+        let factory = self.evm_factory();
         let mut evm = factory.create_foundry_evm_with_inspector(self, evm_env.clone(), inspector);
-        *evm.chain_mut() = chain_context;
+        evm.set_chain_context(chain_context);
 
         let res = evm.transact(tx_env.clone()).wrap_err("EVM error")?;
 
@@ -173,6 +173,10 @@ impl CowBackend<'_, MonadEvmNetwork> {
 }
 
 impl<FEN: FoundryEvmNetwork> DatabaseExt<FEN::EvmFactory> for CowBackend<'_, FEN> {
+    fn evm_factory(&self) -> FEN::EvmFactory {
+        self.backend.evm_factory()
+    }
+
     fn chain_context_for_synthetic_transaction(
         &self,
         tx: &TxEnvFor<FEN>,

@@ -28,7 +28,6 @@ use alloy_evm::{
         receipt_builder::{ReceiptBuilder, ReceiptBuilderCtx},
         spec::EthExecutorSpec,
     },
-    precompiles::PrecompilesMap,
 };
 use alloy_hardforks::{EthereumHardfork, EthereumHardforks, ForkCondition};
 use alloy_primitives::{Address, B256, Bytes, Log, U256, map::HashSet};
@@ -618,7 +617,7 @@ where
             Evm: Evm<
                 DB: Database + Debug,
                 Inspector = AnvilInspector,
-                Precompiles = PrecompilesMap,
+                Precompiles: foundry_evm::core::evm::FoundryPrecompiles,
             >,
         >,
     B::Receipt: TxReceipt,

@@ -362,6 +362,10 @@ Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
 
 #[forgetest_init]
 fn config_inline_evm_version(prj: _, cmd: _) {
+    // BLOBBASEFEE is an Ethereum opcode; Arbitrum intentionally rejects it.
+    prj.update_config(|config| {
+        config.networks = foundry_evm_networks::NetworkConfigs::with_ethereum();
+    });
     prj.add_test(
         "inline.sol",
         r#"
@@ -431,6 +435,7 @@ Ran 2 test suites [ELAPSED]: 4 tests passed, 0 failed, 0 skipped (4 total tests)
 
 #[forgetest_init]
 fn config_inline_hardfork_same_network_family(prj: _, cmd: _) {
+    cmd.set_network(None);
     prj.write_config(foundry_config::Config {
         hardfork: Some("tempo:T2".parse::<foundry_config::FoundryHardfork>().unwrap()),
         ..foundry_config::Config::default()

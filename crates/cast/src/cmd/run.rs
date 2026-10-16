@@ -35,7 +35,7 @@ use foundry_cli::{
     utils::{TraceResult, init_progress},
 };
 use foundry_common::{
-    SYSTEM_TRANSACTION_TYPE, is_known_system_sender,
+    is_legacy_system_transaction,
     provider::{ProviderBuilder, RetryProvider},
     shell,
 };
@@ -49,9 +49,12 @@ use foundry_config::{
 };
 use foundry_evm::{
     core::{
-        FoundryBlock as _, FoundryTransaction as _,
+        FoundryBlock as _, FoundryChain as _, FoundryTransaction as _,
         env::FromAnyRpcTransaction as _,
-        evm::{EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, TempoEvmNetwork, TxEnvFor},
+        evm::{
+            ArbitrumEvmNetwork, ChainFor, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork,
+            TempoEvmNetwork, TxEnvFor,
+        },
     },
     executors::{Executor, ExecutorBuilder, TracingExecutor},
     hardforks::FoundryHardfork,
@@ -72,7 +75,7 @@ use std::sync::Arc;
 use foundry_evm::core::evm::BaseEvmNetwork;
 
 #[cfg(feature = "monad")]
-use foundry_evm::core::evm::{BlockContext, ChainFor, MonadEvmNetwork};
+use foundry_evm::core::evm::{BlockContext, MonadEvmNetwork};
 
 #[cfg(feature = "optimism")]
 use foundry_evm::core::evm::OpEvmNetwork;
@@ -273,12 +276,19 @@ impl RunArgs {
     /// Replays the transaction locally with the EVM of its network.
     async fn replay(self, config: Box<Config>, evm_opts: EvmOpts) -> Result<()> {
         match evm_opts.networks.execution_network() {
+            NetworkVariant::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
+                self.run_with_evm(config, evm_opts, builder, Some(ReplayGasLimits::Unchanged)).await
+            }
             NetworkVariant::Tempo => {
-                self.run_with_evm(config, evm_opts, ExecutorBuilder::<TempoEvmNetwork>::new()).await
+                self.run_with_evm(config, evm_opts, ExecutorBuilder::<TempoEvmNetwork>::new(), None)
+                    .await
             }
             #[cfg(feature = "base")]
             NetworkVariant::Base => {
-                self.run_with_evm(config, evm_opts, ExecutorBuilder::<BaseEvmNetwork>::new()).await
+                self.run_with_evm(config, evm_opts, ExecutorBuilder::<BaseEvmNetwork>::new(), None)
+                    .await
             }
             #[cfg(feature = "monad")]
             NetworkVariant::Monad => {
@@ -289,6 +299,7 @@ impl RunArgs {
                         evm_opts,
                         target,
                         ExecutorBuilder::<MonadEvmNetwork>::new(),
+                        None,
                     )
                     .await?;
                 let result = run.execute_monad().await?;
@@ -296,10 +307,12 @@ impl RunArgs {
             }
             #[cfg(feature = "optimism")]
             NetworkVariant::Optimism => {
-                self.run_with_evm(config, evm_opts, ExecutorBuilder::<OpEvmNetwork>::new()).await
+                self.run_with_evm(config, evm_opts, ExecutorBuilder::<OpEvmNetwork>::new(), None)
+                    .await
             }
             NetworkVariant::Ethereum => {
-                self.run_with_evm(config, evm_opts, ExecutorBuilder::<EthEvmNetwork>::new()).await
+                self.run_with_evm(config, evm_opts, ExecutorBuilder::<EthEvmNetwork>::new(), None)
+                    .await
             }
         }
     }
@@ -309,6 +322,7 @@ impl RunArgs {
         config: Box<Config>,
         evm_opts: EvmOpts,
         executor_builder: ExecutorBuilder<FEN>,
+        gas_limit_override: Option<ReplayGasLimits>,
     ) -> Result<()> {
         let target = self.fetch_target(&config).await?;
         let endpoint_is_anvil = evm_opts
@@ -330,7 +344,9 @@ impl RunArgs {
                 target.tx.tx_hash()
             );
         }
-        let mut run = self.prepare::<FEN>(config, evm_opts, target, executor_builder).await?;
+        let mut run = self
+            .prepare::<FEN>(config, evm_opts, target, executor_builder, gas_limit_override)
+            .await?;
         let result = run.execute_ordinary()?;
         run.finish(result).await
     }
@@ -483,6 +499,7 @@ impl RunArgs {
         evm_opts: EvmOpts,
         target: TargetFetch,
         executor_builder: ExecutorBuilder<FEN>,
+        gas_limit_override: Option<ReplayGasLimits>,
     ) -> Result<PreparedRun<FEN>> {
         #[cfg_attr(not(feature = "monad"), allow(unused_variables))]
         let TargetFetch { tx, provider, compute_units_per_second } = target;
@@ -616,9 +633,11 @@ impl RunArgs {
         // so the target's prestate can be read from it instead of replaying the earlier
         // transactions. Before Cancun, SELFDESTRUCT wipes storage the list does not enumerate.
         // Explicit execution rules must replay the prefix: canonical writes may differ under
-        // the requested EVM version or hardfork.
+        // the requested EVM version or hardfork. Native ArbOS also needs the prefix's
+        // block-local Stylus access history, which a state-only BAL cannot reconstruct.
         let block_access_list = if !self.quick
             && !self.no_bal
+            && !networks.is_arbitrum()
             && !prestate_applied
             && self.evm_version.is_none()
             && config.hardfork.is_none()
@@ -644,8 +663,10 @@ impl RunArgs {
                     .map(TransactionResponse::tx_hash),
             );
         }
-        let replay_gas_limits =
-            ReplayGasLimits::fetch(chain.id(), &provider, replay_tx_hashes).await?;
+        let replay_gas_limits = match gas_limit_override {
+            Some(limits) => limits,
+            None => ReplayGasLimits::fetch(chain.id(), &provider, replay_tx_hashes).await?,
+        };
 
         Ok(PreparedRun {
             args: self,
@@ -812,8 +833,18 @@ impl<FEN: FoundryEvmNetwork> PreparedRun<FEN> {
         }
         let result = self.executor.transact_with_ordinary_block_replay(
             self.evm_env.clone(),
-            target_tx_env,
+            target_tx_env.clone(),
             replay,
+            self.block.as_ref().map_or_else(
+                || ChainFor::<FEN>::for_transaction(&target_tx_env),
+                |block| {
+                    ChainFor::<FEN>::for_rpc_block(
+                        &target_tx_env,
+                        block.header().number(),
+                        block.header().parent_hash(),
+                    )
+                },
+            ),
         )?;
         let trace_kind = self.trace_kind();
         trace!(tx_hash=?self.tx.tx_hash(), "completed execution");
@@ -880,14 +911,8 @@ impl<FEN: FoundryEvmNetwork> PreparedRun<FEN> {
         if self.trace_context.networks().is_monad() {
             return None;
         }
-        let gas_used = receipt.gas_used();
-        if foundry_evm_networks::arbitrum::is_arbitrum_chain(self.trace_context.chain().id()) {
-            // Nitro folds the L1 posting cost into the receipt's gas used.
-            let l1_gas_used =
-                parse_nitro_l1_gas_used(receipt.other_fields().get("gasUsedForL1")).ok()?;
-            return gas_used.checked_sub(l1_gas_used);
-        }
-        Some(gas_used)
+        self.replay_gas_limits
+            .expected_gas(receipt.gas_used(), receipt.other_fields().get("gasUsedForL1"))
     }
 }
 
@@ -945,7 +970,7 @@ impl PreparedRun<MonadEvmNetwork> {
 }
 
 fn is_system_transaction(tx: &AnyRpcTransaction) -> bool {
-    is_known_system_sender(tx.from()) || tx.transaction_type() == Some(SYSTEM_TRANSACTION_TYPE)
+    is_legacy_system_transaction(tx.from(), tx.transaction_type().unwrap_or_default())
 }
 
 fn full_transactions(block: &AnyRpcBlock) -> Result<&[AnyRpcTransaction]> {
@@ -956,6 +981,14 @@ fn full_transactions(block: &AnyRpcBlock) -> Result<&[AnyRpcTransaction]> {
 }
 
 impl ReplayGasLimits {
+    fn expected_gas(&self, gas_used: u64, l1_gas_used: Option<&serde_json::Value>) -> Option<u64> {
+        if matches!(self, Self::Nitro(_)) {
+            // Ethereum replay excludes posting costs; native ArbOS charges them itself.
+            return gas_used.checked_sub(parse_nitro_l1_gas_used(l1_gas_used).ok()?);
+        }
+        Some(gas_used)
+    }
+
     async fn fetch(chain_id: u64, provider: &RetryProvider, tx_hashes: Vec<B256>) -> Result<Self> {
         if !foundry_evm_networks::arbitrum::is_arbitrum_chain(chain_id) {
             return Ok(Self::Unchanged);
@@ -1081,7 +1114,7 @@ const fn parent_beacon_block_root_for_network(
     spec_id: SpecId,
     parent_beacon_block_root: Option<B256>,
 ) -> Option<B256> {
-    if networks.is_monad() || !spec_id.is_enabled_in(SpecId::CANCUN) {
+    if networks.is_monad() || networks.is_arbitrum() || !spec_id.is_enabled_in(SpecId::CANCUN) {
         return None;
     }
 
@@ -1245,6 +1278,8 @@ mod tests {
             (networks, SpecId::CANCUN, root, root),
             (networks, SpecId::SHANGHAI, root, None),
             (networks, SpecId::SHANGHAI, None, None),
+            (NetworkConfigs::with_arbitrum(), SpecId::CANCUN, root, None),
+            (NetworkConfigs::with_arbitrum(), SpecId::PRAGUE, root, None),
             #[cfg(feature = "monad")]
             (NetworkConfigs::with_monad(), SpecId::PRAGUE, root, None),
             #[cfg(feature = "monad")]
@@ -1264,6 +1299,17 @@ mod tests {
         let config = TracingConfig { decode_internal: true, ..Default::default() };
 
         assert!(!args.resolve_tracing(&config, 0).decode_internal);
+    }
+
+    #[test]
+    fn native_arbitrum_replay_keeps_posting_gas() {
+        let l1_gas = serde_json::json!("0x64");
+        let eth_replay = ReplayGasLimits::Nitro(B256HashMap::default());
+        assert_eq!(eth_replay.expected_gas(1_000, Some(&l1_gas)), Some(900));
+        assert_eq!(eth_replay.expected_gas(1_000, None), None);
+        assert_eq!(eth_replay.expected_gas(99, Some(&l1_gas)), None);
+        assert_eq!(ReplayGasLimits::Unchanged.expected_gas(1_000, Some(&l1_gas)), Some(1_000));
+        assert_eq!(ReplayGasLimits::Unchanged.expected_gas(1_000, None), Some(1_000));
     }
 
     #[test]

@@ -3,11 +3,12 @@ use crate::{
     inspectors::{InspectorStackBuilder, TempoLabels},
 };
 use alloy_primitives::Address;
+use foundry_config::stylus::StylusConfig;
 use foundry_evm_core::{
     backend::Backend,
     evm::{
-        BlockEnvFor, EthEvmNetwork, EvmEnvFor, FoundryEvmNetwork, SpecFor, TempoEvmNetwork,
-        TxEnvFor,
+        ArbitrumEvmNetwork, BlockEnvFor, EthEvmNetwork, EvmEnvFor, FoundryEvmFactory,
+        FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
     },
 };
 use foundry_evm_networks::NetworkConfigs;
@@ -41,6 +42,8 @@ pub struct ExecutorBuilder<FEN: FoundryEvmNetwork> {
     /// The spec override. When `None`, the spec from `EvmEnv::cfg_env` is preserved.
     spec: Option<SpecFor<FEN>>,
     legacy_assertions: bool,
+    /// Concrete factory owning resolved execution policy.
+    factory: FEN::EvmFactory,
 }
 
 impl<FEN: FoundryEvmNetwork> Default for ExecutorBuilder<FEN> {
@@ -51,11 +54,18 @@ impl<FEN: FoundryEvmNetwork> Default for ExecutorBuilder<FEN> {
             gas_limit: None,
             spec: None,
             legacy_assertions: false,
+            factory: FEN::EvmFactory::default(),
         }
     }
 }
 
 impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
+    /// Replaces the resolved factory before initializing a backend.
+    pub fn evm_factory(mut self, factory: FEN::EvmFactory) -> Self {
+        self.factory = factory;
+        self
+    }
+
     /// Returns additional cheatcode addresses selected for this executor.
     #[inline]
     pub const fn extra_cheatcode_addresses(&self) -> &'static [Address] {
@@ -101,18 +111,32 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
         self
     }
 
-    /// Builds the executor as configured.
+    /// Builds an executor when backend initialization is known to be infallible.
+    ///
+    /// Tool entry points must use [`Self::try_build`] to report database failures normally.
     #[inline]
     pub fn build(
         self,
-        mut evm_env: EvmEnvFor<FEN>,
+        evm_env: EvmEnvFor<FEN>,
         tx_env: TxEnvFor<FEN>,
         db: Backend<FEN>,
+        networks: NetworkConfigs,
+    ) -> Executor<FEN> {
+        self.try_build(evm_env, tx_env, db, networks)
+            .expect("failed to initialize network backend state")
+    }
+
+    /// Builds the executor, propagating failures to initialize network-owned database state.
+    pub fn try_build(
+        self,
+        mut evm_env: EvmEnvFor<FEN>,
+        tx_env: TxEnvFor<FEN>,
+        mut db: Backend<FEN>,
         // TODO(monad-fen-lifecycle): Remove this argument after the backend's Monad fork-position
         // migration and the inspector's separate Celo configuration cleanup are complete.
         networks: NetworkConfigs,
-    ) -> Executor<FEN> {
-        let Self { mut stack, gas_limit, spec, legacy_assertions, .. } = self;
+    ) -> eyre::Result<Executor<FEN>> {
+        let Self { mut stack, gas_limit, spec, legacy_assertions, factory } = self;
         stack.networks = networks;
         if stack.block.is_none() {
             stack.block = Some(evm_env.block_env.clone());
@@ -124,12 +148,36 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
         if let Some(spec) = spec {
             evm_env.cfg_env.set_spec_and_mainnet_gas_params(spec);
         }
-        Executor::new(db, evm_env, tx_env, stack.build(), networks, gas_limit, legacy_assertions)
+        factory.initialize_backend(&mut db, &evm_env)?;
+        Ok(Executor::new(
+            db,
+            evm_env,
+            tx_env,
+            stack.build(),
+            networks,
+            gas_limit,
+            legacy_assertions,
+            factory,
+        ))
     }
 }
 
 impl ExecutorBuilder<EthEvmNetwork> {
     /// Creates the default Ethereum executor builder.
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl ExecutorBuilder<ArbitrumEvmNetwork> {
+    /// Resolves ArbOS initialization and local execution settings for this factory.
+    pub const fn stylus_config(mut self, config: StylusConfig) -> Self {
+        self.factory = foundry_evm_core::evm::ArbitrumEvmFactory::new(config);
+        self
+    }
+
+    /// Creates the default Arbitrum executor builder.
     #[inline]
     pub fn new() -> Self {
         Self::default()
