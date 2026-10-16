@@ -31,7 +31,7 @@ futures = "0.3.32"
 
 parking_lot = "0.12.5"
 
-revm = { version = "42.0.1", features = ["std", "serde"] }
+revm = { version = "43.0.0", features = ["std", "serde"] }
 
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "1.0.149", features = ["arbitrary_precision"] }
@@ -41,7 +41,7 @@ tokio = { version = "1.47.1", features = ["rt-multi-thread"] }
 tracing = "0.1.44"
 
 url = "2.5.8"
-zstd = { version = "0.13.3", optional = true }
+zstd = { version = "0.14.0", optional = true }
 
 [dev-dependencies]
 alloy-rpc-client = "2.2.0"

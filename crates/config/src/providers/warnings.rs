@@ -24,6 +24,9 @@ const COMPILATION_RESTRICTIONS_KEYS: &[&str] = &[
 const SETTINGS_OVERRIDES_KEYS: &[&str] =
     &["name", "via_ir", "evm_version", "optimizer", "optimizer_runs", "bytecode_hash"];
 
+/// Allowed keys for external compiler adapter entries.
+const EXTERNAL_COMPILER_KEYS: &[&str] = &["id", "command", "args", "roots", "settings"];
+
 /// Allowed keys for VyperConfig.
 /// Required because VyperConfig uses `skip_serializing_if = "Option::is_none"` on all fields,
 /// causing the default serialization to produce an empty dict.
@@ -55,6 +58,7 @@ const SYMBOLIC_KEYS: &[&str] = &[
     "use_fuzz_corpus",
     "corpus_seed_limit",
     "use_fuzz_frontiers",
+    "check_invariant_frontiers",
     "frontier_limit",
     "frontier_ids",
     "frontier_pcs",
@@ -216,6 +220,7 @@ impl<P: Provider> WarningsProvider<P> {
             let mut allowed_keys: BTreeSet<String> = default_dict.keys().cloned().collect();
             // The whole Stylus section is omitted when no overrides are configured.
             allowed_keys.insert("stylus".to_string());
+            allowed_keys.insert("external_compilers".to_string());
             for profile_map in profiles.clone() {
                 for (profile, value) in profile_map {
                     let Some(profile_dict) = value.as_dict() else {
@@ -410,6 +415,7 @@ impl<P: Provider> WarningsProvider<P> {
             "additional_compiler_profiles" => {
                 SETTINGS_OVERRIDES_KEYS.iter().map(|s| s.to_string()).collect()
             }
+            "external_compilers" => EXTERNAL_COMPILER_KEYS.iter().map(|s| s.to_string()).collect(),
             _ => BTreeSet::new(),
         }
     }

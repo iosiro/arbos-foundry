@@ -61,7 +61,7 @@ arbos-foundryup --update
 
 ### Build from Source
 
-Building requires Rust 1.96 or later, including the pinned compiler and build-metadata dependencies.
+Building requires Rust 1.98 or later, including the pinned compiler and build-metadata dependencies.
 
 ```bash
 git clone https://github.com/iosiro/arbos-foundry
@@ -442,7 +442,7 @@ rejected because the backend is already initialized.
 
 ## Differences from Upstream Foundry
 
-This fork is based on Foundry v1.8.1 with the following changes:
+This fork is based on Foundry v1.8.5 with the following changes:
 
 - **Added**: Native Stylus/WASM execution via [arbos-revm](https://github.com/iosiro/arbos-revm)
 - **Added**: ArbOS state initialization with configurable parameters

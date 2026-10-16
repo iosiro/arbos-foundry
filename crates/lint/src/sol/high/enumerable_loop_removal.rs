@@ -3,7 +3,7 @@ use crate::{
     linter::{LateLintPass, LintContext},
     sol::{
         Severity, SolLint,
-        analysis::{branch_always_exits, resolved_function, write_target},
+        analysis::{branch_always_exits, loop_update, write_target},
     },
 };
 use alloy_primitives::U256;
@@ -13,10 +13,9 @@ use solar::{
     sema::{
         Gcx,
         hir::{
-            self, BinOpKind, CallArgs, CallArgsKind, Expr, ExprKind, FunctionId, Hir, LoopSource,
-            Res, Stmt, StmtKind, VarKind, VariableId, Visit,
+            self, BinOpKind, Expr, ExprKind, Hir, LoopSource, Stmt, StmtKind, VarKind, VariableId,
+            Visit,
         },
-        ty::TyKind,
     },
 };
 use std::{convert::Infallible, ops::ControlFlow};
@@ -25,7 +24,7 @@ declare_forge_lint!(
     ENUMERABLE_LOOP_REMOVAL,
     Severity::High,
     "enumerable-loop-removal",
-    "`remove` on an EnumerableSet inside a loop that iterates it with `at` corrupts the iteration"
+    "`remove` on an `EnumerableSet` inside a loop that iterates it with `at` can corrupt the iteration"
 );
 
 // The detector reports only the shape it can judge without a flow analysis: a loop whose own
@@ -34,16 +33,15 @@ declare_forge_lint!(
 // deliberately unreported even when they corrupt iteration; set operands that cannot be
 // identified statically are conservatively treated as possible aliases.
 
-impl<'hir> LateLintPass<'hir> for EnumerableLoopRemoval {
+impl<'gcx> LateLintPass<'gcx> for EnumerableLoopRemoval {
     fn check_function(
         &mut self,
         ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        hir: &'hir Hir<'hir>,
-        func: &'hir hir::Function<'hir>,
+        gcx: Gcx<'gcx>,
+        func: &'gcx hir::Function<'gcx>,
     ) {
         if let Some(body) = func.body {
-            LoopFinder { gcx, hir, ctx, bindings: Vec::new() }.walk_body(body.stmts);
+            LoopFinder { gcx, ctx, bindings: Vec::new() }.walk_body(body.stmts);
         }
     }
 }
@@ -52,9 +50,8 @@ impl<'hir> LateLintPass<'hir> for EnumerableLoopRemoval {
 /// calls that corrupt that loop's own iteration. The walk keeps, at every point, what each local
 /// `storage` reference last named, so each loop is judged against the bindings standing where it
 /// runs rather than against every binding of the function.
-struct LoopFinder<'ctx, 's, 'c, 'hir> {
-    gcx: Gcx<'hir>,
-    hir: &'hir Hir<'hir>,
+struct LoopFinder<'ctx, 's, 'c, 'gcx> {
+    gcx: Gcx<'gcx>,
     ctx: &'ctx LintContext<'s, 'c>,
     /// What each local `storage` reference names where the walk stands, the latest entry
     /// winning; `None` once a write leaves it without one answer (a conditional branch, a loop
@@ -62,27 +59,27 @@ struct LoopFinder<'ctx, 's, 'c, 'hir> {
     bindings: Vec<(VariableId, Option<SetPath>)>,
 }
 
-impl<'hir> LoopFinder<'_, '_, '_, 'hir> {
-    fn walk_body(&mut self, stmts: &'hir [Stmt<'hir>]) {
+impl<'gcx> LoopFinder<'_, '_, '_, 'gcx> {
+    fn walk_body(&mut self, stmts: impl IntoIterator<Item = &'gcx Stmt<'gcx>>) {
         for stmt in stmts {
             self.walk_stmt(stmt);
         }
     }
 
-    fn walk_stmt(&mut self, stmt: &'hir Stmt<'hir>) {
+    fn walk_stmt(&mut self, stmt: &'gcx Stmt<'gcx>) {
         // A `for` desugars to `Block { init; Loop(For) }`; its index lives partly in the init,
         // which runs once, on the straight line entering the loop.
         if let StmtKind::Block(block) = &stmt.kind
             && let Some((last, init)) = block.stmts.split_last()
-            && let StmtKind::Loop(body, LoopSource::For | LoopSource::ForWithUpdate) = &last.kind
+            && let StmtKind::Loop(body, source @ LoopSource::For { .. }) = &last.kind
         {
             self.walk_body(init);
-            return self.enter_loop(init, body.stmts);
+            return self.enter_loop(init, body.stmts, loop_update(*source));
         }
         match &stmt.kind {
             // A bare block runs on the straight line: what it binds stays bound past it.
             StmtKind::Block(block) | StmtKind::UncheckedBlock(block) => self.walk_body(block.stmts),
-            StmtKind::Loop(body, _) => self.enter_loop(&[], body.stmts),
+            StmtKind::Loop(body, source) => self.enter_loop(&[], body.stmts, loop_update(*source)),
             // Which branch ran is not tracked: everything the statement writes stops naming one
             // thing, and what a branch binds for its own statements ends with the branch.
             StmtKind::If(_, then, else_) => {
@@ -111,12 +108,17 @@ impl<'hir> LoopFinder<'_, '_, '_, 'hir> {
     /// may have run on an earlier turn by the time any of its statements runs again, so
     /// everything the loop writes, init included, stops naming one thing before the loop is
     /// judged, and stays so past it.
-    fn enter_loop(&mut self, init: &'hir [Stmt<'hir>], body: &'hir [Stmt<'hir>]) {
+    fn enter_loop(
+        &mut self,
+        init: &'gcx [Stmt<'gcx>],
+        body: &'gcx [Stmt<'gcx>],
+        update: Option<&'gcx Stmt<'gcx>>,
+    ) {
         self.poison_writes(init);
-        self.poison_writes(body);
-        self.analyze_loop(user_body(body));
+        self.poison_writes(body.iter().chain(update));
+        self.analyze_loop(user_body(body).iter().chain(update));
         let mark = self.bindings.len();
-        self.walk_body(body);
+        self.walk_body(body.iter().chain(update));
         self.bindings.truncate(mark);
     }
 
@@ -124,26 +126,25 @@ impl<'hir> LoopFinder<'_, '_, '_, 'hir> {
     /// one thing, then a declaration or plain assignment binds its reference to what the
     /// right-hand side names right here (resolved eagerly, so a later write to a reference the
     /// right-hand side reads does not reach back into this binding).
-    fn apply_bindings(&mut self, stmt: &'hir Stmt<'hir>) {
+    fn apply_bindings(&mut self, stmt: &'gcx Stmt<'gcx>) {
         self.poison_writes(std::slice::from_ref(stmt));
         let bindings = &mut self.bindings;
         let mut bind = |var: VariableId, value: &Expr<'_>| {
-            let path = set_path(self.hir, value, bindings, &mut Vec::new());
+            let path = set_path(self.gcx, value, bindings, &mut Vec::new());
             bindings.push((var, path));
         };
         match &stmt.kind {
             StmtKind::DeclSingle(var) => {
-                if let Some(init) = self.hir.variable(*var).initializer {
+                if let Some(init) = self.gcx.hir.variable(*var).initializer {
                     bind(*var, init);
                 }
             }
             StmtKind::Expr(expr) => {
                 if let ExprKind::Assign(target, None, value) = &expr.peel_parens().kind
-                    && let ExprKind::Ident(reses) = &target.peel_parens().kind
+                    && let ExprKind::Ident(_) = &target.peel_parens().kind
+                    && let Some(var) = self.gcx.resolved_variable(target)
                 {
-                    for var in reses.iter().filter_map(Res::as_variable) {
-                        bind(var, value);
-                    }
+                    bind(var, value);
                 }
             }
             _ => {}
@@ -151,31 +152,30 @@ impl<'hir> LoopFinder<'_, '_, '_, 'hir> {
     }
 
     /// Marks everything the statements write as no longer naming one thing.
-    fn poison_writes(&mut self, stmts: &'hir [Stmt<'hir>]) {
+    fn poison_writes(&mut self, stmts: impl IntoIterator<Item = &'gcx Stmt<'gcx>>) {
         let mut written = Vec::new();
-        collect_writes(self.hir, stmts, &mut written);
+        collect_writes(self.gcx, stmts, &mut written);
         self.bindings.extend(written.into_iter().map(|var| (var, None)));
     }
 
     /// Flags the removals in a straight-line loop body that remove from a set the loop reads with
     /// `at` at an unconditional ascending cadence.
-    fn analyze_loop(&mut self, body: &'hir [Stmt<'hir>]) {
+    fn analyze_loop(&mut self, body: impl Iterator<Item = &'gcx Stmt<'gcx>> + Clone) {
         // Control flow would make the corruption depend on the path taken, which is not tracked;
         // without an ascending index there is no upward walk for swap-and-pop to disturb.
-        if !body_is_straight_line(body) {
+        if !body_is_straight_line(self.gcx, body.clone()) {
             return;
         }
-        let cadence = ascending_cadence(self.hir, body);
+        let cadence = ascending_cadence(self.gcx, body.clone());
         if cadence.is_empty() {
             return;
         }
         let (mut iterated, mut removes) = (Vec::new(), Vec::new());
         let mut calls = ExprWalker {
-            hir: self.hir,
+            hir: &self.gcx.hir,
             prune_unreachable: true,
-            f: |expr: &'hir Expr<'hir>| {
-                let Some(call) = enumerable_set_call(self.gcx, self.hir, &self.bindings, expr)
-                else {
+            f: |expr: &'gcx Expr<'gcx>| {
+                let Some(call) = enumerable_set_call(self.gcx, &self.bindings, expr) else {
                     return;
                 };
                 match call.op {
@@ -209,20 +209,20 @@ impl<'hir> LoopFinder<'_, '_, '_, 'hir> {
 
 /// Calls `f` on every expression under the visited statements. With `prune_unreachable`, the
 /// arms of `&&`/`||`/`?:` that a literal boolean condition proves unreachable are skipped.
-struct ExprWalker<'hir, F> {
-    hir: &'hir Hir<'hir>,
+struct ExprWalker<'gcx, F> {
+    hir: &'gcx Hir<'gcx>,
     prune_unreachable: bool,
     f: F,
 }
 
-impl<'hir, F: FnMut(&'hir Expr<'hir>)> Visit<'hir> for ExprWalker<'hir, F> {
+impl<'gcx, F: FnMut(&'gcx Expr<'gcx>)> Visit<'gcx> for ExprWalker<'gcx, F> {
     type BreakValue = Infallible;
 
-    fn hir(&self) -> &'hir Hir<'hir> {
+    fn hir(&self) -> &'gcx Hir<'gcx> {
         self.hir
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<Infallible> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<Infallible> {
         (self.f)(expr);
         if !self.prune_unreachable {
             return self.walk_expr(expr);
@@ -261,7 +261,7 @@ impl<'hir, F: FnMut(&'hir Expr<'hir>)> Visit<'hir> for ExprWalker<'hir, F> {
 /// wraps it in: `for`/`while` become a single `if (cond) { body } else break`, `do-while` appends
 /// `if (cond) continue; else break;`. Without peeling, the guard's `break`/`continue` would read
 /// as user control flow. A body of another shape is returned unchanged.
-fn user_body<'hir>(body: &'hir [Stmt<'hir>]) -> &'hir [Stmt<'hir>] {
+fn user_body<'gcx>(body: &'gcx [Stmt<'gcx>]) -> &'gcx [Stmt<'gcx>] {
     let is_break = |stmt: &Stmt<'_>| matches!(stmt.kind, StmtKind::Break);
     match body {
         [only] => match &only.kind {
@@ -284,12 +284,15 @@ fn user_body<'hir>(body: &'hir [Stmt<'hir>]) -> &'hir [Stmt<'hir>] {
 /// statement, inline assembly or nested loop (bare blocks are transparent). Any of these could
 /// let control skip a removal or the cadence step, or leave the loop before a shifted slot is
 /// read, none of which this detector tracks.
-fn body_is_straight_line(stmts: &[Stmt<'_>]) -> bool {
-    stmts.iter().all(|stmt| {
-        !branch_always_exits(stmt)
+fn body_is_straight_line<'gcx>(
+    gcx: Gcx<'_>,
+    stmts: impl IntoIterator<Item = &'gcx Stmt<'gcx>>,
+) -> bool {
+    stmts.into_iter().all(|stmt| {
+        !branch_always_exits(gcx, stmt)
             && match &stmt.kind {
                 StmtKind::Block(block) | StmtKind::UncheckedBlock(block) => {
-                    body_is_straight_line(block.stmts)
+                    body_is_straight_line(gcx, block.stmts)
                 }
                 StmtKind::If(..)
                 | StmtKind::Try(..)
@@ -305,32 +308,35 @@ fn body_is_straight_line(stmts: &[Stmt<'_>]) -> bool {
 /// The loop's own indices that step upward unconditionally: bare identifiers whose every write
 /// on the straight line of the body (bare blocks included) is a supported ascending step. A
 /// reset, a no-op step, a decrement or composite arithmetic disqualifies the variable.
-fn ascending_cadence<'hir>(hir: &'hir Hir<'hir>, body: &'hir [Stmt<'hir>]) -> Vec<VariableId> {
+fn ascending_cadence<'gcx>(
+    gcx: Gcx<'gcx>,
+    body: impl IntoIterator<Item = &'gcx Stmt<'gcx>>,
+) -> Vec<VariableId> {
     let (mut cadence, mut other_writes) = (Vec::new(), Vec::new());
-    collect_cadence_writes(hir, body, &mut cadence, &mut other_writes);
+    collect_cadence_writes(gcx, body, &mut cadence, &mut other_writes);
     cadence.retain(|var| !other_writes.contains(var));
     cadence
 }
 
-fn collect_cadence_writes<'hir>(
-    hir: &'hir Hir<'hir>,
-    stmts: &'hir [Stmt<'hir>],
+fn collect_cadence_writes<'gcx>(
+    gcx: Gcx<'gcx>,
+    stmts: impl IntoIterator<Item = &'gcx Stmt<'gcx>>,
     cadence: &mut Vec<VariableId>,
     other_writes: &mut Vec<VariableId>,
 ) {
     for stmt in stmts {
         let mut written = match &stmt.kind {
             StmtKind::Block(block) | StmtKind::UncheckedBlock(block) => {
-                collect_cadence_writes(hir, block.stmts, cadence, other_writes);
+                collect_cadence_writes(gcx, block.stmts, cadence, other_writes);
                 continue;
             }
             StmtKind::DeclSingle(var) => vec![*var],
             StmtKind::DeclMulti(vars, _) => vars.iter().flatten().copied().collect(),
             _ => Vec::new(),
         };
-        collect_writes(hir, std::slice::from_ref(stmt), &mut written);
+        collect_writes(gcx, std::slice::from_ref(stmt), &mut written);
         let ascending = match &stmt.kind {
-            StmtKind::Expr(expr) => ascending_step(expr.peel_parens()),
+            StmtKind::Expr(expr) => ascending_step(gcx, expr.peel_parens()),
             _ => None,
         };
         for var in written {
@@ -345,22 +351,26 @@ fn collect_cadence_writes<'hir>(
 
 /// The bare identifier an expression steps upward by one of the simple ascending forms:
 /// `i++`/`++i`, `i += <positive literal>`, `i = i + <positive literal>` or its commutation.
-fn ascending_step<'hir>(expr: &'hir Expr<'hir>) -> Option<VariableId> {
+fn ascending_step<'gcx>(gcx: Gcx<'gcx>, expr: &'gcx Expr<'gcx>) -> Option<VariableId> {
+    let variable = |expr: &Expr<'_>| {
+        gcx.resolved_variable(expr)
+            .filter(|_| matches!(expr.peel_parens().kind, ExprKind::Ident(_)))
+    };
     match &expr.kind {
         ExprKind::Unary(op, operand) if matches!(op.kind, UnOpKind::PreInc | UnOpKind::PostInc) => {
-            operand.as_variable()
+            variable(operand)
         }
         ExprKind::Assign(lhs, Some(op), rhs)
             if op.kind == BinOpKind::Add && is_positive_literal(rhs) =>
         {
-            lhs.as_variable()
+            variable(lhs)
         }
         ExprKind::Assign(lhs, None, rhs) => {
-            let target = lhs.as_variable()?;
+            let target = variable(lhs)?;
             let ExprKind::Binary(left, op, right) = &rhs.peel_parens().kind else { return None };
             (op.kind == BinOpKind::Add
-                && ((left.as_variable() == Some(target) && is_positive_literal(right))
-                    || (is_positive_literal(left) && right.as_variable() == Some(target))))
+                && ((variable(left) == Some(target) && is_positive_literal(right))
+                    || (is_positive_literal(left) && variable(right) == Some(target))))
             .then_some(target)
         }
         _ => None,
@@ -385,26 +395,26 @@ fn literal_bool(expr: &Expr<'_>) -> Option<bool> {
 /// The variables a statement list writes through expressions, nested loops included:
 /// assignments (tuple targets included), increments, decrements and deletes. Member and indexed
 /// targets do not write their base variable.
-fn collect_writes<'hir>(
-    hir: &'hir Hir<'hir>,
-    stmts: &'hir [Stmt<'hir>],
+fn collect_writes<'gcx>(
+    gcx: Gcx<'gcx>,
+    stmts: impl IntoIterator<Item = &'gcx Stmt<'gcx>>,
     out: &mut Vec<VariableId>,
 ) {
-    fn lvalue_variables(expr: &Expr<'_>, out: &mut Vec<VariableId>) {
+    fn lvalue_variables(gcx: Gcx<'_>, expr: &Expr<'_>, out: &mut Vec<VariableId>) {
         match &expr.peel_parens().kind {
-            ExprKind::Ident(reses) => out.extend(reses.iter().filter_map(Res::as_variable)),
+            ExprKind::Ident(_) => out.extend(gcx.resolved_variable(expr)),
             ExprKind::Tuple(exprs) => {
-                exprs.iter().flatten().for_each(|expr| lvalue_variables(expr, out));
+                exprs.iter().flatten().for_each(|expr| lvalue_variables(gcx, expr, out));
             }
             _ => {}
         }
     }
     let mut writes = ExprWalker {
-        hir,
+        hir: &gcx.hir,
         prune_unreachable: false,
         f: |expr: &Expr<'_>| {
             if let Some(target) = write_target(expr) {
-                lvalue_variables(target, out)
+                lvalue_variables(gcx, target, out)
             }
         },
     };
@@ -420,26 +430,25 @@ enum SetOp {
 }
 
 /// A resolved EnumerableSet call.
-struct SetCall<'hir> {
+struct SetCall<'gcx> {
     op: SetOp,
     set: Option<SetPath>,
     /// The `index` argument of `at`.
-    index: Option<&'hir Expr<'hir>>,
+    index: Option<&'gcx Expr<'gcx>>,
 }
 
 /// The EnumerableSet `at` or `remove` a call dispatches to. Resolving through the type checker
 /// covers the `using for` method form, the library-qualified form and import aliases. The library
 /// is identified only by its kind and exact `EnumerableSet` name, not its source or behavior.
-fn enumerable_set_call<'hir>(
-    gcx: Gcx<'hir>,
-    hir: &'hir Hir<'hir>,
+fn enumerable_set_call<'gcx>(
+    gcx: Gcx<'gcx>,
     bindings: &Bindings,
-    expr: &'hir Expr<'hir>,
-) -> Option<SetCall<'hir>> {
-    let ExprKind::Call(callee, args, _) = &expr.kind else { return None };
-    let function_id = resolved_function(gcx, callee)?;
-    let function = hir.function(function_id);
-    let contract = hir.contract(function.contract?);
+    expr: &'gcx Expr<'gcx>,
+) -> Option<SetCall<'gcx>> {
+    let ExprKind::Call(callee, ..) = &expr.kind else { return None };
+    let function_id = gcx.resolved_function(callee)?;
+    let function = gcx.hir.function(function_id);
+    let contract = gcx.hir.contract(function.contract?);
     if !contract.kind.is_library() || contract.name.as_str() != "EnumerableSet" {
         return None;
     }
@@ -451,15 +460,17 @@ fn enumerable_set_call<'hir>(
     // The set operand is the bound receiver in the method form and the first argument in the
     // library-qualified form; the index of `at` sits right after it.
     let (set_expr, index_arg) = match &callee.peel_parens().kind {
-        ExprKind::Member(receiver, _) if is_enumerable_set_value(gcx, hir, receiver) => {
+        ExprKind::Member(receiver, _)
+            if gcx.resolved_call(expr).is_some_and(|resolved| resolved.attached) =>
+        {
             (Some(&**receiver), 0)
         }
-        _ => (nth_argument(hir, function_id, args, 0, 0), 1),
+        _ => (gcx.call_arg(expr, 0), 1),
     };
     Some(SetCall {
         op,
-        set: set_expr.and_then(|expr| set_path(hir, expr, bindings, &mut Vec::new())),
-        index: nth_argument(hir, function_id, args, index_arg, 1),
+        set: set_expr.and_then(|expr| set_path(gcx, expr, bindings, &mut Vec::new())),
+        index: gcx.call_arg(expr, index_arg),
     })
 }
 
@@ -486,19 +497,19 @@ type Bindings = [(VariableId, Option<SetPath>)];
 /// call result, a reference without one straight-line binding, anything the analysis would have
 /// to evaluate.
 fn set_path(
-    hir: &Hir<'_>,
+    gcx: Gcx<'_>,
     expr: &Expr<'_>,
     bindings: &Bindings,
     seen: &mut Vec<VariableId>,
 ) -> Option<SetPath> {
     match &expr.peel_parens().kind {
         ExprKind::Ident(_) => {
-            let var = expr.as_variable()?;
+            let var = gcx.resolved_variable(expr)?;
             if seen.contains(&var) {
                 return None;
             }
             seen.push(var);
-            let variable = hir.variable(var);
+            let variable = gcx.hir.variable(var);
             if !matches!(variable.kind, VarKind::Statement) {
                 return Some(SetPath { base: var, steps: Vec::new() });
             }
@@ -507,53 +518,21 @@ fn set_path(
             // anew each turn; a tuple-destructured one has neither and may name any set.
             match bindings.iter().rev().find(|(bound, _)| *bound == var) {
                 Some((_, binding)) => binding.clone(),
-                None => set_path(hir, variable.initializer?, bindings, seen),
+                None => set_path(gcx, variable.initializer?, bindings, seen),
             }
         }
         ExprKind::Member(base, field) => {
-            let mut path = set_path(hir, base, bindings, seen)?;
+            let mut path = set_path(gcx, base, bindings, seen)?;
             path.steps.push(Step::Field(field.name));
             Some(path)
         }
         ExprKind::Index(base, Some(index)) => {
             let ExprKind::Lit(lit) = &index.peel_parens().kind else { return None };
             let LitKind::Number(key) = &lit.kind else { return None };
-            let mut path = set_path(hir, base, bindings, seen)?;
+            let mut path = set_path(gcx, base, bindings, seen)?;
             path.steps.push(Step::Key(*key));
             Some(path)
         }
         _ => None,
     }
-}
-
-/// The argument at position `arg` of a positional call, or the one a named call binds to the
-/// callee's parameter at position `parameter`. In the method form the bound receiver fills the
-/// first parameter, so positional arguments sit one position before the parameters they fill.
-fn nth_argument<'hir>(
-    hir: &'hir Hir<'hir>,
-    function_id: FunctionId,
-    args: &'hir CallArgs<'hir>,
-    arg: usize,
-    parameter: usize,
-) -> Option<&'hir Expr<'hir>> {
-    match &args.kind {
-        CallArgsKind::Unnamed(exprs) => exprs.get(arg),
-        CallArgsKind::Named(named) => {
-            let parameter = *hir.function(function_id).parameters.get(parameter)?;
-            let name = hir.variable(parameter).name?;
-            named.iter().find(|argument| argument.name.name == name.name).map(|arg| &arg.value)
-        }
-    }
-}
-
-/// Whether `receiver` is a value of a struct declared in a library (or contract) named
-/// `EnumerableSet`, which tells the bound method form apart from the library-qualified form.
-fn is_enumerable_set_value<'hir>(
-    gcx: Gcx<'hir>,
-    hir: &'hir Hir<'hir>,
-    receiver: &Expr<'_>,
-) -> bool {
-    let Some(ty) = gcx.type_of_expr(receiver.peel_parens().id) else { return false };
-    let TyKind::Struct(id) = ty.peel_refs().kind else { return false };
-    hir.strukt(id).contract.is_some_and(|c| hir.contract(c).name.as_str() == "EnumerableSet")
 }

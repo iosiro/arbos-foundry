@@ -1,20 +1,17 @@
 use super::ExternalFunction;
 use crate::{
     linter::{LateLintPass, LintContext},
-    sol::{
-        Severity, SolLint,
-        analysis::{function_ids, is_builtin},
-    },
+    sol::{Severity, SolLint, analysis::is_builtin},
 };
 use solar::{
     ast::{ContractKind, DataLocation, Visibility},
-    interface::{Symbol, data_structures::Never, sym},
+    interface::{data_structures::Never, sym},
     sema::{
         Gcx,
         hir::{
-            self, ContractId, Expr, ExprKind, FunctionId, ItemId, Res, Stmt, StmtKind, VariableId,
-            Visit as _,
+            self, ContractId, Expr, ExprKind, FunctionId, Stmt, StmtKind, VariableId, Visit as _,
         },
+        ty::TyKind,
     },
 };
 use std::{
@@ -28,7 +25,7 @@ declare_forge_lint!(
     EXTERNAL_FUNCTION,
     Severity::Gas,
     "external-function",
-    "public function can be declared external"
+    "`public` function can be declared `external`"
 );
 
 #[derive(Default)]
@@ -36,8 +33,8 @@ struct ProjectIndex {
     /// Functions referenced by name anywhere in the project: internal calls (`foo()`) and
     /// function pointers (`fn = foo;`).
     referenced: HashSet<FunctionId>,
-    /// Contracts containing a `super.<name>` access, keyed by `<name>`.
-    super_called: HashMap<Symbol, HashSet<ContractId>>,
+    /// Contracts containing a `super` access, keyed by its resolved function.
+    super_called: HashMap<FunctionId, HashSet<ContractId>>,
 }
 
 thread_local! {
@@ -46,16 +43,17 @@ thread_local! {
     static PROJECT_INDEX: RefCell<Option<(usize, Rc<ProjectIndex>)>> = const { RefCell::new(None) };
 }
 
-fn project_index<'hir>(hir: &'hir hir::Hir<'hir>) -> Rc<ProjectIndex> {
-    let key = std::ptr::from_ref(hir) as usize;
+fn project_index(gcx: Gcx<'_>) -> Rc<ProjectIndex> {
+    let key = std::ptr::from_ref(&gcx.hir) as usize;
     PROJECT_INDEX.with_borrow_mut(|slot| match slot {
         Some((cached_key, index)) if *cached_key == key => index.clone(),
-        _ => slot.insert((key, Rc::new(build_project_index(hir)))).1.clone(),
+        _ => slot.insert((key, Rc::new(build_project_index(gcx)))).1.clone(),
     })
 }
 
-fn build_project_index<'hir>(hir: &'hir hir::Hir<'hir>) -> ProjectIndex {
-    let mut builder = IndexBuilder { hir, index: ProjectIndex::default(), contract: None };
+fn build_project_index(gcx: Gcx<'_>) -> ProjectIndex {
+    let hir = &gcx.hir;
+    let mut builder = IndexBuilder { gcx, index: ProjectIndex::default(), contract: None };
     for func in hir.functions() {
         builder.contract = func.contract;
         let _ = builder.visit_function(func);
@@ -68,27 +66,35 @@ fn build_project_index<'hir>(hir: &'hir hir::Hir<'hir>) -> ProjectIndex {
     builder.index
 }
 
-struct IndexBuilder<'hir> {
-    hir: &'hir hir::Hir<'hir>,
+struct IndexBuilder<'gcx> {
+    gcx: Gcx<'gcx>,
     index: ProjectIndex,
     /// Contract being walked, to attribute `super.<name>` accesses to the caller.
     contract: Option<ContractId>,
 }
 
-impl<'hir> hir::Visit<'hir> for IndexBuilder<'hir> {
+impl<'gcx> hir::Visit<'gcx> for IndexBuilder<'gcx> {
     type BreakValue = Never;
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<Self::BreakValue> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<Self::BreakValue> {
         match &expr.kind {
-            ExprKind::Ident(_) => self.index.referenced.extend(function_ids(expr)),
-            ExprKind::Member(base, member) if is_builtin(base, sym::super_) => {
-                if let Some(cid) = self.contract {
-                    self.index.super_called.entry(member.name).or_default().insert(cid);
+            ExprKind::Ident(_) => self.index.referenced.extend(self.gcx.resolved_function(expr)),
+            ExprKind::Member(base, _) if is_builtin(self.gcx, base, sym::super_) => {
+                if let Some(cid) = self.contract
+                    && let Some(fid) = self.gcx.resolved_function(expr)
+                {
+                    self.index.super_called.entry(fid).or_default().insert(cid);
                 }
+            }
+            ExprKind::Member(base, _)
+                if matches!(self.gcx.type_of_expr(base.id).map(|ty| ty.kind),
+                    Some(TyKind::Type(ty)) if matches!(ty.kind, TyKind::Contract(_))) =>
+            {
+                self.index.referenced.extend(self.gcx.resolved_function(expr));
             }
             _ => {}
         }
@@ -96,15 +102,14 @@ impl<'hir> hir::Visit<'hir> for IndexBuilder<'hir> {
     }
 }
 
-impl<'hir> LateLintPass<'hir> for ExternalFunction {
+impl<'gcx> LateLintPass<'gcx> for ExternalFunction {
     fn check_nested_contract(
         &mut self,
         ctx: &LintContext,
-        _gcx: Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
+        gcx: Gcx<'gcx>,
         contract_id: ContractId,
     ) {
-        let contract = hir.contract(contract_id);
+        let contract = gcx.hir.contract(contract_id);
         // Libraries have different `external` semantics (delegatecall vs inlining); interfaces
         // have no bodies.
         if !ctx.is_lint_enabled(EXTERNAL_FUNCTION.id)
@@ -113,10 +118,10 @@ impl<'hir> LateLintPass<'hir> for ExternalFunction {
         {
             return;
         }
-        let index = project_index(hir);
+        let index = project_index(gcx);
 
         for fid in contract.functions() {
-            let func = hir.function(fid);
+            let func = gcx.hir.function(fid);
             // Overrides can only widen visibility (`external` -> `public`), so the base chain is
             // flagged instead; abstract declarations must stay `public` to be overridable.
             let Some(name) = func.name else { continue };
@@ -128,33 +133,27 @@ impl<'hir> LateLintPass<'hir> for ExternalFunction {
                 continue;
             }
             // Only reference parameters currently in `memory` yield meaningful savings.
-            if !func.parameters.iter().any(|&p| is_memory_reference(hir.variable(p))) {
+            if !func.parameters.iter().any(|&p| is_memory_reference(gcx, p)) {
                 continue;
             }
-            let mut finder = ParamEscapeFinder { hir, params: func.parameters };
+            let mut finder = ParamEscapeFinder { gcx, params: func.parameters };
             if finder.visit_function(func).is_break() {
                 continue;
             }
-            // Only a `super.<name>` call from a strict descendant can resolve into this contract.
-            let super_called = index.super_called.get(&name.name).is_some_and(|callers| {
+            let super_called = index.super_called.iter().any(|(&target, callers)| {
                 callers.iter().any(|&caller| {
-                    caller != contract_id
-                        && hir.contract(caller).linearized_bases.contains(&contract_id)
+                    gcx.hir.contracts_enumerated().any(|(cid, contract)| {
+                        contract.linearized_bases.contains(&caller)
+                            && gcx.resolve_super_function(cid, caller, target) == fid
+                    })
                 })
             });
-            // A referenced same-name/arity function in this contract or a derivative conceptually
-            // targets the base's slot. Same-arity overloads are conflated (HIR types have no
-            // structural equality), yielding only false negatives.
-            let override_referenced = hir
+            // A reference to this function's virtual target in a descendant also uses its slot.
+            let override_referenced = gcx
+                .hir
                 .contracts_enumerated()
                 .filter(|(cid, c)| *cid == contract_id || c.linearized_bases.contains(&contract_id))
-                .flat_map(|(_, c)| c.functions())
-                .filter(|fid| index.referenced.contains(fid))
-                .any(|fid| {
-                    let other = hir.function(fid);
-                    other.name.is_some_and(|n| n.name == name.name)
-                        && other.parameters.len() == func.parameters.len()
-                });
+                .any(|(cid, _)| index.referenced.contains(&gcx.resolve_virtual_function(cid, fid)));
             if !super_called && !override_referenced {
                 ctx.emit(&EXTERNAL_FUNCTION, name.span);
             }
@@ -164,35 +163,35 @@ impl<'hir> LateLintPass<'hir> for ExternalFunction {
 
 /// Breaks when a parameter is written, aliased, passed to a callee or modifier that could mutate
 /// it through the internal-call memory-reference aliasing rule.
-struct ParamEscapeFinder<'a, 'hir> {
-    hir: &'hir hir::Hir<'hir>,
+struct ParamEscapeFinder<'a, 'gcx> {
+    gcx: Gcx<'gcx>,
     params: &'a [VariableId],
 }
 
 impl ParamEscapeFinder<'_, '_> {
     fn is_param(&self, expr: &Expr<'_>) -> bool {
-        root_var_is(expr, &|v| self.params.contains(&v))
+        root_var_is(self.gcx, expr, &|v| self.params.contains(&v))
     }
 }
 
-impl<'hir> hir::Visit<'hir> for ParamEscapeFinder<'_, 'hir> {
+impl<'gcx> hir::Visit<'gcx> for ParamEscapeFinder<'_, 'gcx> {
     type BreakValue = ();
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_modifier(&mut self, modifier: &'hir hir::Modifier<'hir>) -> ControlFlow<()> {
+    fn visit_modifier(&mut self, modifier: &'gcx hir::Modifier<'gcx>) -> ControlFlow<()> {
         if modifier.args.exprs().any(|arg| self.is_param(arg)) {
             return ControlFlow::Break(());
         }
         self.walk_modifier(modifier)
     }
 
-    fn visit_stmt(&mut self, stmt: &'hir Stmt<'hir>) -> ControlFlow<()> {
+    fn visit_stmt(&mut self, stmt: &'gcx Stmt<'gcx>) -> ControlFlow<()> {
         if let StmtKind::DeclSingle(vid) = &stmt.kind
-            && let var = self.hir.variable(*vid)
-            && is_memory_reference(var)
+            && let var = self.gcx.hir.variable(*vid)
+            && is_memory_reference(self.gcx, *vid)
             && var.initializer.is_some_and(|init| self.is_param(init))
         {
             return ControlFlow::Break(());
@@ -200,21 +199,25 @@ impl<'hir> hir::Visit<'hir> for ParamEscapeFinder<'_, 'hir> {
         self.walk_stmt(stmt)
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<()> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<()> {
         let escapes = match &expr.kind {
             ExprKind::Assign(lhs, op, rhs) => {
                 self.is_param(lhs)
                     || (op.is_none()
-                        && root_var_is(lhs, &|v| {
-                            let var = self.hir.variable(v);
-                            var.is_local_variable() && is_memory_reference(var)
+                        && root_var_is(self.gcx, lhs, &|v| {
+                            let var = self.gcx.hir.variable(v);
+                            var.is_local_variable() && is_memory_reference(self.gcx, v)
                         })
                         && self.is_param(rhs))
             }
             ExprKind::Delete(inner) => self.is_param(inner),
             ExprKind::Unary(op, inner) => op.kind.has_side_effects() && self.is_param(inner),
-            ExprKind::Call(callee, args, opts) => {
-                !is_type_conversion(callee)
+            ExprKind::Call(callee, args) => {
+                let (callee, opts) = callee.split_call_options();
+                !self
+                    .gcx
+                    .type_of_expr(callee.id)
+                    .is_some_and(|ty| matches!(ty.kind, TyKind::Type(_)))
                     && (args.exprs().any(|arg| self.is_param(arg))
                         || opts.is_some_and(|opts| {
                             opts.args.iter().any(|opt| self.is_param(&opt.value))
@@ -231,35 +234,19 @@ impl<'hir> hir::Visit<'hir> for ParamEscapeFinder<'_, 'hir> {
     }
 }
 
-fn is_memory_reference(var: &hir::Variable<'_>) -> bool {
-    var.ty.kind.is_reference_type() && var.data_location == Some(DataLocation::Memory)
-}
-
-/// `T(...)`, `new T(...)`, or a struct/contract/enum/UDVT conversion.
-fn is_type_conversion(callee: &Expr<'_>) -> bool {
-    match &callee.peel_parens().kind {
-        ExprKind::Type(_) | ExprKind::TypeCall(_) | ExprKind::New(_) => true,
-        ExprKind::Ident(reses) => reses.iter().any(|r| {
-            matches!(
-                r,
-                Res::Item(
-                    ItemId::Struct(_) | ItemId::Contract(_) | ItemId::Enum(_) | ItemId::Udvt(_)
-                )
-            )
-        }),
-        _ => false,
-    }
+fn is_memory_reference(gcx: Gcx<'_>, var: VariableId) -> bool {
+    gcx.type_of_item(var.into()).loc() == Some(DataLocation::Memory)
 }
 
 /// Whether the variable at the root of `expr` (through parens, members, indexes and slices)
 /// satisfies `pred`.
-fn root_var_is(expr: &Expr<'_>, pred: &impl Fn(VariableId) -> bool) -> bool {
+fn root_var_is(gcx: Gcx<'_>, expr: &Expr<'_>, pred: &impl Fn(VariableId) -> bool) -> bool {
     match &expr.peel_parens().kind {
-        ExprKind::Ident(reses) => reses.iter().filter_map(Res::as_variable).any(pred),
+        ExprKind::Ident(_) => gcx.resolved_variable(expr).is_some_and(pred),
         ExprKind::Member(base, _)
         | ExprKind::Payable(base)
         | ExprKind::Index(base, _)
-        | ExprKind::Slice(base, ..) => root_var_is(base, pred),
+        | ExprKind::Slice(base, ..) => root_var_is(gcx, base, pred),
         _ => false,
     }
 }

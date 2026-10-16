@@ -110,7 +110,7 @@ async fn nested_custom_chain_celo_fork_preserves_execution_profile() {
     assert_eq!(nested_api.anvil_node_info().await.unwrap().network.as_deref(), Some("celo"));
     assert_eq!(
         nested_api.config().unwrap().current.precompiles.get("celo transfer"),
-        Some(&address!("00000000000000000000000000000000000000fd"))
+        Some(&Address::with_last_byte(0xfd))
     );
 }
 
@@ -555,11 +555,7 @@ async fn test_can_set_storage_bsc_fork() {
 
     let busd_contract = BUSD::new(busd_addr, &provider);
 
-    let balance = busd_contract
-        .balanceOf(address!("0x0000000000000000000000000000000000000000"))
-        .call()
-        .await
-        .unwrap();
+    let balance = busd_contract.balanceOf(Address::ZERO).call().await.unwrap();
     assert_eq!(balance, U256::from(12345u64));
 }
 
@@ -577,7 +573,7 @@ async fn can_get_node_info() {
 
     let expected_node_info = NodeInfo {
         current_block_number: 0_u64,
-        current_block_timestamp: 1,
+        current_block_timestamp: block.header.timestamp,
         current_block_hash: block.header.hash,
         hard_fork,
         transaction_order: "fees".to_owned(),
@@ -718,7 +714,7 @@ async fn test_set_chain_id() {
     let from = handle.dev_accounts().next().unwrap();
     let receipt = provider
         .send_transaction(WithOtherFields::new(
-            TransactionRequest::default().from(from).to(Address::random()).value(U256::from(1)),
+            TransactionRequest::default().from(from).to(Address::random()).value(U256::ONE),
         ))
         .await
         .unwrap()
@@ -778,6 +774,22 @@ async fn test_revert_restores_time_offset() {
     let block = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
     assert!(block.header.timestamp >= initial.header.timestamp + 100);
     assert!(block.header.timestamp < initial.header.timestamp + 200);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_revert_restores_next_block_timestamp() {
+    let (api, _handle) = spawn(NodeConfig::test()).await;
+    let initial = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
+    let next_timestamp = initial.header.timestamp + 1_000;
+
+    api.evm_set_next_block_timestamp(next_timestamp).unwrap();
+    let snapshot = api.evm_snapshot().await.unwrap();
+    api.mine_one().await.unwrap();
+    assert!(api.evm_revert(snapshot).await.unwrap());
+    api.mine_one().await.unwrap();
+
+    let block = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
+    assert_eq!(block.header.timestamp, next_timestamp);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -874,6 +886,21 @@ async fn test_set_next_block_prevrandao_cleared_on_revert() {
 
     let block = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
     assert_ne!(block.header.mix_hash, Some(prevrandao));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_next_block_prevrandao_restored_on_revert() {
+    let (api, _handle) = spawn(NodeConfig::test()).await;
+    let prevrandao = b256!("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+
+    api.anvil_set_next_block_prevrandao(prevrandao).await.unwrap();
+    let state_snapshot = api.evm_snapshot().await.unwrap();
+    api.mine_one().await.unwrap();
+    assert!(api.evm_revert(state_snapshot).await.unwrap());
+    api.mine_one().await.unwrap();
+
+    let block = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
+    assert_eq!(block.header.mix_hash, Some(prevrandao));
 }
 
 // test that after a snapshot revert, the env block is reset
@@ -1109,8 +1136,9 @@ async fn can_replay_arbitrum_transaction_with_priority_fee_above_max_fee() {
     let trace = api
         .trace_replay_transaction(tx_hash, [TraceType::Trace].into_iter().collect())
         .await
+        .unwrap()
         .unwrap();
-    assert!(!trace.trace.is_empty());
+    assert!(!trace.full_trace.trace.is_empty());
 
     let mut tx = TxEip1559 {
         chain_id: api.chain_id(),
@@ -1138,7 +1166,7 @@ async fn can_replay_arbitrum_transaction_with_priority_fee_above_max_fee() {
     let mut tx = TxEip1559 {
         chain_id: api.chain_id(),
         to: TxKind::Call(accounts[2].address()),
-        value: U256::from(1),
+        value: U256::ONE,
         max_priority_fee_per_gas: 3_000_000_000,
         max_fee_per_gas: 2_000_000_000,
         gas_limit: 1_000_000,
@@ -1301,7 +1329,7 @@ async fn manual_mining_rpcs_preserve_controls_on_failure() {
         api.anvil_set_next_block_prevrandao(prevrandao).await.unwrap();
 
         let result: std::result::Result<serde_json::Value, _> = if method == "anvil_mine" {
-            provider.raw_request(method.into(), (U256::from(1),)).await
+            provider.raw_request(method.into(), (U256::ONE,)).await
         } else {
             provider
                 .raw_request(
@@ -1320,7 +1348,7 @@ async fn manual_mining_rpcs_preserve_controls_on_failure() {
         assert_eq!(block.header.timestamp, next_timestamp, "{method}");
         assert_eq!(block.header.mix_hash, Some(prevrandao), "{method}");
 
-        api.evm_increase_time(U256::from(1)).await.unwrap();
+        api.evm_increase_time(U256::ONE).await.unwrap();
         api.mine_one().await.unwrap();
         let following = api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
         assert_ne!(following.header.mix_hash, Some(prevrandao), "{method}");
@@ -1362,7 +1390,7 @@ async fn instant_mining_reselects_from_live_pool_after_failure() {
         let first = TransactionRequest::default()
             .from(accounts[0].address())
             .to(accounts[1].address())
-            .value(U256::from(1));
+            .value(U256::ONE);
         let first_hash = api.send_transaction(WithOtherFields::new(first)).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(api.backend.best_number(), 0);
@@ -1375,7 +1403,7 @@ async fn instant_mining_reselects_from_live_pool_after_failure() {
         let second = TransactionRequest::default()
             .from(accounts[1].address())
             .to(accounts[2].address())
-            .value(U256::from(1));
+            .value(U256::ONE);
         let second_hash = api.send_transaction(WithOtherFields::new(second)).await.unwrap();
 
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -1416,6 +1444,35 @@ async fn fixed_and_mixed_mining_failures_remain_bounded() {
         .unwrap_or_else(|_| panic!("scheduler did not recover, mixed={mixed}"));
         assert_eq!(api.backend.best_number(), 1, "mixed={mixed}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reorg_zero_depth_with_transactions_is_rejected() {
+    let (api, _handle) = spawn(NodeConfig::test()).await;
+    api.mine_one().await.unwrap();
+    let tip = api.block_number().unwrap();
+
+    // Nothing is mined by a reorg of depth 0, so a transaction can't be placed anywhere.
+    let err = api
+        .anvil_reorg(ReorgOptions {
+            depth: 0,
+            tx_block_pairs: vec![(TransactionData::JSON(TransactionRequest::default()), 0)],
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("Reorg depth must be at least 1"), "{err}");
+
+    // Block numbers are still checked against the last reorged block.
+    let err = api
+        .anvil_reorg(ReorgOptions {
+            depth: 1,
+            tx_block_pairs: vec![(TransactionData::JSON(TransactionRequest::default()), 1)],
+        })
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("must not exceed (depth-1) 0"), "{err}");
+
+    assert_eq!(api.block_number().unwrap(), tip);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1742,12 +1799,11 @@ async fn test_safe_and_finalized_use_configured_slots_in_epoch() {
     let finalized_block = api.block_by_number(BlockNumberOrTag::Finalized).await.unwrap().unwrap();
     assert_eq!(finalized_block.header.number, 1);
 
-    let safe_history =
-        api.fee_history(U256::from(1), BlockNumberOrTag::Safe, vec![]).await.unwrap();
+    let safe_history = api.fee_history(U256::ONE, BlockNumberOrTag::Safe, vec![]).await.unwrap();
     assert_eq!(safe_history.oldest_block, 3);
 
     let finalized_history =
-        api.fee_history(U256::from(1), BlockNumberOrTag::Finalized, vec![]).await.unwrap();
+        api.fee_history(U256::ONE, BlockNumberOrTag::Finalized, vec![]).await.unwrap();
     assert_eq!(finalized_history.oldest_block, 1);
 }
 
@@ -1857,7 +1913,7 @@ async fn can_get_node_info_tempo_t0() {
 
     let expected_node_info = NodeInfo {
         current_block_number: 0_u64,
-        current_block_timestamp: 1,
+        current_block_timestamp: block.header.timestamp,
         current_block_hash: block.header.hash,
         hard_fork: "T0".to_string(),
         transaction_order: "fees".to_owned(),
@@ -1905,7 +1961,7 @@ async fn can_get_node_info_tempo_t1() {
 
     let expected_node_info = NodeInfo {
         current_block_number: 0_u64,
-        current_block_timestamp: 1,
+        current_block_timestamp: block.header.timestamp,
         current_block_hash: block.header.hash,
         hard_fork: "T1".to_string(),
         transaction_order: "fees".to_owned(),
@@ -1942,7 +1998,7 @@ async fn can_get_node_info_monad() {
 
     let expected_node_info = NodeInfo {
         current_block_number: 0_u64,
-        current_block_timestamp: 1,
+        current_block_timestamp: block.header.timestamp,
         current_block_hash: block.header.hash,
         hard_fork: "MonadEight".to_string(),
         transaction_order: "fees".to_owned(),
@@ -2023,7 +2079,7 @@ async fn can_drop_all_transactions() {
             TransactionRequest::default()
                 .with_from(sender)
                 .with_to(Address::repeat_byte(0x22))
-                .with_value(U256::from(1))
+                .with_value(U256::ONE)
                 .with_nonce(nonce),
         ))
         .await
@@ -2090,7 +2146,7 @@ async fn send_unsigned_transaction_requires_a_sender() {
             (WithOtherFields::new(
                 TransactionRequest::default()
                     .with_to(Address::repeat_byte(0x99))
-                    .with_value(U256::from(1)),
+                    .with_value(U256::ONE),
             ),),
         )
         .await

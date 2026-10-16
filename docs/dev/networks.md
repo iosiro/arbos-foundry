@@ -29,9 +29,11 @@ Network-specific tests must select their execution family with CLI flags or
 REPL harness follows the same convention. Keep dedicated unselected-execution tests so this
 test default cannot mask regressions in the shipped Arbitrum default.
 
-`NetworkConfigs` is discovery and selection state, not an execution-policy container. Its lifetime
-ends when a tool selects its concrete `FoundryEvmNetwork`. After that dispatch, the selected types,
-factory, context, and narrow resolved inputs are authoritative.
+`NetworkConfigs` is discovery and selection state, not an execution-policy container. The target
+architecture ends its lifetime when a tool selects its concrete `FoundryEvmNetwork`. After that
+dispatch, the selected types, factory, context, and narrow resolved inputs are authoritative.
+Existing backend fork-position and Celo inspector configuration are named migration exceptions;
+they are not precedent for new post-dispatch family checks.
 
 An optional RPC capability probe must not become a requirement for an otherwise valid endpoint.
 Before an endpoint has positively identified a custom execution family, failed optional probes
@@ -53,10 +55,12 @@ CLI, config, and RPC discovery
    concrete FoundryEvmNetwork dispatch
 ```
 
-Code below that boundary must not receive, store, or reconstruct `NetworkConfigs`. In particular,
-executors, backends, inspectors, replay helpers, nested EVM construction, and typed runner state
-must not repeat `is_monad()`, `is_tempo()`, or equivalent family checks after the concrete FEN has
-been selected.
+New code below that boundary must not receive, store, or reconstruct `NetworkConfigs`. In
+particular, executors, backends, inspectors, replay helpers, nested EVM construction, and typed
+runner state must not add `is_monad()`, `is_tempo()`, or equivalent family checks after the concrete
+FEN has been selected. The remaining backend fork-position and Celo inspector consumers should be
+removed with their complete state-lifecycle owners rather than hidden behind another generic
+policy layer.
 
 Do not disguise downstream dispatch as:
 
@@ -85,6 +89,13 @@ network's execution semantics.
 | REVM context and journal | Execution-time state mutation, checkpoints, commits, and reverts |
 | `NetworkConfigs` and hardfork types | Pre-dispatch selection, chain and endpoint inference, feature configuration, and hardfork validation |
 | Foundry tools | CLI/config plumbing, one authoritative dispatch per execution entry point, and tool-specific workflows and user-visible behavior |
+
+After dispatch, `SpecFor<FEN>` owns hardfork resolution through `ExecutionSpec`: checked
+namespaced conversion, native source-chain schedules, local-fork behavior, and metadata for direct
+spec overrides. The shared resolver accepts one typed explicit spec and derives its reported
+hardfork from that same value. Tracing carries the result, including absent metadata for an
+Ethereum or Optimism version override, directly into decoding. Keep the source chain ID separate
+from an overridden execution chain ID when supplying historical context.
 
 Do not encode protocol behavior only as a chain-ID branch in a tool. Put execution semantics in the
 network factory or context, selection in the network configuration layer, and tool-specific workflow
@@ -120,6 +131,23 @@ Large integrations should be split into reviewable layers when possible: hardfor
 core execution, individual tool surfaces, then CI and documentation. Each layer should retain working
 non-custom execution paths.
 
+## Compiler targets and execution hardforks
+
+Keep the Solidity compiler target (`evm_version`), execution family (`network`), and protocol
+revision (`hardfork`) distinct. A Tempo revision uses an Osaka instruction-set baseline with
+Tempo's own gas schedule, precompiles, and transaction rules; an Ethereum version name does not
+identify a Tempo revision.
+
+`vm.setEvmVersion` selects execution rules using the active network's version mappings; it does
+not change the Solidity compiler target. Existing Ethereum aliases and native Tempo revision names
+remain accepted. On Tempo, runtime changes do not rebuild instructions or precompiles; configure
+`hardfork = "tempo:T7"` (or the required revision) before execution to select a different revision.
+
+Execution-time gas refreshes pass through the selected `FoundryEvmFactory`. The default delegates
+to the existing context/configuration behavior, preserving downstream `FoundryCfg` implementations
+and its blanket implementation for `CfgEnv<SPEC>`. Tempo overrides the factory method to use its
+own gas parameters instead of Ethereum prices derived from its instruction-set baseline.
+
 ## State lifecycle
 
 Custom execution state is often not fully represented by ordinary account storage. For every piece
@@ -140,6 +168,23 @@ or journal boundary. Do not rely on cloning the ordinary account database to pre
 another component. Do not add optional custom-family state to a generic context or return generic
 "context update" signals when only one concrete family can use them.
 
+Both cheatcode inspector adapters use
+[`with_inherited_evm`](../../crates/evm/core/src/evm/mod.rs) to pair inherited context setup
+with successful write-back. Inspector assembly stays with the adapter, and EVM factories retain
+construction ownership. This shared operation still uses the existing Monad journal bridge; it
+is not a replacement for the deferred native journal, snapshot, and fork lifecycle migrations.
+
+Isolated calls and `executeTransaction` share account-state preparation and settlement through
+[`prepare_child_state` and `merge_child_state`](../../crates/evm/core/src/evm/mod.rs).
+Their transaction context, environment restoration, and native journal handling remain distinct:
+an isolated call belongs to its enclosing transaction, while `executeTransaction` runs a fresh one.
+
+Historical replay retains the RPC envelope's system classification after transaction conversion.
+The default nested replay behavior deliberately skips system envelopes unsupported by the selected
+execution family without mutating state. A family that supports protocol system envelopes must
+override that behavior in its concrete nested EVM and test canonical execution, foreign-envelope
+skips, malformed envelopes, and rollback after failed protocol prestate.
+
 ## Tool coverage
 
 An integration is incomplete until the supported user workflows dispatch to the same execution
@@ -157,6 +202,26 @@ Unsupported combinations should fail at the selection boundary with a specific e
 Ethereum and other enabled families must continue to use their existing path. Once a workflow has
 selected a concrete FEN, helpers used by that workflow must not accept a second runtime execution
 profile.
+
+### Script recovery
+
+The requirements in this subsection are proposed and are not guarantees of the current script
+broadcaster. Network integrations must satisfy them as the durable recovery architecture is
+implemented.
+
+Custom transaction fields remain owned by the selected Alloy `Network` and concrete execution
+family, but `forge script` must carry their final values through durable submission and resume. A
+network integration that changes transaction preparation is incomplete until it identifies every
+field that can change transaction identity or semantics, preserves those fields in script recovery
+state, and tests interrupted submission with that network's real envelope type.
+
+Do not reconstruct a custom transaction from family-neutral Ethereum fields during resume. Persist
+the final typed or encoded payload at the transaction boundary, including fee assets, validity
+windows, sponsorship, authorization, auxiliary calls, or signer metadata required by that family.
+Locally signed payloads must be recoverable without the signer; delegated signing with an ambiguous
+outcome must stop rather than silently request a second signature. See the
+[Forge scripting recovery contract](./scripting.md#recovery-contract) for the shared lifecycle and
+failure-injection requirements.
 
 ## Tests and CI
 
@@ -186,7 +251,3 @@ User-facing selection, configuration, and workflows belong in the
 [Foundry Book](https://getfoundry.sh). CLI option text belongs in the Clap definitions and is
 generated into the book. Trait, context, and state invariants belong in Rustdoc next to their
 implementation. Cross-crate integration guidance belongs here.
-
-Add a changelog fragment for user-visible behavior. If a change only reorganizes contributor
-documentation or CI and has no release-facing effect, use the repository's `L-ignore` label instead
-of inventing a package release note.

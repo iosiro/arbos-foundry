@@ -4,7 +4,7 @@ use crate::{
     sol::{
         Severity, SolLint,
         analysis::{
-            arg_for_param, branch_always_exits, expr_is_address, is_address_cast, is_builtin,
+            arg_for_param, branch_always_exits, expr_is_address, is_address_cast,
             is_require_or_assert, ty_contract_id,
         },
     },
@@ -12,13 +12,13 @@ use crate::{
 use alloy_primitives::Selector;
 use solar::{
     ast::{LitKind, UnOpKind},
-    interface::{Symbol, data_structures::Never, kw, sym},
+    interface::{data_structures::Never, kw, sym},
     sema::{
         Gcx,
         builtins::Builtin,
         hir::{
-            self, BinOpKind, ContractId, ContractKind, Expr, ExprKind, LoopSource, Res, Stmt,
-            StmtKind, VariableId, Visit,
+            self, BinOpKind, ContractId, ContractKind, Expr, ExprKind, LoopSource, Stmt, StmtKind,
+            VariableId, Visit,
         },
     },
 };
@@ -37,25 +37,19 @@ declare_forge_lint!(
     "proxy and implementation functions have colliding selectors"
 );
 
-impl<'hir> LateLintPass<'hir> for FunctionSelectorCollision {
-    fn check_nested_contract(
-        &mut self,
-        ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
-        proxy_id: ContractId,
-    ) {
-        let proxy = hir.contract(proxy_id);
+impl<'gcx> LateLintPass<'gcx> for FunctionSelectorCollision {
+    fn check_nested_contract(&mut self, ctx: &LintContext, gcx: Gcx<'gcx>, proxy_id: ContractId) {
+        let proxy = gcx.hir.contract(proxy_id);
         if proxy.kind != ContractKind::Contract || proxy.linearization_failed() {
             return;
         }
         let Some(fallback_id) = proxy.fallback else { return };
-        let fallback = hir.function(fallback_id);
+        let fallback = gcx.hir.function(fallback_id);
         let Some(body) = fallback.body else { return };
 
         let mut collector = DelegateTargetCollector {
             gcx,
-            hir,
+            contract_id: proxy_id,
             current_inputs: Vec::new(),
             paths: vec![PathState::default()],
             placeholder: None,
@@ -76,7 +70,7 @@ impl<'hir> LateLintPass<'hir> for FunctionSelectorCollision {
 
         let proxy_functions = gcx.interface_functions(proxy_id);
         for target in collector.targets {
-            let implementation = hir.contract(target.contract);
+            let implementation = gcx.hir.contract(target.contract);
             if target.contract == proxy_id
                 || implementation.kind == ContractKind::Library
                 || implementation.linearization_failed()
@@ -189,18 +183,18 @@ struct LoopControl {
 
 /// What `_` resumes: the rest of the modifier chain and the function body.
 #[derive(Clone, Copy)]
-struct Continuation<'hir> {
-    modifiers: &'hir [hir::Modifier<'hir>],
+struct Continuation<'gcx> {
+    modifiers: &'gcx [hir::Modifier<'gcx>],
     index: usize,
-    body: hir::Block<'hir>,
+    body: hir::Block<'gcx>,
     body_input: Option<CalldataInput>,
 }
 
-fn lvalue_contains_var(expr: &Expr<'_>, target: VariableId) -> bool {
+fn lvalue_contains_var(gcx: Gcx<'_>, expr: &Expr<'_>, target: VariableId) -> bool {
     match &expr.peel_parens().kind {
-        ExprKind::Ident(reses) => reses.iter().any(|res| res.as_variable() == Some(target)),
+        ExprKind::Ident(_) => gcx.resolved_variable(expr) == Some(target),
         ExprKind::Tuple(exprs) => {
-            exprs.iter().flatten().any(|expr| lvalue_contains_var(expr, target))
+            exprs.iter().flatten().any(|expr| lvalue_contains_var(gcx, expr, target))
         }
         _ => false,
     }
@@ -219,14 +213,14 @@ fn dedup(paths: &mut Vec<PathState>) {
     paths.retain(|path| seen.insert(path.clone()));
 }
 
-struct DelegateTargetCollector<'hir> {
-    gcx: Gcx<'hir>,
-    hir: &'hir hir::Hir<'hir>,
+struct DelegateTargetCollector<'gcx> {
+    gcx: Gcx<'gcx>,
+    contract_id: ContractId,
     /// Full-calldata inputs visible in the block being visited.
     current_inputs: Vec<CalldataInput>,
     /// Live path states; empty means the current point is unreachable.
     paths: Vec<PathState>,
-    placeholder: Option<Continuation<'hir>>,
+    placeholder: Option<Continuation<'gcx>>,
     /// Per function/modifier frame, the states at each `return`.
     return_controls: Vec<Vec<PathState>>,
     continuation_cache: HashMap<(usize, PathState), Vec<PathState>>,
@@ -234,18 +228,19 @@ struct DelegateTargetCollector<'hir> {
     targets: Vec<DelegateTarget>,
 }
 
-impl<'hir> DelegateTargetCollector<'hir> {
-    fn visit_modifier_chain(&mut self, cont: Continuation<'hir>) {
+impl<'gcx> DelegateTargetCollector<'gcx> {
+    fn visit_modifier_chain(&mut self, cont: Continuation<'gcx>) {
         let previous_inputs =
             std::mem::replace(&mut self.current_inputs, cont.body_input.into_iter().collect());
         if let Some(invocation) = cont.modifiers.get(cont.index) {
             for arg in invocation.args.exprs() {
                 let _ = self.visit_expr(arg);
             }
-            if let Some(modifier_id) = invocation.id.as_function()
-                && let Some(modifier_body) = self.hir.function(modifier_id).body
+            if let Some(modifier_id) =
+                self.gcx.resolve_modifier_target(self.contract_id, invocation)
+                && let Some(modifier_body) = self.gcx.hir.function(modifier_id).body
             {
-                let modifier = self.hir.function(modifier_id);
+                let modifier = self.gcx.hir.function(modifier_id);
                 let params: Vec<_> = modifier
                     .parameters
                     .iter()
@@ -255,8 +250,9 @@ impl<'hir> DelegateTargetCollector<'hir> {
                 let bindings: Vec<_> = params
                     .iter()
                     .filter_map(|&param| {
-                        let arg = arg_for_param(self.hir, modifier, param.var, &invocation.args)?;
-                        Some((param, full_calldata_source(arg, &self.current_inputs)?))
+                        let arg =
+                            arg_for_param(self.gcx, modifier_id, param.var, &invocation.args)?;
+                        Some((param, full_calldata_source(self.gcx, arg, &self.current_inputs)?))
                     })
                     .collect();
                 for path in &mut self.paths {
@@ -289,8 +285,8 @@ impl<'hir> DelegateTargetCollector<'hir> {
 
     fn visit_block(
         &mut self,
-        block: hir::Block<'hir>,
-        placeholder: Option<Continuation<'hir>>,
+        block: hir::Block<'gcx>,
+        placeholder: Option<Continuation<'gcx>>,
         inputs: Vec<CalldataInput>,
     ) {
         let previous = std::mem::replace(&mut self.placeholder, placeholder);
@@ -303,7 +299,7 @@ impl<'hir> DelegateTargetCollector<'hir> {
     }
 
     /// Runs the continuation once per distinct incoming path state, memoizing the outcome.
-    fn visit_continuation(&mut self, cont: Continuation<'hir>) {
+    fn visit_continuation(&mut self, cont: Continuation<'gcx>) {
         let mut output_paths = Vec::new();
         for input in std::mem::take(&mut self.paths) {
             let key = (cont.index, input);
@@ -354,7 +350,7 @@ impl<'hir> DelegateTargetCollector<'hir> {
     }
 
     /// Splits the live paths into those where `expr` is true and those where it is false.
-    fn visit_condition(&mut self, expr: &'hir Expr<'hir>) -> (Vec<PathState>, Vec<PathState>) {
+    fn visit_condition(&mut self, expr: &'gcx Expr<'gcx>) -> (Vec<PathState>, Vec<PathState>) {
         match &expr.peel_parens().kind {
             ExprKind::Lit(lit) => {
                 let paths = std::mem::take(&mut self.paths);
@@ -419,7 +415,7 @@ impl<'hir> DelegateTargetCollector<'hir> {
     /// the next iteration (fall-through and `continue`) are returned.
     fn visit_loop_stmts(
         &mut self,
-        stmts: &'hir [Stmt<'hir>],
+        stmts: &'gcx [Stmt<'gcx>],
         exits: &mut Vec<PathState>,
     ) -> Vec<PathState> {
         self.loop_controls.push(LoopControl::default());
@@ -443,29 +439,21 @@ impl<'hir> DelegateTargetCollector<'hir> {
         *paths = vec![PathState { selector_filter: SelectorFilter::default(), modified_inputs }];
     }
 
-    /// One iteration of a lowered `for (; cond; update) body`, which is `if (cond) { body; update }
-    /// else break` (or just `{ body; update }` without a condition). Returns the back-edge paths
-    /// and the loop-exit paths.
+    /// One iteration of a `for` loop with an update statement: `if (cond) { body } else break`
+    /// followed by the update, which `continue` also reaches. Returns the back-edge paths and the
+    /// loop-exit paths.
     fn visit_for_iteration(
         &mut self,
-        block: &hir::Block<'hir>,
+        block: &hir::Block<'gcx>,
+        update: &'gcx Stmt<'gcx>,
     ) -> Option<(Vec<PathState>, Vec<PathState>)> {
         let [stmt] = block.stmts else { return None };
         let (condition, body, else_stmt) = match &stmt.kind {
             StmtKind::If(condition, then_stmt, else_stmt) => {
-                let StmtKind::Block(body) = &then_stmt.kind else { return None };
-                (Some(*condition), body, *else_stmt)
+                (Some(*condition), *then_stmt, *else_stmt)
             }
-            StmtKind::Block(body) => (None, body, None),
-            _ => return None,
+            _ => (None, stmt, None),
         };
-        if body.span != block.span {
-            return None;
-        }
-        let (update, body) = body.stmts.split_last()?;
-        if !matches!(update.kind, StmtKind::Expr(_)) {
-            return None;
-        }
 
         let mut exits = Vec::new();
         if let Some(condition) = condition {
@@ -481,13 +469,13 @@ impl<'hir> DelegateTargetCollector<'hir> {
             self.paths = true_paths;
         }
 
-        self.paths = self.visit_loop_stmts(body, &mut exits);
+        self.paths = self.visit_loop_stmts(std::slice::from_ref(body), &mut exits);
         let _ = self.visit_stmt(update);
         Some((std::mem::take(&mut self.paths), exits))
     }
 
     /// Iterates the loop body to a fixpoint over the set of distinct entry states.
-    fn visit_loop(&mut self, block: &hir::Block<'hir>, source: LoopSource) {
+    fn visit_loop(&mut self, block: &hir::Block<'gcx>, source: LoopSource<'gcx>) {
         let mut pending = std::mem::take(&mut self.paths);
         let mut seen = HashSet::new();
         let mut exits = Vec::new();
@@ -499,12 +487,12 @@ impl<'hir> DelegateTargetCollector<'hir> {
             }
 
             self.paths = std::mem::take(&mut pending);
-            let next = if source == LoopSource::ForWithUpdate
-                && let Some((next, for_exits)) = self.visit_for_iteration(block)
+            let next = if let LoopSource::For { update: Some(update) } = source
+                && let Some((next, for_exits)) = self.visit_for_iteration(block, update)
             {
                 extend_unique(&mut exits, for_exits);
                 next
-            } else if source == LoopSource::DoWhile
+            } else if matches!(source, LoopSource::DoWhile)
                 && let Some((condition, body)) = block.stmts.split_last()
             {
                 // `continue` in a do-while body still evaluates the condition.
@@ -544,14 +532,14 @@ impl<'hir> DelegateTargetCollector<'hir> {
     }
 }
 
-impl<'hir> Visit<'hir> for DelegateTargetCollector<'hir> {
+impl<'gcx> Visit<'gcx> for DelegateTargetCollector<'gcx> {
     type BreakValue = Never;
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<Never> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<Never> {
         if self.paths.is_empty() {
             return ControlFlow::Continue(());
         }
@@ -571,13 +559,14 @@ impl<'hir> Visit<'hir> for DelegateTargetCollector<'hir> {
                 self.paths = true_paths;
                 dedup(&mut self.paths);
             }
-            ExprKind::Call(callee, args, opts) => {
+            ExprKind::Call(callee, args) => {
+                let (callee, opts) = callee.split_call_options();
                 let _ = self.visit_expr(callee);
                 for arg in opts.iter().flat_map(|opts| opts.args) {
                     let _ = self.visit_expr(&arg.value);
                 }
                 let mut args = args.exprs();
-                if is_require_or_assert(callee) {
+                if is_require_or_assert(self.gcx, callee) {
                     let Some(condition) = args.next() else { return ControlFlow::Continue(()) };
                     let args: Vec<_> = args.collect();
                     let (true_paths, false_paths) = self.visit_condition(condition);
@@ -611,7 +600,7 @@ impl<'hir> Visit<'hir> for DelegateTargetCollector<'hir> {
                         .current_inputs
                         .iter()
                         .copied()
-                        .filter(|input| lvalue_contains_var(lhs, input.var))
+                        .filter(|input| lvalue_contains_var(self.gcx, lhs, input.var))
                         .collect(),
                     _ => Vec::new(),
                 };
@@ -626,7 +615,7 @@ impl<'hir> Visit<'hir> for DelegateTargetCollector<'hir> {
         ControlFlow::Continue(())
     }
 
-    fn visit_stmt(&mut self, stmt: &'hir Stmt<'hir>) -> ControlFlow<Never> {
+    fn visit_stmt(&mut self, stmt: &'gcx Stmt<'gcx>) -> ControlFlow<Never> {
         if self.paths.is_empty() {
             return ControlFlow::Continue(());
         }
@@ -697,7 +686,7 @@ impl<'hir> Visit<'hir> for DelegateTargetCollector<'hir> {
             }
             _ => {
                 let _ = self.walk_stmt(stmt);
-                if branch_always_exits(stmt) {
+                if branch_always_exits(self.gcx, stmt) {
                     self.paths.clear();
                 }
             }
@@ -714,9 +703,9 @@ fn selector_guard(gcx: Gcx<'_>, expr: &Expr<'_>) -> Option<(Selector, bool)> {
         BinOpKind::Ne => false,
         _ => return None,
     };
-    let selector = if is_msg_member(lhs, sym::sig) {
+    let selector = if gcx.resolved_builtin(lhs) == Some(Builtin::MsgSig) {
         rhs
-    } else if is_msg_member(rhs, sym::sig) {
+    } else if gcx.resolved_builtin(rhs) == Some(Builtin::MsgSig) {
         lhs
     } else {
         return None;
@@ -728,28 +717,20 @@ fn selector_guard(gcx: Gcx<'_>, expr: &Expr<'_>) -> Option<(Selector, bool)> {
     {
         return None;
     }
-    let Res::Item(hir::ItemId::Function(function)) = gcx.resolved_expr(function)? else {
-        return None;
-    };
+    let function = gcx.resolved_function(function)?;
     Some((gcx.function_selector(function), matches))
-}
-
-/// `msg.<name>`.
-fn is_msg_member(expr: &Expr<'_>, name: Symbol) -> bool {
-    matches!(&expr.peel_parens().kind, ExprKind::Member(base, member)
-        if member.name == name && is_builtin(base, sym::msg))
 }
 
 /// The statically typed implementation contract of a proxy-style `<addr>.delegatecall(<full
 /// calldata>)`, with the calldata input that must be unmodified for the forwarding to be complete.
-fn delegated_contract<'hir>(
-    gcx: Gcx<'hir>,
+fn delegated_contract<'gcx>(
+    gcx: Gcx<'gcx>,
     full_calldata_inputs: &[CalldataInput],
-    expr: &'hir Expr<'hir>,
+    expr: &'gcx Expr<'gcx>,
 ) -> Option<(ContractId, Option<CalldataInput>)> {
-    let ExprKind::Call(callee, args, _) = &expr.peel_parens().kind else { return None };
-    let ExprKind::Member(receiver, member) = &callee.peel_parens().kind else { return None };
-    let required_input = full_calldata_source(args.exprs().next()?, full_calldata_inputs)?;
+    let (callee, args, _) = expr.peel_parens().as_call()?;
+    let ExprKind::Member(receiver, member) = &callee.kind else { return None };
+    let required_input = full_calldata_source(gcx, args.exprs().next()?, full_calldata_inputs)?;
     if member.name != kw::Delegatecall
         || gcx.resolved_builtin(callee) != Some(Builtin::AddressDelegatecall)
         || !expr_is_address(gcx, receiver)
@@ -759,16 +740,16 @@ fn delegated_contract<'hir>(
     typed_contract_behind_address_cast(gcx, receiver).map(|contract| (contract, required_input))
 }
 
-fn typed_contract_behind_address_cast<'hir>(
-    gcx: Gcx<'hir>,
-    expr: &'hir Expr<'hir>,
+fn typed_contract_behind_address_cast<'gcx>(
+    gcx: Gcx<'gcx>,
+    expr: &'gcx Expr<'gcx>,
 ) -> Option<ContractId> {
     let expr = expr.peel_parens();
     if let Some(id) = gcx.type_of_expr(expr.id).and_then(ty_contract_id) {
         return Some(id);
     }
     match &expr.kind {
-        ExprKind::Call(callee, args, _) if is_address_cast(callee) => {
+        ExprKind::Call(callee, args) if is_address_cast(callee) => {
             args.exprs().next().and_then(|arg| typed_contract_behind_address_cast(gcx, arg))
         }
         ExprKind::Payable(inner) => typed_contract_behind_address_cast(gcx, inner),
@@ -779,15 +760,14 @@ fn typed_contract_behind_address_cast<'hir>(
 /// `Some(None)` for `msg.data`, `Some(Some(input))` for a known full-calldata input, `None`
 /// otherwise.
 fn full_calldata_source(
+    gcx: Gcx<'_>,
     expr: &Expr<'_>,
     full_calldata_inputs: &[CalldataInput],
 ) -> Option<Option<CalldataInput>> {
-    if is_msg_member(expr, sym::data) {
+    if gcx.resolved_builtin(expr) == Some(Builtin::MsgData) {
         return Some(None);
     }
-    let ExprKind::Ident(reses) = &expr.peel_parens().kind else { return None };
-    reses
-        .iter()
-        .filter_map(Res::as_variable)
-        .find_map(|id| full_calldata_inputs.iter().copied().find(|input| input.var == id).map(Some))
+    let ExprKind::Ident(_) = &expr.peel_parens().kind else { return None };
+    let id = gcx.resolved_variable(expr)?;
+    full_calldata_inputs.iter().copied().find(|input| input.var == id).map(Some)
 }

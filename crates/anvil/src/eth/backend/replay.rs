@@ -11,7 +11,10 @@ use alloy_consensus::{
 };
 use alloy_evm::{
     Evm, FromRecoveredTx, FromTxWithEncoded, RecoveredTx,
-    block::{BlockExecutionError, BlockExecutionResult, BlockExecutor, StateDB, TxResult},
+    block::{
+        BalIndexedDatabase, BlockExecutionError, BlockExecutionResult, BlockExecutor, StateDB,
+        TxResult,
+    },
 };
 use alloy_network::{BlockResponse, TransactionResponse};
 use alloy_primitives::B256;
@@ -170,8 +173,9 @@ pub(crate) fn execute_historical_replay<E>(
 ) -> Result<(Vec<MaybeImpersonatedTransaction<FoundryTxEnvelope>>, Vec<TransactionInfo>)>
 where
     E: Evm<
-            DB: StateDB,
+            DB: StateDB + BalIndexedDatabase,
             Inspector = AnvilInspector,
+            Precompiles: foundry_evm::core::evm::FoundryPrecompiles,
             Tx: FromRecoveredTx<FoundryTxEnvelope> + FromTxWithEncoded<FoundryTxEnvelope>,
         >,
     E::HaltReason: Clone + IntoInstructionResult,
@@ -195,8 +199,9 @@ pub(crate) fn execute_historical_replay_with<E, F>(
 ) -> Result<(Vec<MaybeImpersonatedTransaction<FoundryTxEnvelope>>, Vec<TransactionInfo>)>
 where
     E: Evm<
-            DB: StateDB,
+            DB: StateDB + BalIndexedDatabase,
             Inspector = AnvilInspector,
+            Precompiles: foundry_evm::core::evm::FoundryPrecompiles,
             Tx: FromRecoveredTx<FoundryTxEnvelope> + FromTxWithEncoded<FoundryTxEnvelope>,
         >,
     E::HaltReason: Clone + IntoInstructionResult,
@@ -244,7 +249,8 @@ where
         let gas_used = execution_result.tx_gas_used();
         executor.commit_transaction(result);
 
-        let traces = executor.evm_mut().inspector_mut().finish_transaction(inspector_config);
+        let (_, inspector, precompiles) = executor.evm_mut().components_mut();
+        let traces = inspector.finish_transaction(inspector_config, precompiles);
         let (exit_reason, out) = match execution_result {
             ExecutionResult::Success { reason, output, .. } => (reason.into(), Some(output)),
             ExecutionResult::Revert { output, .. } => {

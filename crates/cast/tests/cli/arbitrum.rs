@@ -14,7 +14,8 @@ sol! {
     function inkPrice() external view returns (uint32);
 }
 
-casttest!(arbitrum_fork_trace_and_replay_apply_stylus_config, async |prj, cmd| {
+#[casttest]
+async fn arbitrum_fork_trace_and_replay_apply_stylus_config(prj: _, cmd: _) {
     cmd.set_network(Some("arbitrum"));
     let (_api, handle) = anvil::spawn(
         NodeConfig::test()
@@ -99,9 +100,10 @@ Transaction successfully executed.
     // Local tracing overrides must not mutate the fork source.
     let output = provider.call(query.into()).await.unwrap();
     assert_eq!(u32::abi_decode(&output).unwrap(), 13_579);
-});
+}
 
-casttest!(arbitrum_default_fork_execution_and_ethereum_opt_in, async |prj, cmd| {
+#[casttest]
+async fn arbitrum_default_fork_execution_and_ethereum_opt_in(prj: _, cmd: _) {
     cmd.set_network(None);
     // An Ethereum source must not silently change the selected local execution family.
     let (_api, handle) = anvil::spawn(NodeConfig::test().with_chain_id(Some(1_u64))).await;
@@ -174,4 +176,4 @@ Transaction successfully executed.
             }
         }
     }
-});
+}

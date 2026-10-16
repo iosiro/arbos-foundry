@@ -2,7 +2,7 @@
 
 use super::{
     context::{
-        ActiveInternalCallCache, ActiveInternalCallLocation, StatusKind, TUIContext,
+        ActiveInternalCallCache, ActiveInternalCallLocation, Prompt, StatusKind, TUIContext,
         write_pretty_opcode,
     },
     storage::{StorageAccess, StorageSpace, hex_u256, storage_access_at, storage_values},
@@ -12,8 +12,9 @@ use alloy_dyn_abi::{DynSolType, Specifier, parser::Parameters};
 use alloy_primitives::{Address, U256, keccak256};
 use foundry_common::fmt::format_token;
 use foundry_evm_core::buffer::{BufferKind, get_buffer_accesses};
-use foundry_evm_traces::debug::{
-    DebugSourceScope, DebugVariable, decode_step_parameters, function_signature,
+use foundry_evm_traces::{
+    CallKind, DecodedInternalCall, DecodedTraceStep,
+    debug::{DebugSourceScope, DebugVariable, decode_step_parameters, function_signature},
 };
 use ratatui::{
     Frame,
@@ -23,7 +24,6 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
 };
 use revm::interpreter::InstructionResult;
-use revm_inspectors::tracing::types::{CallKind, DecodedInternalCall, DecodedTraceStep};
 use std::{collections::VecDeque, fmt::Write};
 
 impl TUIContext<'_> {
@@ -255,29 +255,24 @@ impl TUIContext<'_> {
     }
 
     fn footer_height(&self) -> u16 {
-        let status_or_input = if self.command_input.is_some() {
+        let status_or_input = if matches!(self.prompt, Some(Prompt::Command(_))) {
             3
         } else {
-            u16::from(
-                self.pc_input.is_some()
-                    || self.buffer_offset_input.is_some()
-                    || self.opcode_search_input.is_some()
-                    || self.status.is_some(),
-            )
+            u16::from(self.prompt.is_some() || self.status.is_some())
         };
         let shortcuts = if self.show_shortcuts { 3 } else { 0 };
         status_or_input + shortcuts
     }
 
     fn draw_footer(&self, f: &mut Frame<'_>, area: Rect) {
-        if let Some(input) = &self.command_input {
+        if let Some(Prompt::Command(input)) = &self.prompt {
             self.draw_command_prompt(f, area, input);
             return;
         }
 
         let mut lines = Vec::with_capacity(self.footer_height() as usize);
 
-        if let Some(input) = &self.pc_input {
+        if let Some(Prompt::Pc(input)) = &self.prompt {
             lines.push(Line::from(vec![
                 Span::styled(
                     "Goto PC: ",
@@ -290,7 +285,7 @@ impl TUIContext<'_> {
                     Style::new().add_modifier(Modifier::DIM),
                 ),
             ]));
-        } else if let Some(input) = &self.buffer_offset_input {
+        } else if let Some(Prompt::BufferOffset(input)) = &self.prompt {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("Goto {} offset: ", self.active_buffer_name()),
@@ -303,7 +298,7 @@ impl TUIContext<'_> {
                     Style::new().add_modifier(Modifier::DIM),
                 ),
             ]));
-        } else if let Some(input) = &self.opcode_search_input {
+        } else if let Some(Prompt::OpcodeSearch(input)) = &self.prompt {
             lines.push(Line::from(vec![
                 Span::styled(
                     "Search opcodes: /",
@@ -1450,7 +1445,7 @@ fn hex_digits(n: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::TUIContext;
+    use super::{Prompt, TUIContext};
     use crate::{
         DebugNode, DebuggerLayout,
         debugger::{DebuggerContext, DebuggerStats},
@@ -1459,7 +1454,11 @@ mod tests {
     use alloy_dyn_abi::parser::Parameters;
     use alloy_primitives::{Address, Bytes, U256, address};
     use foundry_evm_core::{Breakpoints, buffer::BufferKind};
-    use foundry_evm_traces::debug::{ContractSources, DebugSourceScope, DebugVariable};
+    use foundry_evm_traces::{
+        CallKind, CallTraceStep, DecodedCallData, DecodedCallTrace, DecodedInternalCall,
+        DecodedTraceStep, StorageChange, StorageChangeReason,
+        debug::{ContractSources, DebugSourceScope, DebugVariable},
+    };
     use ratatui::{
         Terminal,
         backend::TestBackend,
@@ -1468,10 +1467,6 @@ mod tests {
         text::Line,
     };
     use revm::{bytecode::opcode::OpCode, interpreter::InstructionResult};
-    use revm_inspectors::tracing::types::{
-        CallKind, CallTraceStep, DecodedCallData, DecodedCallTrace, DecodedInternalCall,
-        DecodedTraceStep, StorageChange, StorageChangeReason,
-    };
 
     fn line_text(line: &Line<'_>) -> String {
         line.spans.iter().map(|span| span.content.as_ref()).collect()
@@ -1514,6 +1509,9 @@ mod tests {
             gas_refund_counter: 0,
             gas_used: 0,
             gas_cost: 0,
+            state_gas_cost: None,
+            state_gas_reservoir: None,
+            state_gas_spent: 0,
             storage_change: None,
             status: Some(InstructionResult::Stop),
             immediate_bytes: None,
@@ -1681,7 +1679,7 @@ mod tests {
         }));
         let mut second = trace_step(Vec::new());
         second.storage_change = Some(Box::new(StorageChange {
-            key: U256::from(1),
+            key: U256::ONE,
             value: U256::from(0xbeef),
             had_value: None,
             reason: StorageChangeReason::SSTORE,
@@ -1842,7 +1840,7 @@ mod tests {
     fn command_prompt_draws_in_bordered_block() {
         let mut context = context_with_arena(vec![debug_node(0, 0, vec![trace_step(Vec::new())])]);
         let mut tui = TUIContext::new(&mut context);
-        tui.command_input = Some("pc 0".to_string());
+        tui.prompt = Some(Prompt::Command("pc 0".to_string()));
         let backend = TestBackend::new(120, 6);
         let mut terminal = Terminal::new(backend).unwrap();
 
@@ -1890,7 +1888,7 @@ mod tests {
         let mut calldata = Vec::new();
         calldata.extend_from_slice(&super::function_selector(&scope.function_name, &types));
         calldata.extend_from_slice(&abi_word(U256::from(42)));
-        calldata.extend_from_slice(&abi_word(U256::from(1)));
+        calldata.extend_from_slice(&abi_word(U256::ONE));
 
         let values = super::decode_external_parameter_values(&scope, &calldata).unwrap();
 
@@ -1919,7 +1917,7 @@ mod tests {
         calldata.extend_from_slice(&abi_word(U256::from(42)));
         let mut returndata = Vec::new();
         returndata.extend_from_slice(&abi_word(U256::from(99)));
-        returndata.extend_from_slice(&abi_word(U256::from(1)));
+        returndata.extend_from_slice(&abi_word(U256::ONE));
 
         let values = super::decode_external_return_values(&scope, &calldata, &returndata).unwrap();
 
@@ -1993,7 +1991,7 @@ mod tests {
 
     #[test]
     fn decode_step_parameters_reads_static_values_from_stack() {
-        let step = trace_step(vec![U256::from(42), U256::from(1)]);
+        let step = trace_step(vec![U256::from(42), U256::ONE]);
         let parameters = Parameters::parse("(uint256 amount, bool ok)").unwrap();
         let values = super::decode_step_parameters(&parameters, &step, None).unwrap();
 
@@ -2185,7 +2183,7 @@ mod tests {
     fn storage_lines_format_sload_and_label() {
         let mut step = trace_step(Vec::new());
         step.storage_change = Some(Box::new(StorageChange {
-            key: U256::from(1),
+            key: U256::ONE,
             value: U256::from(42),
             had_value: None,
             reason: StorageChangeReason::SLOAD,
@@ -2207,7 +2205,7 @@ mod tests {
     fn storage_access_line_formats_sstore_with_previous_value() {
         let mut step = trace_step(Vec::new());
         step.storage_change = Some(Box::new(StorageChange {
-            key: U256::from(1),
+            key: U256::ONE,
             value: U256::from(42),
             had_value: Some(U256::from(7)),
             reason: StorageChangeReason::SSTORE,
@@ -2223,7 +2221,7 @@ mod tests {
 
     #[test]
     fn current_storage_access_line_uses_next_stack_snapshot_for_warm_sload() {
-        let mut step = trace_step(vec![U256::from(1)]);
+        let mut step = trace_step(vec![U256::ONE]);
         step.op = OpCode::SLOAD;
         step.storage_change = None;
         let next_step = trace_step(vec![U256::from(42)]);
@@ -2238,7 +2236,7 @@ mod tests {
 
     #[test]
     fn current_storage_access_line_uses_next_stack_snapshot_for_tload() {
-        let mut step = trace_step(vec![U256::from(1)]);
+        let mut step = trace_step(vec![U256::ONE]);
         step.op = OpCode::TLOAD;
         let next_step = trace_step(vec![U256::from(42)]);
         let mut context = context_with_arena(vec![debug_node(0, 0, vec![step, next_step])]);
@@ -2303,7 +2301,7 @@ mod tests {
     #[test]
     fn op_list_title_includes_gas_and_subcall_stats() {
         let stats = DebuggerStats { session_trace_gas_used: 789_012, session_subcalls: 3 };
-        let address = Address::from([0x42; 20]);
+        let address = Address::repeat_byte(0x42);
         let title = super::op_list_title(&address, 0x2a, 123_456, 42, 7, Some(stats));
 
         assert!(title.contains("pc: 0x2a (42)"));
@@ -2317,7 +2315,7 @@ mod tests {
 
     #[test]
     fn op_list_title_omits_aggregate_stats_when_unavailable() {
-        let title = super::op_list_title(&Address::from([0x42; 20]), 0x2a, 123_456, 42, 7, None);
+        let title = super::op_list_title(&Address::repeat_byte(0x42), 0x2a, 123_456, 42, 7, None);
 
         assert!(!title.contains("sessionTraceGasUsed"));
         assert!(!title.contains("sessionSubcalls"));

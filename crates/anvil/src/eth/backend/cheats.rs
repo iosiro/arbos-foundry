@@ -95,6 +95,10 @@ impl CheatsManager {
         state.next_block_prevrandao = Some(prevrandao);
     }
 
+    pub(crate) fn next_block_prevrandao(&self) -> Option<B256> {
+        self.state.read().next_block_prevrandao
+    }
+
     /// Prepares the manually set `prevrandao` without consuming it.
     pub(crate) fn prepare_next_block_prevrandao(&self) -> Option<PendingPrevrandao> {
         let state = self.state.read();
@@ -221,7 +225,7 @@ mod tests {
     #[test]
     fn impersonate_returns_false_then_true() {
         let mgr = CheatsManager::default();
-        let addr = Address::from([1u8; 20]);
+        let addr = Address::repeat_byte(1u8);
         assert!(!mgr.impersonate(addr));
         assert!(mgr.impersonate(addr));
     }

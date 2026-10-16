@@ -7,6 +7,9 @@ use foundry_evm_networks::NetworkConfigs;
 use foundry_test_utils::{rpc, util::OTHER_SOLC_VERSION};
 
 #[cfg(feature = "monad")]
+use alloy_primitives::Address;
+
+#[cfg(feature = "monad")]
 async fn rpc_request(endpoint: &str, method: &str, params: serde_json::Value) -> serde_json::Value {
     reqwest::Client::new()
         .post(endpoint)
@@ -96,7 +99,8 @@ fn override_rpc_transaction_chain_id(value: &mut serde_json::Value, target: &str
 // Test evm version switch during tests / scripts.
 // <https://github.com/foundry-rs/foundry/issues/9840>
 // <https://github.com/foundry-rs/foundry/issues/6228>
-forgetest_init!(test_set_evm_version, |prj, cmd| {
+#[forgetest_init]
+fn test_set_evm_version(prj: _, cmd: _) {
     let endpoint = rpc::next_http_archive_rpc_url();
     prj.add_test(
         "TestEvmVersion.t.sol",
@@ -270,10 +274,11 @@ Traces:
 ...
 
 "#]]);
-});
+}
 
 #[cfg(feature = "monad")]
-forgetest_init!(test_set_evm_version_monad_hardfork, |prj, cmd| {
+#[forgetest_init]
+fn test_set_evm_version_monad_hardfork(prj: _, cmd: _) {
     prj.add_test(
         "MonadEvmVersion.t.sol",
         r#"
@@ -425,11 +430,20 @@ contract MonadEvmVersionTest is Test {
    "#,
     );
 
-    cmd.args(["test", "--network", "monad", "--mc", "MonadEvmVersionTest"]).assert_success();
-});
+    cmd.args(["test", "--network", "monad", "--mc", "MonadEvmVersionTest"])
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 1 test for test/MonadEvmVersion.t.sol:MonadEvmVersionTest
+[PASS] test_set_monad_evm_version() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 #[cfg(feature = "monad")]
-forgetest_async!(fork_resolves_monad_hardfork_from_timestamp, |prj, cmd| {
+#[forgetest]
+async fn fork_resolves_monad_hardfork_from_timestamp(prj: _, cmd: _) {
     let monad_nine_activation =
         foundry_evm::hardforks::MonadHardfork::MonadNine.mainnet_activation_timestamp().unwrap();
     let mainnet_activation =
@@ -609,11 +623,19 @@ contract MonadForkHardforkTest {
             "--mt",
             "test_monad_nine",
         ])
-        .assert_success();
-});
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 1 test for test/MonadForkHardfork.t.sol:MonadForkHardforkTest
+[PASS] test_monad_nine() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 #[cfg(feature = "monad")]
-forgetest_init!(test_monad_memory_limit, |prj, cmd| {
+#[forgetest_init]
+fn test_monad_memory_limit(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.hardfork = Some("monad:MonadNine".parse().unwrap());
         config.memory_limit = 128 * 1024 * 1024;
@@ -674,10 +696,11 @@ contract MonadMemoryLimitTest is Test {
 [FAIL: EvmError: MemoryLimitOOG] test_memory_ending_above_limit() ([GAS])
 ...
 "#]]);
-});
+}
 
 #[cfg(feature = "monad")]
-forgetest_async!(execute_transaction_uses_monad_fork_context, |prj, cmd| {
+#[forgetest]
+async fn execute_transaction_uses_monad_fork_context(prj: _, cmd: _) {
     use alloy_consensus::SignableTransaction as _;
     use alloy_network::TxSignerSync as _;
     use alloy_provider::Provider as _;
@@ -884,11 +907,22 @@ contract ExecuteTransactionMonadContextTest {
     });
 
     cmd.args(["test", "--network", "monad", "--mc", "ExecuteTransactionMonadContextTest"])
-        .assert_success();
-});
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 4 tests for test/ExecuteTransactionMonadContext.t.sol:ExecuteTransactionMonadContextTest
+[PASS] test_execute_transaction_credit_clears_outer_violation() ([GAS])
+[PASS] test_execute_transaction_does_not_track_nested_only_account() ([GAS])
+[PASS] test_execute_transaction_preserves_unaffected_outer_violation() ([GAS])
+[PASS] test_execute_transaction_uses_ancestor_context() ([GAS])
+Suite result: ok. 4 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 #[cfg(feature = "monad")]
-forgetest_async!(transaction_fork_excludes_future_monad_participants, |prj, cmd| {
+#[forgetest]
+async fn transaction_fork_excludes_future_monad_participants(prj: _, cmd: _) {
     use alloy_consensus::SignableTransaction as _;
     use alloy_network::{ReceiptResponse as _, TxSignerSync as _};
     use alloy_provider::Provider as _;
@@ -1134,11 +1168,22 @@ contract TransactionForkMonadContextTest {
     });
 
     cmd.args(["test", "--network", "monad", "--mc", "TransactionForkMonadContextTest"])
-        .assert_success();
-});
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 4 tests for test/TransactionForkMonadContext.t.sol:TransactionForkMonadContextTest
+[PASS] test_future_transaction_is_not_an_ancestor() ([GAS])
+[PASS] test_non_immediate_transact_rejects_without_mutation() ([GAS])
+[PASS] test_parent_block_transact_advances_to_next_transaction() ([GAS])
+[PASS] test_sequential_transacts_advance_past_block() ([GAS])
+Suite result: ok. 4 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 #[cfg(feature = "monad")]
-forgetest_async!(monad_fork_aux_lifecycle_tracks_outer_context, |prj, cmd| {
+#[forgetest]
+async fn monad_fork_aux_lifecycle_tracks_outer_context(prj: _, cmd: _) {
     use alloy_consensus::SignableTransaction as _;
     use alloy_network::{ReceiptResponse as _, TxSignerSync as _};
     use alloy_provider::Provider as _;
@@ -1776,11 +1821,19 @@ contract MonadForkAuxLifecycleTest {
             "test_fork_active_transact_advances_outer_context",
             "--isolate",
         ])
-        .assert_success();
-});
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 1 test for test/MonadForkAuxLifecycle.t.sol:MonadForkAuxLifecycleTest
+[PASS] test_fork_active_transact_advances_outer_context() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 #[cfg(feature = "monad")]
-forgetest_async!(transact_replays_monad_protocol_system_target_forks, |prj, cmd| {
+#[forgetest]
+async fn transact_replays_monad_protocol_system_target_forks(prj: _, cmd: _) {
     use alloy_network::{ReceiptResponse as _, TransactionBuilder as _};
     use alloy_provider::Provider as _;
 
@@ -1788,12 +1841,9 @@ forgetest_async!(transact_replays_monad_protocol_system_target_forks, |prj, cmd|
         alloy_primitives::address!("0x6f49a8F621353f12378d0046E7d7e4b9B249DC9e");
     const STAKING_ADDRESS: alloy_primitives::Address =
         alloy_primitives::address!("0x0000000000000000000000000000000000001000");
-    const BLOCK_AUTHOR: alloy_primitives::Address =
-        alloy_primitives::address!("0x1111111111111111111111111111111111111111");
-    const VALIDATOR_AUTH: alloy_primitives::Address =
-        alloy_primitives::address!("0x2222222222222222222222222222222222222222");
-    const UNKNOWN_BLOCK_AUTHOR: alloy_primitives::Address =
-        alloy_primitives::address!("0x3333333333333333333333333333333333333333");
+    const BLOCK_AUTHOR: alloy_primitives::Address = Address::repeat_byte(0x11);
+    const VALIDATOR_AUTH: alloy_primitives::Address = Address::repeat_byte(0x22);
+    const UNKNOWN_BLOCK_AUTHOR: alloy_primitives::Address = Address::repeat_byte(0x33);
     const VALIDATOR_ID: u64 = 7;
 
     let (api, handle) = anvil::spawn(anvil::NodeConfig::test()).await;
@@ -2073,10 +2123,22 @@ contract MonadProtocolSystemTargetTest {
     });
 
     cmd.args(["test", "--network", "monad", "--mc", "MonadProtocolSystemTargetTest"])
-        .assert_success();
-});
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 5 tests for test/MonadProtocolSystemTarget.t.sol:MonadProtocolSystemTargetTest
+[PASS] test_failed_reward_target_from_parent_block_fork_rolls_back() ([GAS])
+[PASS] test_failed_reward_target_from_transaction_hash_fork_rolls_back() ([GAS])
+[PASS] test_gas_paying_system_sender_target_fork_is_rejected() ([GAS])
+[PASS] test_reward_target_from_parent_block_fork() ([GAS])
+[PASS] test_reward_target_from_transaction_hash_fork() ([GAS])
+Suite result: ok. 5 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
-forgetest_init!(test_set_evm_version_tempo_hardfork, |prj, cmd| {
+#[forgetest_init]
+fn test_set_evm_version_tempo_hardfork(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
     });
@@ -2107,10 +2169,54 @@ contract TempoEvmVersionTest is Test {
    "#,
     );
 
-    cmd.args(["test", "--network", "tempo", "--mc", "TempoEvmVersionTest"]).assert_success();
-});
+    cmd.args(["test", "--network", "tempo", "--mc", "TempoEvmVersionTest"])
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 1 test for test/TempoEvmVersion.t.sol:TempoEvmVersionTest
+[PASS] test_set_tempo_evm_version() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
-forgetest_init!(test_network_tempo_defaults_to_latest_hardfork, |prj, cmd| {
+#[forgetest_init]
+fn test_set_evm_version_tempo_gas(prj: _, cmd: _) {
+    prj.update_config(|config| {
+        config.solc = Some(OTHER_SOLC_VERSION.into());
+    });
+    prj.add_test(
+        "TempoEvmVersionGas.t.sol",
+        include_str!("../../fixtures/TempoEvmVersionGas.t.sol"),
+    );
+    for hardfork in ["tempo:T3", "tempo:T7", "tempo:T14"] {
+        cmd.forge_fuse()
+            .args([
+                "test",
+                "--network",
+                "tempo",
+                "--hardfork",
+                hardfork,
+                "--mc",
+                "TempoEvmVersionGasTest",
+            ])
+            .assert_success()
+            .stdout_eq(str![[r#"
+...
+Ran 5 tests for test/TempoEvmVersionGas.t.sol:TempoEvmVersionGasTest
+[PASS] testCodeDepositGas() ([GAS])
+[PASS] testEmptyAccountGas() ([GAS])
+[PASS] testLegacyEthereumAliasGas() ([GAS])
+[PASS] testLegacyNativeRevisionChange() ([GAS])
+[PASS] testNewStorageSlotGas() ([GAS])
+Suite result: ok. 5 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+    }
+}
+
+#[forgetest_init]
+fn test_network_tempo_defaults_to_latest_hardfork(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
     });
@@ -2140,10 +2246,19 @@ contract TempoDefaultEvmVersionTest is Test {{
         ),
     );
 
-    cmd.args(["test", "--network", "tempo", "--mc", "TempoDefaultEvmVersionTest"]).assert_success();
-});
+    cmd.args(["test", "--network", "tempo", "--mc", "TempoDefaultEvmVersionTest"])
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 1 test for test/TempoDefaultEvmVersion.t.sol:TempoDefaultEvmVersionTest
+[PASS] test_network_tempo_defaults_to_latest_hardfork() ([GAS])
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
-forgetest_async!(arbitrum_default_and_ethereum_opt_in_fork, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_default_and_ethereum_opt_in_fork(prj: _, cmd: _) {
     cmd.set_network(None);
     foundry_test_utils::util::initialize(prj.root());
     prj.update_config(|config| {
@@ -2217,9 +2332,10 @@ contract EthereumStateTest is Test {
         config.networks = NetworkConfigs::with_arbitrum();
     });
     cmd.forge_fuse().args(["test", "--mc", "ArbosStateTest"]).assert_success();
-});
+}
 
-forgetest_async!(arbitrum_fork_operations_preserve_stylus_deployment_policy, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_operations_preserve_stylus_deployment_policy(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let (api, handle) =
         anvil::spawn(anvil::NodeConfig::test().with_networks(NetworkConfigs::with_arbitrum()))
@@ -2291,9 +2407,10 @@ contract ArbitrumForkPolicyTest is Test {
         "-vvvv",
     ])
     .assert_success();
-});
+}
 
-forgetest!(arbitrum_blockhash_cheatcodes_keep_l1_and_l2_separate, |prj, cmd| {
+#[forgetest]
+fn arbitrum_blockhash_cheatcodes_keep_l1_and_l2_separate(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     prj.add_test(
         "BlockhashDomains.t.sol",
@@ -2342,9 +2459,10 @@ contract ArbitrumBlockhashDomainsTest is Test {
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumBlockhashDomainsTest", "-vvvv"])
         .assert_success();
     cmd.arg("--isolate").assert_success();
-});
+}
 
-forgetest_async!(arbitrum_fork_blockhash_overrides_follow_lifecycle, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_blockhash_overrides_follow_lifecycle(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let (_api, handle) = anvil::spawn(
         anvil::NodeConfig::test()
@@ -2397,36 +2515,33 @@ contract ArbitrumForkHashOverridesTest is Test {
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkHashOverridesTest", "-vvvv"])
         .assert_success();
     cmd.arg("--isolate").assert_success();
-});
+}
 
-forgetest_async!(
-    arbitrum_fork_arbsys_reads_rpc_hashes_without_changing_l1_blockhash,
-    |prj, cmd| {
-        foundry_test_utils::util::initialize(prj.root());
-        let (api, handle) = anvil::spawn(
-            anvil::NodeConfig::test()
-                .with_chain_id(Some(421_614_u64))
-                .with_networks(NetworkConfigs::with_arbitrum()),
-        )
-        .await;
-        for _ in 0..3 {
-            api.mine_one().await.unwrap();
-        }
-        let block = handle.http_provider().get_block_by_number(2.into()).await.unwrap().unwrap();
-        let parent = block.header.hash;
-        let grandparent = block.header.parent_hash;
-        // L2 is ahead of L1, as on Arbitrum. An L1-keyed fork anchor would reject L2 parent hashes.
-        let endpoint = foundry_test_utils::rpc::spawn_rpc_proxy_with_l1_block_number(
-            handle.http_endpoint(),
-            1,
-        )
-        .await;
-        prj.update_config(|config| {
-            config.rpc_endpoints = RpcEndpoints::new([("source", RpcEndpointUrl::Url(endpoint))]);
-        });
-        prj.add_test(
-            "ForkHashDomains.t.sol",
-            &r#"
+#[forgetest]
+async fn arbitrum_fork_arbsys_reads_rpc_hashes_without_changing_l1_blockhash(prj: _, cmd: _) {
+    foundry_test_utils::util::initialize(prj.root());
+    let (api, handle) = anvil::spawn(
+        anvil::NodeConfig::test()
+            .with_chain_id(Some(421_614_u64))
+            .with_networks(NetworkConfigs::with_arbitrum()),
+    )
+    .await;
+    for _ in 0..3 {
+        api.mine_one().await.unwrap();
+    }
+    let block = handle.http_provider().get_block_by_number(2.into()).await.unwrap().unwrap();
+    let parent = block.header.hash;
+    let grandparent = block.header.parent_hash;
+    // L2 is ahead of L1, as on Arbitrum. An L1-keyed fork anchor would reject L2 parent hashes.
+    let endpoint =
+        foundry_test_utils::rpc::spawn_rpc_proxy_with_l1_block_number(handle.http_endpoint(), 1)
+            .await;
+    prj.update_config(|config| {
+        config.rpc_endpoints = RpcEndpoints::new([("source", RpcEndpointUrl::Url(endpoint))]);
+    });
+    prj.add_test(
+        "ForkHashDomains.t.sol",
+        &r#"
 pragma solidity >=0.8.20;
 import {Test} from "forge-std/Test.sol";
 interface ArbSysHashes {
@@ -2461,16 +2576,16 @@ contract ArbitrumForkHashDomainsTest is Test {
     }
 }
 "#
-            .replace("<parent>", &format!("bytes32({parent})"))
-            .replace("<grandparent>", &format!("bytes32({grandparent})")),
-        );
-        cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkHashDomainsTest", "-vvvv"])
-            .assert_success();
-        cmd.arg("--isolate").assert_success();
-    }
-);
+        .replace("<parent>", &format!("bytes32({parent})"))
+        .replace("<grandparent>", &format!("bytes32({grandparent})")),
+    );
+    cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkHashDomainsTest", "-vvvv"])
+        .assert_success();
+    cmd.arg("--isolate").assert_success();
+}
 
-forgetest_init!(arbitrum_rejects_blob_basefee, |prj, cmd| {
+#[forgetest_init]
+fn arbitrum_rejects_blob_basefee(prj: _, cmd: _) {
     prj.add_test(
         "BlobBasefee.t.sol",
         r#"
@@ -2491,9 +2606,10 @@ contract ArbitrumBlobBasefeeTest is Test {
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumBlobBasefeeTest", "-vvvv"])
         .assert_success();
     cmd.arg("--isolate").assert_success();
-});
+}
 
-forgetest_async!(arbitrum_fork_selects_opcode_rules_from_source_state, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_selects_opcode_rules_from_source_state(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let remote = alloy_primitives::address!("0000000000000000000000000000000000123456");
     let mut handles = Vec::new();
@@ -2553,9 +2669,10 @@ contract ArbitrumForkOpcodeRulesTest is Test {
     );
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumForkOpcodeRulesTest", "-vvvv"])
         .assert_success();
-});
+}
 
-forgetest_async!(arbitrum_fork_refreshes_cached_source_state, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_refreshes_cached_source_state(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let mut node = anvil::NodeConfig::test()
         .with_chain_id(Some(421_614_u64))
@@ -2752,9 +2869,10 @@ contract EthereumForkStorageControlTest is Test {
                 .assert_success();
         }
     }
-});
+}
 
-forgetest_async!(arbitrum_fork_transaction_replay_keeps_l1_and_l2_numbers_distinct, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_transaction_replay_keeps_l1_and_l2_numbers_distinct(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let (api, handle) = anvil::spawn(
         anvil::NodeConfig::test()
@@ -2965,9 +3083,10 @@ contract ArbitrumReplayNumbersTest is Test {
     cmd.args(["test", "--network", "arbitrum", "--mc", "ArbitrumReplayNumbersTest", "-vvvv"])
         .assert_success();
     proxy.abort();
-});
+}
 
-forgetest_init!(test_arbitrum_execute_transaction_preserves_deployment_policy, |prj, cmd| {
+#[forgetest_init]
+fn test_arbitrum_execute_transaction_preserves_deployment_policy(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
     });
@@ -3047,9 +3166,10 @@ contract NestedStylusPolicyTest is Test {
             "-vvvv",
         ])
         .assert_success();
-});
+}
 
-forgetest_async!(arbitrum_fork_uses_registered_arb_sys_precompile, |prj, cmd| {
+#[forgetest]
+async fn arbitrum_fork_uses_registered_arb_sys_precompile(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let (api, handle) = anvil::spawn(
         anvil::NodeConfig::test()
@@ -3124,9 +3244,10 @@ contract ArbSysProviderTest is Test {
             "-vvvv",
         ])
         .assert_success();
-});
+}
 
-forgetest_init!(arbitrum_inline_stylus_settings_preserve_setup_and_isolation, |prj, cmd| {
+#[forgetest_init]
+fn arbitrum_inline_stylus_settings_preserve_setup_and_isolation(prj: _, cmd: _) {
     prj.update_config(|config| config.solc = Some(OTHER_SOLC_VERSION.into()));
     prj.add_test(
         "InlineStylus.t.sol",
@@ -3208,9 +3329,10 @@ contract InlineStylusVersionTest is Test {
     cmd.forge_fuse()
         .args(["coverage", "--network", "arbitrum", "--mc", "InlineStylus", "--report", "summary"])
         .assert_success();
-});
+}
 
-forgetest_init!(arbitrum_inline_function_version_rejects_reinitialization, |prj, cmd| {
+#[forgetest_init]
+fn arbitrum_inline_function_version_rejects_reinitialization(prj: _, cmd: _) {
     prj.add_test(
         "InlineVersion.t.sol",
         r#"
@@ -3227,9 +3349,10 @@ contract InlineVersionTest is Test {
 Error: function-level ArbOS version override in test/InlineVersion.t.sol:InlineVersionTest:testVersionOverride cannot change already-initialized state; configure the version at contract or project scope
 
 "#]]);
-});
+}
 
-forgetest_init!(test_network_arbitrum_applies_stylus_cli_config, |prj, cmd| {
+#[forgetest_init]
+fn test_network_arbitrum_applies_stylus_cli_config(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
     });
@@ -3279,9 +3402,10 @@ contract ConfiguredArbosStateTest is Test {
         "23456",
     ])
     .assert_success();
-});
+}
 
-forgetest_init!(test_stylus_utility_cheatcodes, |prj, cmd| {
+#[forgetest_init]
+fn test_stylus_utility_cheatcodes(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));
@@ -3324,9 +3448,10 @@ contract StylusUtilitiesTest is Test {
     );
 
     cmd.args(["test", "--network", "arbitrum", "--mc", "StylusUtilitiesTest"]).assert_success();
-});
+}
 
-forgetest_init!(test_stylus_block_cache_gas, |prj, cmd| {
+#[forgetest_init]
+fn test_stylus_block_cache_gas(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));
@@ -3397,9 +3522,10 @@ contract BlockCacheTest is Test {
                 .assert_success();
         }
     }
-});
+}
 
-forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
+#[forgetest_init]
+fn test_stylus_event_inspection(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));
@@ -3450,9 +3576,10 @@ forgetest_init!(test_stylus_event_inspection, |prj, cmd| {
 ...
 "#]]);
     }
-});
+}
 
-forgetest_init!(test_stylus_host_inspection, |prj, cmd| {
+#[forgetest_init]
+fn test_stylus_host_inspection(prj: _, cmd: _) {
     cmd.set_network(Some("arbitrum"));
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
@@ -3466,9 +3593,10 @@ forgetest_init!(test_stylus_host_inspection, |prj, cmd| {
         prj.update_config(|config| config.isolate = isolate);
         cmd.forge_fuse().args(["test", "--mc", "StylusInspectorTest", "-vvvv"]).assert_success();
     }
-});
+}
 
-forgetest_init!(test_deploy_stylus_code_executes_program, |prj, cmd| {
+#[forgetest_init]
+fn test_deploy_stylus_code_executes_program(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));
@@ -3634,12 +3762,13 @@ contract StylusCachePolicyTest is Test {
     cmd.forge_fuse()
         .args(["test", "--network", "arbitrum", "--stylus-debug", "--mc", "DeployStylusTest"])
         .assert_success();
-});
+}
 
 // Validates T5 implicit-approval wiring: the cheatcodes, the AddressRegistry selector,
 // unchanged standard approve/transferFrom behavior, an implicit pull through StablecoinDEX,
 // and a non-implicit spender control case.
-forgetest_init!(test_tempo_implicit_approval_t5, |prj, cmd| {
+#[forgetest_init]
+fn test_tempo_implicit_approval_t5(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         // The precompile registry snapshots `cfg.spec` at EVM construction, so pinning T5
@@ -3651,12 +3780,27 @@ forgetest_init!(test_tempo_implicit_approval_t5, |prj, cmd| {
     let fixture = include_str!("../../fixtures/TempoImplicitApproval.t.sol");
     prj.add_test("TempoImplicitApproval.t.sol", fixture);
 
-    cmd.args(["test", "--network", "tempo", "--mc", "TempoImplicitApprovalTest"]).assert_success();
-});
+    cmd.args(["test", "--network", "tempo", "--mc", "TempoImplicitApprovalTest"])
+        .assert_success()
+        .stdout_eq(str![[r#"
+...
+Ran 7 tests for test/TempoImplicitApproval.t.sol:TempoImplicitApprovalTest
+[PASS] test_assumeImplicitApproval_positive_t5() ([GAS])
+[PASS] test_cheatcode_isImplicitlyApproved_reports_pre_t5() ([GAS])
+[PASS] test_cheatcode_matches_registry_selector_t5() ([GAS])
+[PASS] test_implicit_spender_pulls_without_approve_t5() ([GAS])
+[PASS] test_isImplicitlyApproved_t5() ([GAS])
+[PASS] test_non_implicit_spender_requires_approve_t5() ([GAS])
+[PASS] test_standard_approve_flow_unchanged_t5() ([GAS])
+Suite result: ok. 7 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#]]);
+}
 
 // Regression test for <https://github.com/foundry-rs/foundry/issues/13040>:
 // configured evm_version must be preserved after createSelectFork / rollFork.
-forgetest_init!(test_fork_preserves_evm_version, |prj, cmd| {
+#[forgetest_init]
+fn test_fork_preserves_evm_version(prj: _, cmd: _) {
     let endpoint = rpc::next_http_archive_rpc_url();
 
     prj.update_config(|config| {
@@ -3681,5 +3825,33 @@ contract ForkEvmVersionTest is Test {
         .replace("<rpc>", &endpoint),
     );
 
-    cmd.args(["test", "--mc", "ForkEvmVersionTest", "-vvvv"]).assert_success();
-});
+    cmd.args(["test", "--mc", "ForkEvmVersionTest", "-vvvv"]).assert_success().stdout_eq(str![[
+        r#"
+...
+Ran 1 test for test/ForkEvmVersion.t.sol:ForkEvmVersionTest
+[PASS] test_evm_version_preserved_after_fork() ([GAS])
+Traces:
+  [12097] ForkEvmVersionTest::test_evm_version_preserved_after_fork()
+    ├─ [0] VM::getEvmVersion() [staticcall]
+    │   └─ ← [Return] "cancun"
+    ├─ [0] VM::assertEq("cancun", "cancun", "before fork") [staticcall]
+    │   └─ ← [Return]
+    ├─ [0] VM::createSelectFork("<rpc url>", 21000000 [2.1e7])
+    │   └─ ← [Return] 0
+    ├─ [0] VM::getEvmVersion() [staticcall]
+    │   └─ ← [Return] "cancun"
+    ├─ [0] VM::assertEq("cancun", "cancun", "after createSelectFork") [staticcall]
+    │   └─ ← [Return]
+    ├─ [0] VM::rollFork(21000001 [2.1e7])
+    │   └─ ← [Return]
+    ├─ [0] VM::getEvmVersion() [staticcall]
+    │   └─ ← [Return] "cancun"
+    ├─ [0] VM::assertEq("cancun", "cancun", "after rollFork") [staticcall]
+    │   └─ ← [Return]
+    └─ ← [Stop]
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; [ELAPSED]
+...
+"#
+    ]]);
+}

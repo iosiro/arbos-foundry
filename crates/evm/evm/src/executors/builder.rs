@@ -4,8 +4,6 @@ use crate::{
 };
 use alloy_primitives::Address;
 use foundry_config::stylus::StylusConfig;
-#[cfg(feature = "optimism")]
-use foundry_evm_core::evm::OpEvmNetwork;
 use foundry_evm_core::{
     backend::Backend,
     evm::{
@@ -13,10 +11,17 @@ use foundry_evm_core::{
         FoundryEvmNetwork, SpecFor, TempoEvmNetwork, TxEnvFor,
     },
 };
-#[cfg(feature = "monad")]
-use foundry_evm_core::{constants::MONAD_CHEATCODE_ADDRESS, evm::MonadEvmNetwork};
 use foundry_evm_networks::NetworkConfigs;
 use revm::context::{Block, Transaction};
+
+#[cfg(feature = "base")]
+use foundry_evm_core::evm::BaseEvmNetwork;
+
+#[cfg(feature = "monad")]
+use foundry_evm_core::{constants::MONAD_CHEATCODE_ADDRESS, evm::MonadEvmNetwork};
+
+#[cfg(feature = "optimism")]
+use foundry_evm_core::evm::OpEvmNetwork;
 
 /// The builder that allows to configure an evm [`Executor`] which a stack of optional
 /// [`revm::Inspector`]s, such as [`Cheatcodes`].
@@ -127,8 +132,8 @@ impl<FEN: FoundryEvmNetwork> ExecutorBuilder<FEN> {
         mut evm_env: EvmEnvFor<FEN>,
         tx_env: TxEnvFor<FEN>,
         mut db: Backend<FEN>,
-        // TODO(monad-fen-dispatch): Remove this argument after inspector inputs and backend fork
-        // behavior are resolved by the initial concrete FEN dispatch.
+        // TODO(monad-fen-lifecycle): Remove this argument after the backend's Monad fork-position
+        // migration and the inspector's separate Celo configuration cleanup are complete.
         networks: NetworkConfigs,
     ) -> eyre::Result<Executor<FEN>> {
         let Self { mut stack, gas_limit, spec, legacy_assertions, factory } = self;
@@ -173,6 +178,15 @@ impl ExecutorBuilder<ArbitrumEvmNetwork> {
     }
 
     /// Creates the default Arbitrum executor builder.
+    #[inline]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(feature = "base")]
+impl ExecutorBuilder<BaseEvmNetwork> {
+    /// Creates the default Base executor builder.
     #[inline]
     pub fn new() -> Self {
         Self::default()

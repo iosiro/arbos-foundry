@@ -19,14 +19,8 @@ declare_forge_lint!(
     "comparing an expression with itself is always true or false"
 );
 
-impl<'hir> LateLintPass<'hir> for TautologicalCompare {
-    fn check_expr(
-        &mut self,
-        ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        _hir: &'hir hir::Hir<'hir>,
-        expr: &'hir hir::Expr<'hir>,
-    ) {
+impl<'gcx> LateLintPass<'gcx> for TautologicalCompare {
+    fn check_expr(&mut self, ctx: &LintContext, gcx: Gcx<'gcx>, expr: &'gcx hir::Expr<'gcx>) {
         // A UDVT can only be compared through a user-defined operator (`using {f as ==} for T`),
         // which dispatches to an arbitrary function, so `x == x` is not tautological for it.
         if let ExprKind::Binary(left, op, right) = &expr.kind
@@ -51,7 +45,7 @@ impl<'hir> LateLintPass<'hir> for TautologicalCompare {
 
 /// Structural equality for side-effect-free expressions. Anything else (notably arbitrary calls,
 /// which may return different values, and the mutating `++`/`--`) is treated as unequal.
-fn exprs_equal<'hir>(a: &Expr<'hir>, b: &Expr<'hir>) -> bool {
+fn exprs_equal<'gcx>(a: &Expr<'gcx>, b: &Expr<'gcx>) -> bool {
     match (&a.peel_parens().kind, &b.peel_parens().kind) {
         (ExprKind::Ident(ra), ExprKind::Ident(rb)) => ra == rb,
         (ExprKind::Lit(la), ExprKind::Lit(lb)) => literals_equal(la, lb),
@@ -71,7 +65,7 @@ fn exprs_equal<'hir>(a: &Expr<'hir>, b: &Expr<'hir>) -> bool {
         }
         // Only casts to the *same* elementary type are pure conversions: `uint256(x) == uint8(x)`
         // is not tautological because the narrower cast can truncate.
-        (ExprKind::Call(ca, args_a, _), ExprKind::Call(cb, args_b, _)) => {
+        (ExprKind::Call(ca, args_a), ExprKind::Call(cb, args_b)) => {
             matches!((cast_type(ca), cast_type(cb)), (Some(ea), Some(eb)) if ea == eb)
                 && args_a.len() == 1
                 && args_b.len() == 1

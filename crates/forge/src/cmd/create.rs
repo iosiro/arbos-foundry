@@ -1,4 +1,3 @@
-use crate::cmd::install;
 use alloy_chains::Chain;
 use alloy_consensus::{SignableTransaction, Signed};
 use alloy_dyn_abi::{DynSolValue, JsonAbiExt};
@@ -163,6 +162,24 @@ impl CreateArgs {
         }
         let (signer, tempo_access_key) = wallet.maybe_signer_for_chain(chain.id()).await?;
 
+        // Never deploy from an account other than the one explicitly selected by the user. Unlocked
+        // and browser deployments do not use the resolved signer.
+        let deployer = signer
+            .as_ref()
+            .map(|signer| signer.address())
+            .or_else(|| tempo_access_key.as_ref().map(|ak| ak.account()));
+        if !self.unlocked
+            && !self.browser.browser
+            && let Some(from) = self.eth.wallet.from
+            && let Some(deployer) = deployer
+            && from != deployer
+        {
+            eyre::bail!(
+                "the sender specified via `--from`/`ETH_FROM` ({from}) does not match the \
+                 signer address ({deployer})"
+            );
+        }
+
         if tempo_access_key.is_some() || self.tx.tempo.is_tempo() || chain.is_tempo() {
             self.run_generic::<TempoNetwork>(signer, tempo_access_key).await
         } else {
@@ -185,11 +202,7 @@ impl CreateArgs {
         let resolve_unknown_fee_token_symbol = !config.eth_rpc_curl;
 
         // Install missing dependencies.
-        if install::install_missing_dependencies(&mut config).await && config.auto_detect_remappings
-        {
-            // need to re-configure here to also catch additional remappings
-            config = self.load_config()?;
-        }
+        self.install_missing_dependencies(&mut config)?;
 
         // Find Project & Compile
         let project = config.project()?;
@@ -200,7 +213,11 @@ impl CreateArgs {
             project.find_contract_path(&self.contract.name)?
         };
 
-        let output = compile::compile_target(&target_path, &project, shell::is_json())?;
+        let compiler = compile::ProjectCompiler::new()
+            .external_compilers(&config)
+            .quiet(shell::is_json())
+            .target_files([target_path.clone()]);
+        let output = compiler.compile(&project)?;
 
         let (abi, bin, id) = find_contract_artifacts(output, &target_path, &self.contract.name)?;
 
@@ -549,7 +566,7 @@ impl CreateArgs {
         }
 
         if self.tx.gas_limit.is_none() {
-            let request = if browser_signer.is_some() && chain.is_tempo() {
+            let request = if browser_signer.is_some() {
                 deployer.tx.browser_wallet_gas_estimation_request()
             } else {
                 deployer.tx.clone()
@@ -610,7 +627,6 @@ impl CreateArgs {
             sponsor
                 .resolve_and_set_fee_token(
                     resolve_unknown_fee_token_symbol.then_some(&provider),
-                    Some(chain),
                     &mut deployer.tx,
                 )
                 .await?;
@@ -618,7 +634,6 @@ impl CreateArgs {
         } else {
             let fee_token = resolve_and_set_fee_token(
                 resolve_unknown_fee_token_symbol.then_some(&provider),
-                Some(chain),
                 &mut deployer.tx,
                 Some(deployer_address),
             )

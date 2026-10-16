@@ -6,36 +6,17 @@ use foundry_compilers::{
     solc::{SOLC_EXTENSIONS, SolcLanguage, SolcVersionedInput},
 };
 use foundry_config::Config;
-#[cfg(windows)]
-use path_slash::PathExt as _;
 use rayon::prelude::*;
 use solar::{interface::MIN_SOLIDITY_VERSION, sema::ParsingContext};
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt as _;
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     path::{Path, PathBuf},
 };
 
-/// Configures a [`ParsingContext`] from [`Config`].
-///
-/// - Configures include paths, remappings
-/// - Source files are added if `add_source_file` is set
-/// - If no `project` is provided, it will spin up a new ephemeral project.
-/// - If no `target_paths` are provided, all project files are processed.
-/// - Only processes the subset of sources with the most up-to-date Solidity version.
-pub fn configure_pcx(
-    pcx: &mut ParsingContext<'_>,
-    config: &Config,
-    project: Option<&Project>,
-    target_paths: Option<&[PathBuf]>,
-) -> Result<()> {
-    let status = configure_pcx_with_sources(pcx, config, project, target_paths, false)?;
-    if !status.has_compatible_sources && !status.has_unsupported_sources {
-        eyre::bail!("no Solidity sources");
-    }
-    Ok(())
-}
+#[cfg(windows)]
+use path_slash::PathExt as _;
+#[cfg(windows)]
+use std::os::windows::ffi::OsStrExt as _;
 
 /// Describes the Solidity sources encountered while configuring Solar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -197,21 +178,19 @@ pub fn get_solar_sources_from_compile_output(
         && !targets.is_empty()
     {
         let mut source_paths = HashSet::new();
-        let mut queue: VecDeque<PathBuf> = targets
-            .iter()
-            .filter_map(|path| {
-                is_solidity_file(path).then(|| dunce::canonicalize(path).ok()).flatten()
-            })
-            .collect();
-
-        while let Some(path) = queue.pop_front() {
+        for path in targets.iter().filter_map(|path| {
+            is_solidity_file(path).then(|| dunce::canonicalize(path).ok()).flatten()
+        }) {
             if source_paths.insert(path.clone()) {
-                for import in output.graph().imports(path.as_path()) {
-                    // Skip ignored imports to prevent solar from trying to compile them
-                    if !is_ignored(import) {
-                        queue.push_back(import.to_path_buf());
-                    }
-                }
+                // `imports` already includes transitive dependencies.
+                source_paths.extend(
+                    output
+                        .graph()
+                        .imports(&path)
+                        .into_iter()
+                        .filter(|import| !is_ignored(import))
+                        .map(Path::to_path_buf),
+                );
             }
         }
 

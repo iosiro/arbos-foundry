@@ -21,13 +21,13 @@ use foundry_evm_fuzz::{
     BasicTxDetails,
     invariant::{FuzzRunIdentifiedContracts, InvariantContract},
 };
+use foundry_evm_traces::CallTraceArena;
 use proptest::test_runner::TestError;
 use revm::interpreter::InstructionResult;
-use revm_inspectors::tracing::CallTraceArena;
 use std::{borrow::Cow, collections::HashMap};
 
 /// The outcome of an invariant fuzz test
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct InvariantFuzzTestResult {
     /// Errors recorded per invariant.
     pub errors: HashMap<String, InvariantFuzzError>,
@@ -173,7 +173,7 @@ fn logged_assertion_failure<FEN: FoundryEvmNetwork>(call_result: &RawCallResult<
 ///
 /// This covers Solidity `assert`, legacy invalid-opcode assertions, `vm.assert*` reverts, and the
 /// non-reverting `GLOBAL_FAIL_SLOT` path used when `assertions_revert = false`.
-pub(crate) fn did_fail_on_assert<FEN: FoundryEvmNetwork>(
+pub fn did_fail_on_assert<FEN: FoundryEvmNetwork>(
     call_result: &RawCallResult<FEN>,
     state_changeset: &StateChangeset,
 ) -> bool {
@@ -424,9 +424,9 @@ pub(crate) fn can_continue<'a, FEN: FoundryEvmNetwork>(
         }
 
         if reverted && !is_optimization && !invariant_config.has_delay() {
-            // If we don't fail test on revert then remove the reverted call from inputs.
-            // Delay-enabled campaigns keep reverted calls so shrinking can preserve their
-            // warp/roll contribution when building the final counterexample.
+            // If we don't fail the test on revert, remove the reverted call from inputs.
+            // Delay-enabled campaigns keep reverted calls so their warp/roll contribution can be
+            // replayed.
             invariant_run.inputs.pop();
         }
     }
