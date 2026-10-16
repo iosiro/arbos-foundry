@@ -4,10 +4,10 @@ use super::{
 };
 use crate::{
     linter::{LateLintPass, LintContext},
-    sol::{Severity, SolLint, analysis::builtins},
+    sol::{Severity, SolLint},
 };
 use solar::sema::{
-    Gcx, Hir,
+    Gcx,
     builtins::Builtin,
     hir::{Expr, ExprKind, Function, StmtKind},
 };
@@ -19,21 +19,15 @@ declare_forge_lint!(
     "`require` or `revert` inside a loop"
 );
 
-impl<'hir> LateLintPass<'hir> for RequireRevertInLoop {
-    fn check_function(
-        &mut self,
-        ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        hir: &'hir Hir<'hir>,
-        func: &'hir Function<'hir>,
-    ) {
-        for_each_loop_item(gcx, hir, func, false, |item| {
+impl<'gcx> LateLintPass<'gcx> for RequireRevertInLoop {
+    fn check_function(&mut self, ctx: &LintContext, gcx: Gcx<'gcx>, func: &'gcx Function<'gcx>) {
+        for_each_loop_item(gcx, func, false, |item| {
             let reported = match item {
                 LoopItem::Stmt(stmt) => match stmt.kind {
                     StmtKind::Revert(expr) => Some(expr),
                     _ => None,
                 },
-                LoopItem::Expr(expr) => is_require_or_revert_call(expr).then_some(expr),
+                LoopItem::Expr(expr) => is_require_or_revert_call(gcx, expr).then_some(expr),
             };
             if let Some(expr) = reported {
                 ctx.emit(&REQUIRE_REVERT_IN_LOOP, expr.span);
@@ -43,9 +37,10 @@ impl<'hir> LateLintPass<'hir> for RequireRevertInLoop {
 }
 
 /// `require(..)`, `revert(..)` or the Yul `revert(..)` builtin.
-fn is_require_or_revert_call(expr: &Expr<'_>) -> bool {
+fn is_require_or_revert_call(gcx: Gcx<'_>, expr: &Expr<'_>) -> bool {
     let ExprKind::Call(callee, ..) = &expr.peel_parens().kind else { return false };
-    builtins(callee).any(|b| {
-        matches!(b, Builtin::Require | Builtin::Revert | Builtin::RevertMsg | Builtin::YulRevert)
-    })
+    matches!(
+        gcx.resolved_builtin(callee),
+        Some(Builtin::Require | Builtin::Revert | Builtin::RevertMsg | Builtin::YulRevert)
+    )
 }

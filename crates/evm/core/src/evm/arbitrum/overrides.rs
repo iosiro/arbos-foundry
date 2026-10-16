@@ -49,6 +49,12 @@ impl<DB: Database> ArbitrumPrecompileOverrides<DB> {
     }
 }
 
+impl<DB: Database> super::FoundryPrecompiles for ArbitrumPrecompileOverrides<DB> {
+    fn addresses(&self) -> AddressSet {
+        self.addresses.clone()
+    }
+}
+
 impl<DB: Database> PrecompileProvider<ArbitrumContext<DB>> for ArbitrumPrecompileOverrides<DB> {
     type Output = InterpreterResult;
 

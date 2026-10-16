@@ -4,17 +4,18 @@ use std::borrow::Cow;
 
 use alloy_chains::Chain;
 use alloy_evm::precompiles::{DynPrecompile, PrecompileInput};
-use alloy_primitives::{Address, Bytes, U256, address, hex};
+use alloy_primitives::{Address, Bytes, U256, hex};
 use revm::precompile::{PrecompileHalt, PrecompileId, PrecompileOutput, PrecompileResult};
 
 /// ArbSys system contract address.
-pub const ARB_SYS_ADDRESS: Address = address!("0000000000000000000000000000000000000064");
+pub const ARB_SYS_ADDRESS: Address = Address::with_last_byte(0x64);
 
 /// `ArbSys.arbBlockNumber()` selector.
 pub const ARB_BLOCK_NUMBER_SELECTOR: [u8; 4] = hex!("a3b1b31d");
 
-/// Gas charged by Nitro for returning the 32-byte `arbBlockNumber()` result.
-pub const ARB_BLOCK_NUMBER_GAS_COST: u64 = 3;
+/// Gas Nitro charges inside `ArbSys.arbBlockNumber()`: opening the ArbOS state reads its version
+/// from storage (800, the EIP-2200 `SLOAD` cost), and copying the 32-byte result costs 3.
+pub const ARB_BLOCK_NUMBER_GAS_COST: u64 = 803;
 
 /// ID for the ArbSys precompile.
 pub static PRECOMPILE_ID_ARB_SYS: PrecompileId = PrecompileId::Custom(Cow::Borrowed("ArbSys"));

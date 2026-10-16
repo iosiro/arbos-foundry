@@ -47,3 +47,10 @@ impl ChiselEvmNetwork for MonadEvmNetwork {
         ExecutorBuilder::<Self>::new()
     }
 }
+
+#[cfg(feature = "base")]
+impl ChiselEvmNetwork for foundry_evm::core::evm::BaseEvmNetwork {
+    fn executor_builder(_opts: &EvmOpts) -> ExecutorBuilder<Self> {
+        ExecutorBuilder::<Self>::new()
+    }
+}

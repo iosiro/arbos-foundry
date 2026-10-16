@@ -128,14 +128,25 @@ impl BindArgs {
             eyre::bail!("`--ethers` bindings have been removed. Use `--alloy` (default) instead.");
         }
 
-        let config = self.load_config()?;
+        let config = if self.skip_build {
+            self.load_config()?
+        } else {
+            self.load_config_with_dependencies()?
+        };
         let artifacts = config.out.clone();
         let enum_definitions = if self.skip_build {
             let paths = config.project_paths();
-            cached_enum_definitions(&paths, self.get_json_files(&artifacts)?.map(|(_, path)| path))
+            cached_enum_definitions(
+                &paths,
+                &artifacts,
+                self.get_json_files(&artifacts)?.map(|(_, path)| path),
+            )
         } else {
             let mut project = config.project()?;
-            let output = compile_abi_project(&mut project, ProjectCompiler::new())?;
+            let output = compile_abi_project(
+                &mut project,
+                ProjectCompiler::new().external_compilers(&config),
+            )?;
             enum_definitions(output.parser())
         };
 
@@ -290,6 +301,7 @@ impl BindArgs {
 
 fn cached_enum_definitions(
     paths: &ProjectPathsConfig,
+    artifacts_root: &Path,
     artifacts: impl Iterator<Item = PathBuf>,
 ) -> BTreeMap<String, Vec<String>> {
     let Ok(graph) = Graph::<MultiCompilerParser>::resolve(paths) else {
@@ -313,7 +325,10 @@ fn cached_enum_definitions(
         .flat_map(|profiles| profiles.values())
         .map(|artifact| artifact.path.clone())
         .collect::<HashSet<_>>();
-    if artifacts.into_iter().any(|artifact| !cached_artifacts.contains(&artifact)) {
+    if artifacts.into_iter().any(|artifact| {
+        !artifact.starts_with(artifacts_root.join(".external"))
+            && !cached_artifacts.contains(&artifact)
+    }) {
         return BTreeMap::default();
     }
     enum_definitions(graph.parser())

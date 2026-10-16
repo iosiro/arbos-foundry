@@ -28,6 +28,20 @@ impl<FEN: FoundryEvmNetwork> From<ExecutorBuilder<FEN>> for TestExecutorBuilder<
 }
 
 impl TestExecutorBuilder<ArbitrumEvmNetwork> {
+    pub fn configured(
+        config: &Config,
+        inline: &InlineConfig,
+        output: &ProjectCompileOutput,
+        opts: &foundry_evm::opts::EvmOpts,
+    ) -> eyre::Result<Self> {
+        Self::arbitrum(
+            config,
+            inline,
+            output,
+            ExecutorBuilder::<ArbitrumEvmNetwork>::new().stylus_config(opts.stylus_config.clone()),
+        )
+    }
+
     /// Resolve inline settings once, at the concrete Arbitrum tool boundary.
     pub fn arbitrum(
         config: &Config,
@@ -72,3 +86,27 @@ impl TestExecutorBuilder<ArbitrumEvmNetwork> {
         Ok(Self { executor, inline_factories: Arc::new(factories) })
     }
 }
+
+macro_rules! standard_test_builder {
+    ($network:ty) => {
+        impl TestExecutorBuilder<$network> {
+            pub fn configured(
+                _config: &Config,
+                _inline: &InlineConfig,
+                _output: &ProjectCompileOutput,
+                _opts: &foundry_evm::opts::EvmOpts,
+            ) -> eyre::Result<Self> {
+                Ok(ExecutorBuilder::<$network>::new().into())
+            }
+        }
+    };
+}
+
+standard_test_builder!(foundry_evm::core::evm::EthEvmNetwork);
+standard_test_builder!(foundry_evm::core::evm::TempoEvmNetwork);
+#[cfg(feature = "base")]
+standard_test_builder!(foundry_evm::core::evm::BaseEvmNetwork);
+#[cfg(feature = "monad")]
+standard_test_builder!(foundry_evm::core::evm::MonadEvmNetwork);
+#[cfg(feature = "optimism")]
+standard_test_builder!(foundry_evm::core::evm::OpEvmNetwork);

@@ -563,8 +563,8 @@ enum RunContext {
 impl VerifyArgs {
     /// Run the verify command to submit the contract's source code for verification on etherscan
     pub async fn run(self) -> Result<()> {
-        let config = self.load_config()?;
         let context = self.resolve_context().await?;
+        let config = context.config.clone();
         self.run_with_resolved_context(RunContext::Local(Box::new(context)), config).await
     }
 
@@ -808,7 +808,7 @@ impl VerifyArgs {
     /// Resolves [VerificationContext] object either from entered contract name or by trying to
     /// match bytecode located at given address.
     pub async fn resolve_context(&self) -> Result<VerificationContext> {
-        let mut config = self.load_config()?;
+        let mut config = self.load_config_with_dependencies()?;
         config.libraries.extend(self.libraries.clone());
 
         let project = config.project()?;
@@ -993,7 +993,9 @@ impl_figment_convert_cast!(VerifyCheckArgs);
 
 impl VerifyCheckArgs {
     /// Run the verify command to submit the contract's source code for verification on etherscan
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
+        self.etherscan.key =
+            self.verifier.resolve_api_key(self.etherscan.key.as_deref()).map(str::to_owned);
         sh_status!("Checking verification status on {}", self.etherscan.chain.unwrap_or_default())?;
         self.verifier
             .effective_type()

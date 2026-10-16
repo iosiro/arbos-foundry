@@ -4,9 +4,11 @@ use crate::utils::{http_provider, http_provider_with_signer};
 use alloy_consensus::{Eip658Value, Receipt, proofs::calculate_receipt_root};
 use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip2718::Encodable2718};
 use alloy_network::{EthereumWallet, NetworkTransactionBuilder, TransactionBuilder};
-use alloy_primitives::{Address, B256, Bloom, Bytes, TxHash, TxKind, U256, address, b256};
-use alloy_provider::Provider;
-use alloy_rpc_types::{BlockId, TransactionRequest, anvil::Forking};
+use alloy_primitives::{Address, B256, Bloom, Bytes, TxHash, TxKind, U256, address, b256, bytes};
+use alloy_provider::{Provider, ext::TraceApi};
+use alloy_rpc_types::{
+    BlockId, BlockNumberOrTag, TransactionRequest, anvil::Forking, trace::parity::Action,
+};
 use alloy_serde::{OtherFields, WithOtherFields};
 use anvil::{NodeConfig, eth::fees::INITIAL_BASE_FEE, spawn};
 use axum::{Json, Router, routing::post};
@@ -17,8 +19,11 @@ use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, TxDeposit}
 use op_alloy_rpc_types::OpTransactionFields;
 use serde_json::{Value, json};
 
+#[cfg(feature = "base")]
+use foundry_evm::hardforks::BaseUpgrade;
+
 #[tokio::test(flavor = "multi_thread")]
-async fn inferred_optimism_forks_allow_non_monad_source_resets() {
+async fn inferred_optimism_forks_require_op_stack_source_resets() {
     let (_optimism_api, optimism_handle) = spawn(NodeConfig::test().with_optimism()).await;
     let (ethereum_api, _) = spawn(NodeConfig::test()).await;
 
@@ -41,16 +46,64 @@ async fn inferred_optimism_forks_allow_non_monad_source_resets() {
     )
     .await;
     let (_ethereum_origin_api, ethereum_origin) = spawn(NodeConfig::test()).await;
-    optimism_api
+    let original_node_info = optimism_api.anvil_node_info().await.unwrap();
+    let error = optimism_api
         .anvil_reset(Some(Forking {
             json_rpc_url: Some(ethereum_origin.http_endpoint()),
             block_number: Some(0),
         }))
         .await
-        .unwrap();
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "cannot reset Anvil across network families (optimism -> ethereum); start a new instance with matching network configuration"
+    );
     let node_info = optimism_api.anvil_node_info().await.unwrap();
     assert_eq!(node_info.network.as_deref(), Some("optimism"));
-    assert_eq!(node_info.fork_config.fork_url, Some(ethereum_origin.http_endpoint()));
+    assert_eq!(node_info.fork_config.fork_url, Some(optimism_handle.http_endpoint()));
+    assert_eq!(
+        node_info.fork_config.fork_block_number,
+        original_node_info.fork_config.fork_block_number
+    );
+    optimism_api.mine_one().await.unwrap();
+}
+
+#[cfg(feature = "base")]
+#[tokio::test(flavor = "multi_thread")]
+async fn inferred_optimism_fork_reset_to_base_preserves_execution_hardfork() {
+    let timestamp = 1_710_374_401u64;
+    let (_, optimism_origin) = spawn(
+        NodeConfig::test()
+            .with_optimism()
+            .with_hardfork(Some(OpHardfork::Ecotone.into()))
+            .with_genesis_timestamp(Some(timestamp)),
+    )
+    .await;
+    let (api, _) = spawn(
+        NodeConfig::test()
+            .with_eth_rpc_url(Some(optimism_origin.http_endpoint()))
+            .with_fork_block_number(Some(0u64)),
+    )
+    .await;
+    assert!(api.backend.is_optimism());
+    assert_eq!(api.backend.hardfork(), OpHardfork::Ecotone.into());
+
+    let (_, base_origin) = spawn(
+        NodeConfig::test_base()
+            .with_hardfork(Some(BaseUpgrade::Ecotone.into()))
+            .with_genesis_timestamp(Some(timestamp)),
+    )
+    .await;
+    api.anvil_reset(Some(Forking {
+        json_rpc_url: Some(base_origin.http_endpoint()),
+        block_number: Some(0),
+    }))
+    .await
+    .unwrap();
+
+    assert!(api.backend.is_optimism());
+    assert_eq!(api.backend.hardfork(), OpHardfork::Ecotone.into());
+    api.mine_one().await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -69,9 +122,7 @@ async fn test_deposits_not_supported_if_optimism_disabled() {
         .with_gas_limit(21000);
 
     let op_fields = OpTransactionFields {
-        source_hash: Some(b256!(
-            "0x0000000000000000000000000000000000000000000000000000000000000000"
-        )),
+        source_hash: Some(B256::ZERO),
         mint: Some(0),
         is_system_tx: Some(true),
         deposit_receipt_version: None,
@@ -103,9 +154,7 @@ async fn test_send_value_deposit_transaction() {
     let before_balance_to = provider.get_balance(to).await.unwrap();
 
     let op_fields = OpTransactionFields {
-        source_hash: Some(b256!(
-            "0x0000000000000000000000000000000000000000000000000000000000000000"
-        )),
+        source_hash: Some(B256::ZERO),
         mint: Some(0),
         is_system_tx: Some(true),
         deposit_receipt_version: None,
@@ -142,9 +191,7 @@ async fn test_tempo_fields_do_not_override_op_deposit_classification() {
     let accounts: Vec<_> = handle.dev_wallets().collect();
 
     let op_fields = OpTransactionFields {
-        source_hash: Some(b256!(
-            "0x0000000000000000000000000000000000000000000000000000000000000000"
-        )),
+        source_hash: Some(B256::ZERO),
         mint: Some(0),
         is_system_tx: Some(true),
         deposit_receipt_version: None,
@@ -244,9 +291,7 @@ async fn test_simulated_op_deposit_receipt_root_includes_canyon_fields() {
                         "from": accounts[0].address(),
                         "to": accounts[1].address(),
                         "gas": "0x5208",
-                        "sourceHash": b256!(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000"
-                        ),
+                        "sourceHash": B256::ZERO,
                         "mint": "0x0",
                         "isSystemTx": false,
                         "calls": [],
@@ -278,6 +323,78 @@ async fn test_simulated_op_deposit_receipt_root_includes_canyon_fields() {
     assert_eq!(response[0]["receiptsRoot"], json!(calculate_receipt_root(&[receipt])));
 }
 
+/// Mines a deposit from a sender whose nonce is already `2` and returns its receipt as JSON.
+async fn mine_deposit_receipt_after_two_transfers(config: NodeConfig) -> Value {
+    let (api, handle) = spawn(config).await;
+
+    let accounts: Vec<_> = handle.dev_wallets().collect();
+    let from = accounts[0].address();
+    let to = accounts[1].address();
+    // Unsigned requests go through `eth_sendTransaction`, which is where deposits are built.
+    let provider = http_provider(&handle.http_endpoint());
+
+    // Move the sender past nonce zero so pre- and post-execution nonces differ.
+    for _ in 0..2 {
+        let tx = TransactionRequest::default().with_from(from).with_to(to).with_value(U256::ONE);
+        provider
+            .send_transaction(WithOtherFields::new(tx))
+            .await
+            .unwrap()
+            .get_receipt()
+            .await
+            .unwrap();
+    }
+    assert_eq!(provider.get_transaction_count(from).await.unwrap(), 2);
+
+    let other: OtherFields =
+        json!({ "sourceHash": B256::ZERO, "mint": "0x0", "isSystemTx": false }).try_into().unwrap();
+    let tx = TransactionRequest::default()
+        .with_from(from)
+        .with_to(to)
+        .with_value(U256::ONE)
+        .with_gas_limit(21000);
+    let pending = provider
+        .send_transaction(WithOtherFields { inner: tx, other })
+        .await
+        .unwrap()
+        .register()
+        .await
+        .unwrap();
+    api.evm_mine(None).await.unwrap();
+    assert_eq!(provider.get_transaction_count(from).await.unwrap(), 3);
+
+    provider
+        .raw_request::<_, Value>("eth_getTransactionReceipt".into(), (pending.tx_hash(),))
+        .await
+        .unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mined_deposit_receipt_uses_pre_execution_nonce() {
+    let receipt = mine_deposit_receipt_after_two_transfers(
+        NodeConfig::test().with_networks(NetworkConfigs::with_optimism()),
+    )
+    .await;
+
+    assert_eq!(receipt["type"], json!("0x7E"));
+    assert_eq!(receipt["depositNonce"], json!("0x2"));
+    assert_eq!(receipt["depositReceiptVersion"], json!("0x1"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mined_deposit_receipt_omits_metadata_before_regolith() {
+    let receipt = mine_deposit_receipt_after_two_transfers(
+        NodeConfig::test()
+            .with_networks(NetworkConfigs::with_optimism())
+            .with_hardfork(Some(OpHardfork::Bedrock.into())),
+    )
+    .await;
+
+    assert_eq!(receipt["type"], json!("0x7E"));
+    assert_eq!(receipt["depositNonce"], Value::Null);
+    assert_eq!(receipt["depositReceiptVersion"], Value::Null);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_value_raw_deposit_transaction() {
     // enable the Optimism flag
@@ -305,9 +422,7 @@ async fn test_send_value_raw_deposit_transaction() {
         .with_max_priority_fee_per_gas(1_000_000_000);
 
     let op_fields = OpTransactionFields {
-        source_hash: Some(b256!(
-            "0x0000000000000000000000000000000000000000000000000000000000000000"
-        )),
+        source_hash: Some(B256::ZERO),
         mint: Some(0),
         is_system_tx: Some(true),
         deposit_receipt_version: None,
@@ -344,9 +459,8 @@ async fn test_deposit_transaction_hash_matches_sepolia() {
     let accounts: Vec<_> = handle.dev_wallets().collect();
     let signer: EthereumWallet = accounts[0].clone().into();
     // https://sepolia-optimism.etherscan.io/tx/0xbf8b5f08c43e4b860715cd64fc0849bbce0d0ea20a76b269e7bc8886d112fca7
-    let tx_hash: TxHash = "0xbf8b5f08c43e4b860715cd64fc0849bbce0d0ea20a76b269e7bc8886d112fca7"
-        .parse::<TxHash>()
-        .unwrap();
+    let tx_hash: TxHash =
+        b256!("0xbf8b5f08c43e4b860715cd64fc0849bbce0d0ea20a76b269e7bc8886d112fca7");
 
     // https://sepolia-optimism.etherscan.io/getRawTx?tx=0xbf8b5f08c43e4b860715cd64fc0849bbce0d0ea20a76b269e7bc8886d112fca7
     let raw_deposit_tx = alloy_primitives::hex::decode(
@@ -380,13 +494,13 @@ async fn test_deposit_tx_checks_sufficient_funds_after_applying_deposited_value(
     let send_value = 1_000_000_000_u128;
 
     let sender_prev_balance = provider.get_balance(sender).await.unwrap();
-    assert_eq!(sender_prev_balance, U256::from(0));
+    assert_eq!(sender_prev_balance, U256::ZERO);
 
     let recipient_prev_balance = provider.get_balance(recipient).await.unwrap();
-    assert_eq!(recipient_prev_balance, U256::from(0));
+    assert_eq!(recipient_prev_balance, U256::ZERO);
 
     let deposit_tx = TxDeposit {
-        source_hash: b256!("0x0000000000000000000000000000000000000000000000000000000000000000"),
+        source_hash: B256::ZERO,
         from: sender,
         to: TxKind::Call(recipient),
         mint: send_value,
@@ -403,7 +517,7 @@ async fn test_deposit_tx_checks_sufficient_funds_after_applying_deposited_value(
 
     let sender_new_balance = provider.get_balance(sender).await.unwrap();
     // sender should've sent the entire deposited value to recipient
-    assert_eq!(sender_new_balance, U256::from(0));
+    assert_eq!(sender_new_balance, U256::ZERO);
 
     let recipient_new_balance = provider.get_balance(recipient).await.unwrap();
     // recipient should've received the entire deposited value
@@ -621,6 +735,59 @@ async fn jovian_mining_and_simulation_use_da_footprint() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn fork_transaction_replay_uses_jovian_da_footprint() {
+    const DA_FOOTPRINT_SCALAR: u16 = 400;
+    const EXPECTED_DA_FOOTPRINT: u64 = 100 * DA_FOOTPRINT_SCALAR as u64;
+    const JOVIAN_ACTIVATION_TIMESTAMP: u64 = 1_764_691_201;
+
+    for (hardfork, timestamp, expected) in [
+        (OpHardfork::Isthmus, JOVIAN_ACTIVATION_TIMESTAMP - 2, 0),
+        (OpHardfork::Jovian, JOVIAN_ACTIVATION_TIMESTAMP, EXPECTED_DA_FOOTPRINT),
+    ] {
+        let (origin_api, origin) = spawn(
+            NodeConfig::test()
+                .with_chain_id(Some(8453u64))
+                .with_networks(NetworkConfigs::with_optimism())
+                .with_hardfork(Some(hardfork.into()))
+                .with_genesis_timestamp(Some(timestamp)),
+        )
+        .await;
+        let l1_block = address!("0x4200000000000000000000000000000000000015");
+        let mut scalar_slot = [0u8; 32];
+        scalar_slot[18..20].copy_from_slice(&DA_FOOTPRINT_SCALAR.to_be_bytes());
+        origin_api
+            .anvil_set_storage_at(l1_block, U256::from(8), B256::from(scalar_slot))
+            .await
+            .unwrap();
+
+        let wallet = origin.dev_wallets().next().unwrap();
+        let provider = http_provider_with_signer(&origin.http_endpoint(), wallet.into());
+        origin_api.evm_set_next_block_timestamp(timestamp).unwrap();
+        let receipt = provider
+            .send_transaction(WithOtherFields::new(
+                TransactionRequest::default().with_to(Address::random()).with_value(U256::ONE),
+            ))
+            .await
+            .unwrap()
+            .get_receipt()
+            .await
+            .unwrap();
+
+        let (fork_api, _) = spawn(
+            NodeConfig::test()
+                .with_eth_rpc_url(Some(origin.http_endpoint()))
+                .with_fork_transaction_hash(Some(receipt.transaction_hash))
+                .with_hardfork(Some(hardfork.into()))
+                .with_no_mining(true),
+        )
+        .await;
+        let replayed = fork_api.block_by_number(BlockNumberOrTag::Latest).await.unwrap().unwrap();
+
+        assert_eq!(replayed.header.blob_gas_used, Some(expected), "hardfork: {hardfork:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn local_jovian_blocks_include_dynamic_fee_parameters() {
     const DA_FOOTPRINT_SCALAR: u16 = 6_000;
 
@@ -747,7 +914,7 @@ async fn inferred_optimism_fork_uses_optimism_base_fee_params() {
     let origin_wallet = origin_handle.dev_wallets().next().unwrap();
     let origin_provider =
         http_provider_with_signer(&origin_handle.http_endpoint(), origin_wallet.into());
-    let tx = TransactionRequest::default().to(Address::random()).with_value(U256::from(1));
+    let tx = TransactionRequest::default().to(Address::random()).with_value(U256::ONE);
     origin_provider
         .send_transaction(WithOtherFields::new(tx))
         .await
@@ -767,7 +934,7 @@ async fn inferred_optimism_fork_uses_optimism_base_fee_params() {
 
     let fork_wallet = fork_handle.dev_wallets().next().unwrap();
     let fork_provider = http_provider_with_signer(&fork_handle.http_endpoint(), fork_wallet.into());
-    let tx = TransactionRequest::default().to(Address::random()).with_value(U256::from(1));
+    let tx = TransactionRequest::default().to(Address::random()).with_value(U256::ONE);
     fork_provider
         .send_transaction(WithOtherFields::new(tx))
         .await
@@ -778,4 +945,42 @@ async fn inferred_optimism_fork_uses_optimism_base_fee_params() {
 
     let block = fork_provider.get_block(BlockId::latest()).await.unwrap().unwrap();
     assert_eq!(block.header.base_fee_per_gas, Some(INITIAL_BASE_FEE + INITIAL_BASE_FEE * 5 / 250));
+}
+
+// Mined traces omit nested calls to OP's own precompiles, such as P256VERIFY at 0x100 from Fjord,
+// which Ethereum's precompiles at the mapped spec do not include.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_trace_transaction_omits_nested_op_precompile_calls() {
+    let (api, handle) = spawn(NodeConfig::test().with_optimism()).await;
+    let provider = handle.http_provider();
+    let from = handle.dev_wallets().next().unwrap().address();
+
+    // Zero-value STATICCALL to 0x100, then a zero-value CALL to 0xbeef.
+    let caller = Address::repeat_byte(0x42);
+    let code = bytes!("60006000600060006101005afa506000600060006000600061beef5af15000");
+    api.anvil_set_code(caller, code).await.unwrap();
+
+    let tx = TransactionRequest::default().from(from).to(caller);
+    let receipt = provider
+        .send_transaction(WithOtherFields::new(tx))
+        .await
+        .unwrap()
+        .get_receipt()
+        .await
+        .unwrap();
+    let hash = receipt.transaction_hash;
+
+    let traces = provider.trace_transaction(hash).await.unwrap();
+    let traces = traces.into_iter().map(|trace| trace.trace).collect::<Vec<_>>();
+    let targets = traces
+        .iter()
+        .map(|trace| match &trace.action {
+            Action::Call(call) => call.to,
+            action => panic!("expected a call, got {action:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(targets, [caller, Address::left_padding_from(&[0xbe, 0xef])]);
+
+    let replay = provider.trace_replay_transaction(hash).trace().await.unwrap();
+    assert_eq!(replay.trace, traces);
 }

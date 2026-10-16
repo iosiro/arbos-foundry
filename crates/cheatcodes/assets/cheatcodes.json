@@ -235,6 +235,68 @@
       ]
     },
     {
+      "name": "EthStorageProof",
+      "description": "A Merkle proof for a single storage slot. Part of `EthGetProof`.",
+      "fields": [
+        {
+          "name": "key",
+          "ty": "bytes32",
+          "description": "The storage slot."
+        },
+        {
+          "name": "value",
+          "ty": "uint256",
+          "description": "The value stored at the slot."
+        },
+        {
+          "name": "proof",
+          "ty": "bytes[]",
+          "description": "The RLP-encoded trie nodes from the storage root to the slot, root first."
+        }
+      ]
+    },
+    {
+      "name": "EthGetProof",
+      "description": "An EIP-1186 account and storage proof. Returned by `eth_getProof`.",
+      "fields": [
+        {
+          "name": "account",
+          "ty": "address",
+          "description": "The address of the account."
+        },
+        {
+          "name": "balance",
+          "ty": "uint256",
+          "description": "The balance of the account."
+        },
+        {
+          "name": "codeHash",
+          "ty": "bytes32",
+          "description": "The hash of the account's code."
+        },
+        {
+          "name": "nonce",
+          "ty": "uint64",
+          "description": "The nonce of the account."
+        },
+        {
+          "name": "storageHash",
+          "ty": "bytes32",
+          "description": "The root of the account's storage trie."
+        },
+        {
+          "name": "accountProof",
+          "ty": "bytes[]",
+          "description": "The RLP-encoded trie nodes from the state root to the account, root first."
+        },
+        {
+          "name": "storageProof",
+          "ty": "EthStorageProof[]",
+          "description": "The proofs for the requested storage slots, in the order they were requested."
+        }
+      ]
+    },
+    {
       "name": "DirEntry",
       "description": "A single entry in a directory listing. Returned by `readDir`.",
       "fields": [
@@ -514,37 +576,37 @@
     },
     {
       "name": "Gas",
-      "description": "Gas used. Returned by `lastCallGas` and `lastFrameGas`.",
+      "description": "Gas measured for the last completed call or create frame, from the callee's perspective,\n including nested execution. Isolated transactions include intrinsic gas.\n Regular gas (the EIP's execution gas) and EIP-8037 state gas are reported separately.\n Without EIP-8037, state creation uses the ordinary gas schedule and `gasStateUsed` is zero.\n See <https://eips.ethereum.org/EIPS/eip-8037> and <https://getfoundry.sh/reference/cheatcodes/last-frame-gas>.",
       "fields": [
         {
           "name": "gasLimit",
           "ty": "uint64",
-          "description": "The gas limit of the call."
+          "description": "Regular gas available to the frame at entry. Excludes the EIP-8037 state gas reservoir."
         },
         {
           "name": "gasTotalUsed",
           "ty": "uint64",
-          "description": "The total regular gas used."
+          "description": "Regular gas spent by the frame, before refunds. Excludes EIP-8037 state gas; see `gasStateUsed`.\n With isolation, includes intrinsic gas and the regular-gas calldata floor."
         },
         {
           "name": "gasMemoryUsed",
           "ty": "uint64",
-          "description": "DEPRECATED: The amount of gas used for memory expansion. Ref: <https://github.com/foundry-rs/foundry/pull/7934#pullrequestreview-2069236939>"
+          "description": "DEPRECATED: always zero. Memory expansion costs are included in `gasTotalUsed`.\n Ref: <https://github.com/foundry-rs/foundry/pull/7934#pullrequestreview-2069236939>."
         },
         {
           "name": "gasRefunded",
           "ty": "int64",
-          "description": "The amount of gas refunded."
+          "description": "Ordinary refund counter before transaction settlement; finalized for an isolated transaction.\n Can be negative in nested frames. State gas refills are already netted into `gasStateUsed`."
         },
         {
           "name": "gasRemaining",
           "ty": "uint64",
-          "description": "The amount of gas remaining."
+          "description": "Regular gas left at frame end. Excludes the EIP-8037 state gas reservoir.\n State charges can draw from this allowance, so `gasLimit - gasRemaining` can include state gas."
         },
         {
           "name": "gasStateUsed",
           "ty": "int64",
-          "description": "The net state gas used. Zero for reverted or halted frames; may be negative within a nested frame when state gas is refunded."
+          "description": "Net EIP-8037 state gas: state creation charges minus refills, including nested execution.\n Zero without EIP-8037 or if the frame reverted or halted. Can be negative when the frame\n undoes state created earlier in the same transaction; use signed arithmetic with `gasTotalUsed`.\n Their sum measures net consumption, not the gas limit needed to execute."
         }
       ]
     },
@@ -5471,6 +5533,26 @@
     },
     {
       "func": {
+        "id": "eth_getProof",
+        "description": "Gets the EIP-1186 account and storage proof of `target` at `blockNumber` from the active fork.\nThe proof is fetched from the fork's RPC endpoint and does not reflect local state changes.",
+        "declaration": "function eth_getProof(address target, bytes32[] calldata slots, uint256 blockNumber) external view returns (EthGetProof memory proof);",
+        "visibility": "external",
+        "mutability": "view",
+        "signature": "eth_getProof(address,bytes32[],uint256)",
+        "selector": "0xcd502c82",
+        "selectorBytes": [
+          205,
+          80,
+          44,
+          130
+        ]
+      },
+      "group": "evm",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
         "id": "executeTransaction",
         "description": "Executes an RLP-encoded signed transaction with full EVM semantics (like `--isolate` mode).\nThe transaction is decoded from EIP-2718 format (type byte prefix + RLP payload) or legacy RLP.\nReturns the execution output bytes.\nThis cheatcode is not allowed in `forge script` contexts.",
         "declaration": "function executeTransaction(bytes calldata rawTx) external returns (bytes memory);",
@@ -6612,7 +6694,7 @@
     {
       "func": {
         "id": "getBlobhashes",
-        "description": "Gets the blockhashes from the current transaction.\nNot available on EVM versions before Cancun.\nIf used on unsupported EVM versions it will revert.",
+        "description": "Gets the blobhashes from the current transaction.\nNot available on EVM versions before Cancun.\nIf used on unsupported EVM versions it will revert.",
         "declaration": "function getBlobhashes() external view returns (bytes32[] memory hashes);",
         "visibility": "external",
         "mutability": "view",
@@ -7131,6 +7213,26 @@
     },
     {
       "func": {
+        "id": "getSlotNumber",
+        "description": "Gets the current `block.slotnum`.\nUse this instead of `block.slotnum` after `vm.rollSlot`, as the compiler assumes\n`block.slotnum` is constant across a transaction and may optimize repeated reads away.\nNot available on EVM versions before Amsterdam.\nIf used on unsupported EVM versions it will revert.",
+        "declaration": "function getSlotNumber() external view returns (uint64 slotNumber);",
+        "visibility": "external",
+        "mutability": "view",
+        "signature": "getSlotNumber()",
+        "selector": "0xa50d337b",
+        "selectorBytes": [
+          165,
+          13,
+          51,
+          123
+        ]
+      },
+      "group": "evm",
+      "status": "stable",
+      "safety": "safe"
+    },
+    {
+      "func": {
         "id": "getStateDiff",
         "description": "Returns state diffs from current `vm.startStateDiffRecording` session.",
         "declaration": "function getStateDiff() external view returns (string memory diff);",
@@ -7452,7 +7554,7 @@
     {
       "func": {
         "id": "keyExists",
-        "description": "Checks if `key` exists in a JSON object\n`keyExists` is being deprecated in favor of `keyExistsJson`. It will be removed in future versions.",
+        "description": "Checks if `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) exists in a JSON object.\n`keyExists` is being deprecated in favor of `keyExistsJson`. It will be removed in future versions.",
         "declaration": "function keyExists(string calldata json, string calldata key) external view returns (bool);",
         "visibility": "external",
         "mutability": "view",
@@ -7474,7 +7576,7 @@
     {
       "func": {
         "id": "keyExistsJson",
-        "description": "Checks if `key` exists in a JSON object.",
+        "description": "Checks if `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) exists in a JSON object.",
         "declaration": "function keyExistsJson(string calldata json, string calldata key) external view returns (bool);",
         "visibility": "external",
         "mutability": "view",
@@ -7534,7 +7636,7 @@
     {
       "func": {
         "id": "lastCallGas",
-        "description": "DEPRECATED: use `lastFrameGas` instead.\nGets the gas used in the last call from the callee perspective.",
+        "description": "DEPRECATED: use `lastFrameGas` instead.\nGets gas measurements for the last completed call, from the callee's perspective.\nUnlike `lastFrameGas`, CREATE and CREATE2 frames are not recorded; calls made by a constructor are.\nSee `Gas` for field semantics.",
         "declaration": "function lastCallGas() external view returns (Gas memory gas);",
         "visibility": "external",
         "mutability": "view",
@@ -7556,7 +7658,7 @@
     {
       "func": {
         "id": "lastFrameGas",
-        "description": "Gets the gas used in the last call or create from the callee perspective.",
+        "description": "Gets gas measurements for the last completed call or create, from the callee's perspective.\nUnlike `lastCallGas`, CREATE and CREATE2 frames are recorded too. Cheatcode calls are never recorded.\nSee `Gas` for field semantics and <https://getfoundry.sh/reference/cheatcodes/last-frame-gas>.",
         "declaration": "function lastFrameGas() external view returns (Gas memory gas);",
         "visibility": "external",
         "mutability": "view",
@@ -8056,7 +8158,7 @@
     {
       "func": {
         "id": "parseJsonAddressArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `address[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `address[]`.",
         "declaration": "function parseJsonAddressArray(string calldata json, string calldata key) external pure returns (address[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8076,7 +8178,7 @@
     {
       "func": {
         "id": "parseJsonAddressArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `address[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `address[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonAddressArray(string calldata json, string calldata key, address[] calldata defaultValue) external pure returns (address[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8096,7 +8198,7 @@
     {
       "func": {
         "id": "parseJsonAddress_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `address`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `address`.",
         "declaration": "function parseJsonAddress(string calldata json, string calldata key) external pure returns (address);",
         "visibility": "external",
         "mutability": "pure",
@@ -8116,7 +8218,7 @@
     {
       "func": {
         "id": "parseJsonAddress_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `address`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `address`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonAddress(string calldata json, string calldata key, address defaultValue) external pure returns (address);",
         "visibility": "external",
         "mutability": "pure",
@@ -8136,7 +8238,7 @@
     {
       "func": {
         "id": "parseJsonArrayLength",
-        "description": "Returns the length of the JSON array at `key`.",
+        "description": "Returns the length of the JSON array at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields).",
         "declaration": "function parseJsonArrayLength(string calldata json, string calldata key) external pure returns (uint256 length);",
         "visibility": "external",
         "mutability": "pure",
@@ -8156,7 +8258,7 @@
     {
       "func": {
         "id": "parseJsonBoolArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bool[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bool[]`.",
         "declaration": "function parseJsonBoolArray(string calldata json, string calldata key) external pure returns (bool[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8176,7 +8278,7 @@
     {
       "func": {
         "id": "parseJsonBoolArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bool[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bool[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBoolArray(string calldata json, string calldata key, bool[] calldata defaultValue) external pure returns (bool[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8196,7 +8298,7 @@
     {
       "func": {
         "id": "parseJsonBool_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bool`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bool`.",
         "declaration": "function parseJsonBool(string calldata json, string calldata key) external pure returns (bool);",
         "visibility": "external",
         "mutability": "pure",
@@ -8216,7 +8318,7 @@
     {
       "func": {
         "id": "parseJsonBool_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bool`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bool`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBool(string calldata json, string calldata key, bool defaultValue) external pure returns (bool);",
         "visibility": "external",
         "mutability": "pure",
@@ -8236,7 +8338,7 @@
     {
       "func": {
         "id": "parseJsonBytes32Array_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes32[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes32[]`.",
         "declaration": "function parseJsonBytes32Array(string calldata json, string calldata key) external pure returns (bytes32[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8256,7 +8358,7 @@
     {
       "func": {
         "id": "parseJsonBytes32Array_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes32[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes32[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBytes32Array(string calldata json, string calldata key, bytes32[] calldata defaultValue) external pure returns (bytes32[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8276,7 +8378,7 @@
     {
       "func": {
         "id": "parseJsonBytes32_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes32`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes32`.",
         "declaration": "function parseJsonBytes32(string calldata json, string calldata key) external pure returns (bytes32);",
         "visibility": "external",
         "mutability": "pure",
@@ -8296,7 +8398,7 @@
     {
       "func": {
         "id": "parseJsonBytes32_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes32`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes32`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBytes32(string calldata json, string calldata key, bytes32 defaultValue) external pure returns (bytes32);",
         "visibility": "external",
         "mutability": "pure",
@@ -8316,7 +8418,7 @@
     {
       "func": {
         "id": "parseJsonBytesArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes[]`.",
         "declaration": "function parseJsonBytesArray(string calldata json, string calldata key) external pure returns (bytes[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8336,7 +8438,7 @@
     {
       "func": {
         "id": "parseJsonBytesArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBytesArray(string calldata json, string calldata key, bytes[] calldata defaultValue) external pure returns (bytes[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8356,7 +8458,7 @@
     {
       "func": {
         "id": "parseJsonBytes_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes`.",
         "declaration": "function parseJsonBytes(string calldata json, string calldata key) external pure returns (bytes memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8376,7 +8478,7 @@
     {
       "func": {
         "id": "parseJsonBytes_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `bytes`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `bytes`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonBytes(string calldata json, string calldata key, bytes calldata defaultValue) external pure returns (bytes memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8396,7 +8498,7 @@
     {
       "func": {
         "id": "parseJsonIntArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `int256[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `int256[]`.",
         "declaration": "function parseJsonIntArray(string calldata json, string calldata key) external pure returns (int256[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8416,7 +8518,7 @@
     {
       "func": {
         "id": "parseJsonIntArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `int256[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `int256[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonIntArray(string calldata json, string calldata key, int256[] calldata defaultValue) external pure returns (int256[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8436,7 +8538,7 @@
     {
       "func": {
         "id": "parseJsonInt_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `int256`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `int256`.",
         "declaration": "function parseJsonInt(string calldata json, string calldata key) external pure returns (int256);",
         "visibility": "external",
         "mutability": "pure",
@@ -8456,7 +8558,7 @@
     {
       "func": {
         "id": "parseJsonInt_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `int256`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `int256`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonInt(string calldata json, string calldata key, int256 defaultValue) external pure returns (int256);",
         "visibility": "external",
         "mutability": "pure",
@@ -8496,7 +8598,7 @@
     {
       "func": {
         "id": "parseJsonStringArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `string[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `string[]`.",
         "declaration": "function parseJsonStringArray(string calldata json, string calldata key) external pure returns (string[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8516,7 +8618,7 @@
     {
       "func": {
         "id": "parseJsonStringArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `string[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `string[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonStringArray(string calldata json, string calldata key, string[] calldata defaultValue) external pure returns (string[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8536,7 +8638,7 @@
     {
       "func": {
         "id": "parseJsonString_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `string`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `string`.",
         "declaration": "function parseJsonString(string calldata json, string calldata key) external pure returns (string memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8556,7 +8658,7 @@
     {
       "func": {
         "id": "parseJsonString_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `string`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `string`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonString(string calldata json, string calldata key, string calldata defaultValue) external pure returns (string memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8576,7 +8678,7 @@
     {
       "func": {
         "id": "parseJsonTypeArray",
-        "description": "Parses a string of JSON data at `key` and coerces it to type array corresponding to `typeDescription`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to type array corresponding to `typeDescription`.",
         "declaration": "function parseJsonTypeArray(string calldata json, string calldata key, string calldata typeDescription) external pure returns (bytes memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8616,7 +8718,7 @@
     {
       "func": {
         "id": "parseJsonType_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to type corresponding to `typeDescription`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to type corresponding to `typeDescription`.",
         "declaration": "function parseJsonType(string calldata json, string calldata key, string calldata typeDescription) external pure returns (bytes memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8636,7 +8738,7 @@
     {
       "func": {
         "id": "parseJsonUintArray_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `uint256[]`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `uint256[]`.",
         "declaration": "function parseJsonUintArray(string calldata json, string calldata key) external pure returns (uint256[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8656,7 +8758,7 @@
     {
       "func": {
         "id": "parseJsonUintArray_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `uint256[]`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `uint256[]`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonUintArray(string calldata json, string calldata key, uint256[] calldata defaultValue) external pure returns (uint256[] memory);",
         "visibility": "external",
         "mutability": "pure",
@@ -8676,7 +8778,7 @@
     {
       "func": {
         "id": "parseJsonUint_0",
-        "description": "Parses a string of JSON data at `key` and coerces it to `uint256`.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `uint256`.",
         "declaration": "function parseJsonUint(string calldata json, string calldata key) external pure returns (uint256);",
         "visibility": "external",
         "mutability": "pure",
@@ -8696,7 +8798,7 @@
     {
       "func": {
         "id": "parseJsonUint_1",
-        "description": "Parses a string of JSON data at `key` and coerces it to `uint256`, or returns `defaultValue` if the key does not exist.",
+        "description": "Parses a string of JSON data at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields) and coerces it to `uint256`, or returns `defaultValue` if the key does not exist.",
         "declaration": "function parseJsonUint(string calldata json, string calldata key, uint256 defaultValue) external pure returns (uint256);",
         "visibility": "external",
         "mutability": "pure",
@@ -8736,7 +8838,7 @@
     {
       "func": {
         "id": "parseJson_1",
-        "description": "ABI-encodes a JSON object at `key`.",
+        "description": "ABI-encodes a JSON object at `key` (a JSONPath selector; use `.foo`, not `foo`, for object fields).",
         "declaration": "function parseJson(string calldata json, string calldata key) external pure returns (bytes memory abiEncodedData);",
         "visibility": "external",
         "mutability": "pure",
@@ -10679,6 +10781,26 @@
     },
     {
       "func": {
+        "id": "rollSlot",
+        "description": "Sets `block.slotnum` without changing the block number or timestamp.\nNot available on EVM versions before Amsterdam.\nIf used on unsupported EVM versions it will revert.",
+        "declaration": "function rollSlot(uint64 newSlotNumber) external;",
+        "visibility": "external",
+        "mutability": "",
+        "signature": "rollSlot(uint64)",
+        "selector": "0xf53fbdc4",
+        "selectorBytes": [
+          245,
+          63,
+          189,
+          196
+        ]
+      },
+      "group": "evm",
+      "status": "stable",
+      "safety": "unsafe"
+    },
+    {
+      "func": {
         "id": "rpcJson_0",
         "description": "Performs an Ethereum JSON-RPC request to the current fork URL and returns the JSON result.",
         "declaration": "function rpcJson(string calldata method, string calldata params) external returns (string memory data);",
@@ -11280,7 +11402,7 @@
     {
       "func": {
         "id": "setEvmVersion",
-        "description": "Set the exact test or script execution evm version, e.g. `berlin`, `cancun`.\n**Note:** The execution evm version is not the same as the compilation one.",
+        "description": "Selects the test or script execution hardfork, e.g. `berlin`, `cancun`, or `tempo:T7`.\nUses the active network's version mappings and gas schedule. Does not change the network\nor Solidity compiler target. On Tempo, runtime changes do not rebuild instructions or\nprecompiles; configure `hardfork` before execution to select a different revision.\n**Note:** The execution evm version is not the same as the compilation one.",
         "declaration": "function setEvmVersion(string calldata evm) external;",
         "visibility": "external",
         "mutability": "",
@@ -11882,7 +12004,7 @@
     {
       "func": {
         "id": "snapshotGasLastCall_0",
-        "description": "DEPRECATED: use `snapshotGasLastFrame` instead.\nSnapshot capture the gas usage of the last call by name from the callee perspective.",
+        "description": "DEPRECATED: use `snapshotGasLastFrame` instead.\nSnapshot capture the gas usage of the last call by name from the callee perspective.\nWithout isolation, measures regular counter consumption, including spillover but excluding reservoir-funded state gas.\nIsolated frames with zero net state gas use receipt gas; see <https://getfoundry.sh/reference/cheatcodes/gas-snapshots>.",
         "declaration": "function snapshotGasLastCall(string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -11904,7 +12026,7 @@
     {
       "func": {
         "id": "snapshotGasLastCall_1",
-        "description": "DEPRECATED: use `snapshotGasLastFrame` instead.\nSnapshot capture the gas usage of the last call by name in a group from the callee perspective.",
+        "description": "DEPRECATED: use `snapshotGasLastFrame` instead.\nSnapshot capture the gas usage of the last call by name in a group from the callee perspective.\nWithout isolation, measures regular counter consumption, including spillover but excluding reservoir-funded state gas.\nIsolated frames with zero net state gas use receipt gas; see <https://getfoundry.sh/reference/cheatcodes/gas-snapshots>.",
         "declaration": "function snapshotGasLastCall(string calldata group, string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -11926,7 +12048,7 @@
     {
       "func": {
         "id": "snapshotGasLastFrame_0",
-        "description": "Snapshot capture the gas usage of the last call or create by name from the callee perspective.",
+        "description": "Snapshot capture the gas usage of the last call or create by name from the callee perspective.\nWithout isolation, measures regular counter consumption, including spillover but excluding reservoir-funded state gas.\nIsolated frames with zero net state gas use receipt gas; see <https://getfoundry.sh/reference/cheatcodes/gas-snapshots>.",
         "declaration": "function snapshotGasLastFrame(string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -11946,7 +12068,7 @@
     {
       "func": {
         "id": "snapshotGasLastFrame_1",
-        "description": "Snapshot capture the gas usage of the last call or create by name in a group from the callee perspective.",
+        "description": "Snapshot capture the gas usage of the last call or create by name in a group from the callee perspective.\nWithout isolation, measures regular counter consumption, including spillover but excluding reservoir-funded state gas.\nIsolated frames with zero net state gas use receipt gas; see <https://getfoundry.sh/reference/cheatcodes/gas-snapshots>.",
         "declaration": "function snapshotGasLastFrame(string calldata group, string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -12246,7 +12368,7 @@
     {
       "func": {
         "id": "startSnapshotGas_0",
-        "description": "Start a snapshot capture of the current gas usage by name.\nThe group name is derived from the contract name.",
+        "description": "Start a snapshot capture of the current gas usage by name.\nThe group name is derived from the contract name.\nMeasures gas consumed from the regular counter, including state spillover but excluding reservoir-funded state gas.",
         "declaration": "function startSnapshotGas(string calldata name) external;",
         "visibility": "external",
         "mutability": "",
@@ -12266,7 +12388,7 @@
     {
       "func": {
         "id": "startSnapshotGas_1",
-        "description": "Start a snapshot capture of the current gas usage by name in a group.",
+        "description": "Start a snapshot capture of the current gas usage by name in a group.\nMeasures gas consumed from the regular counter, including state spillover but excluding reservoir-funded state gas.",
         "declaration": "function startSnapshotGas(string calldata group, string calldata name) external;",
         "visibility": "external",
         "mutability": "",
@@ -12446,7 +12568,7 @@
     {
       "func": {
         "id": "stopSnapshotGas_0",
-        "description": "Stop the snapshot capture of the current gas by latest snapshot name, capturing the gas used since the start.",
+        "description": "Stop the snapshot capture of the current gas by latest snapshot name, capturing the gas used since the start.\nMeasures gas consumed from the regular counter, including state spillover but excluding reservoir-funded state gas.",
         "declaration": "function stopSnapshotGas() external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -12466,7 +12588,7 @@
     {
       "func": {
         "id": "stopSnapshotGas_1",
-        "description": "Stop the snapshot capture of the current gas usage by name, capturing the gas used since the start.\nThe group name is derived from the contract name.",
+        "description": "Stop the snapshot capture of the current gas usage by name, capturing the gas used since the start.\nThe group name is derived from the contract name.\nMeasures gas consumed from the regular counter, including state spillover but excluding reservoir-funded state gas.",
         "declaration": "function stopSnapshotGas(string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",
@@ -12486,7 +12608,7 @@
     {
       "func": {
         "id": "stopSnapshotGas_2",
-        "description": "Stop the snapshot capture of the current gas usage by name in a group, capturing the gas used since the start.",
+        "description": "Stop the snapshot capture of the current gas usage by name in a group, capturing the gas used since the start.\nMeasures gas consumed from the regular counter, including state spillover but excluding reservoir-funded state gas.",
         "declaration": "function stopSnapshotGas(string calldata group, string calldata name) external returns (uint256 gasUsed);",
         "visibility": "external",
         "mutability": "",

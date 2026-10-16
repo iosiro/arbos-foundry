@@ -6,6 +6,10 @@ pub(super) mod hashcons;
 #[path = "expr.rs"]
 mod word;
 
+pub(crate) use bool::*;
+pub(crate) use cx::*;
+pub(crate) use word::*;
+
 struct NoopModel;
 
 impl SymbolicModelLookup for NoopModel {
@@ -14,9 +18,14 @@ impl SymbolicModelLookup for NoopModel {
     }
 }
 
-pub(crate) use bool::*;
-pub(crate) use cx::*;
-pub(crate) use word::*;
+/// Results from one deterministic bottom-up expression fold.
+///
+/// Keys borrow the original DAG so the memo table does not add strong references to source nodes.
+#[derive(Default)]
+struct ExpressionFoldCache<'a> {
+    words: HashMap<&'a SymExpr, SymExpr>,
+    bools: HashMap<&'a SymBoolExpr, SymBoolExpr>,
+}
 
 /// Evaluates hash-consed expressions once per model.
 ///
@@ -130,25 +139,4 @@ pub(crate) fn eval_model_constraints<M: SymbolicModelLookup + ?Sized>(
 ) -> bool {
     let mut evaluator = ModelEvaluator::new(model);
     constraints.iter().all(|constraint| evaluator.eval_bool(constraint).unwrap_or(false))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn model_evaluator_only_caches_conjunctions() {
-        let mut cx = SymCx::new();
-        let value = SymExpr::var(&mut cx, "value");
-        let one = SymExpr::constant(&mut cx, U256::from(1));
-        let condition = SymBoolExpr::eq(&mut cx, value, one).not(&mut cx);
-        let model = SymbolicModel::default();
-        let mut evaluator = ModelEvaluator::new(&model);
-
-        assert!(evaluator.eval_bool(&condition).unwrap());
-        assert!(evaluator.bools.is_empty());
-        let conjunction = SymBoolExpr::and(&mut cx, vec![condition.clone(), condition]);
-        assert!(evaluator.eval_bool(&conjunction).unwrap());
-        assert_eq!(evaluator.bools.len(), 1);
-    }
 }

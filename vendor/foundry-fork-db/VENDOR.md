@@ -1,8 +1,8 @@
 # Vendored fork database
 
 This directory contains `crates/fork-db` from
-[foundry-rs/foundry-core](https://github.com/foundry-rs/foundry-core/tree/6ce81d5c491121c22b3912fb91455d4f2875439e/crates/fork-db),
-revision `6ce81d5c491121c22b3912fb91455d4f2875439e`, version `0.27.0`.
+[foundry-rs/foundry-core](https://github.com/foundry-rs/foundry-core/tree/39c03a49ade2f74a6e97e2af308283a42d78d302/crates/fork-db),
+revision `39c03a49ade2f74a6e97e2af308283a42d78d302`, version `0.27.0`.
 The upstream MIT and Apache-2.0 licenses are included unchanged.
 Repository dprint formatting excludes `vendor/` to preserve upstream file formatting.
 Spelling checks exclude the upstream changelog and release-tool configuration; vendored

@@ -1,9 +1,9 @@
 use crate::executors::{
     EarlyExit, EvmError, Executor, RawCallResult,
+    campaign::execute_invariant_replay_tx,
     invariant::{
         IInvariantTest, call_after_invariant_function, call_invariant_function,
         error::{handler_edge_fingerprint, snapshot_edge_fingerprint},
-        execute_tx,
         result::did_fail_on_assert,
     },
 };
@@ -179,12 +179,10 @@ impl<K: Eq + Hash> ShrinkCandidateKeys<K> {
     }
 }
 
-/// Per-call decision returned by callbacks driving `replay_sequence`. `Continue` hands
-/// the result back so non-reverted calls auto-commit; `Stop` short-circuits.
-#[expect(clippy::large_enum_variant)]
-enum ReplayDecision<T, FEN: FoundryEvmNetwork> {
+/// Per-call decision returned by callbacks driving `replay_sequence`.
+enum ReplayDecision<T> {
     Stop(T),
-    Continue(RawCallResult<FEN>),
+    Continue,
 }
 
 /// Options controlling how `check_sequence` evaluates a candidate call sequence.
@@ -216,6 +214,8 @@ pub struct CheckSequenceOutcome {
     /// Whether replay stopped on an assertion in a sequence call rather than a plain revert or
     /// terminal invariant check.
     pub sequence_assertion_failure: bool,
+    /// Innermost reverter for a sequence assertion, used to recognize legacy handler identities.
+    pub sequence_reverter: Option<Address>,
 }
 
 pub struct ShrunkSequence {
@@ -228,6 +228,9 @@ pub struct ShrunkSequence {
 #[derive(Debug)]
 pub struct HandlerReplayOutcome {
     pub anchor_asserted: bool,
+    /// Top-level fuzzed handler target used as the canonical failure identity.
+    pub handler_target: Address,
+    /// Innermost reverting frame, retained to recognize legacy persisted identities.
     pub reverter: Address,
     pub selector: Selector,
     pub revert_reason: Option<String>,
@@ -610,7 +613,7 @@ pub(crate) fn shrink_sequence<FEN: FoundryEvmNetwork>(
 
 /// Replays `sequence` (indices into `calls`) against `executor`. When
 /// `accumulate_warp_roll` is set, warp/roll from skipped calls is folded into the next
-/// included call. `on_call` may stop early; otherwise non-reverted calls are committed.
+/// included call. `on_call` may stop after each campaign-faithful replay transition.
 fn replay_sequence<FEN, T, F>(
     executor: &mut Executor<FEN>,
     calls: &[BasicTxDetails],
@@ -620,20 +623,16 @@ fn replay_sequence<FEN, T, F>(
 ) -> eyre::Result<Option<T>>
 where
     FEN: FoundryEvmNetwork,
-    F: FnMut(usize, RawCallResult<FEN>) -> eyre::Result<ReplayDecision<T, FEN>>,
+    F: FnMut(usize, RawCallResult<FEN>) -> eyre::Result<ReplayDecision<T>>,
 {
     // Fast path: no warp/roll accumulation → iterate only kept indices (O(k)) and pass
     // `&calls[idx]` directly to skip the per-call `BasicTxDetails` clone.
     if !accumulate_warp_roll {
         for &idx in sequence {
-            let call_result = execute_tx(executor, &calls[idx])?;
+            let (_, call_result) = execute_invariant_replay_tx(executor, &calls[idx])?;
             match on_call(idx, call_result)? {
                 ReplayDecision::Stop(val) => return Ok(Some(val)),
-                ReplayDecision::Continue(mut call_result) => {
-                    if !call_result.reverted {
-                        executor.commit(&mut call_result);
-                    }
-                }
+                ReplayDecision::Continue => {}
             }
         }
         return Ok(None);
@@ -654,15 +653,11 @@ where
         seq_iter.next();
 
         let executed = apply_warp_roll(tx.clone(), accumulated_warp, accumulated_roll);
-        let call_result = execute_tx(executor, &executed)?;
+        let (_, call_result) = execute_invariant_replay_tx(executor, &executed)?;
 
         match on_call(idx, call_result)? {
             ReplayDecision::Stop(val) => return Ok(Some(val)),
-            ReplayDecision::Continue(mut call_result) => {
-                if !call_result.reverted {
-                    executor.commit(&mut call_result);
-                }
-            }
+            ReplayDecision::Continue => {}
         }
 
         accumulated_warp = U256::ZERO;
@@ -702,13 +697,22 @@ pub fn check_sequence<FEN: FoundryEvmNetwork>(
             // scenarios that are replayed with a modified version of test driver (that use
             // new `vm.assume` cheatcodes).
             if call_result.result.as_ref() == MAGIC_ASSUME {
-                return Ok(ReplayDecision::Continue(call_result));
+                return Ok(ReplayDecision::Continue);
             }
             if call_result.reverted {
                 reverts += 1;
             }
             if did_fail_on_assert(&call_result, &call_result.state_changeset) {
-                let site = sequence_call_failure_site(&calls[idx], &call_result);
+                let call = &calls[idx];
+                let target = call.call_details.target;
+                let selector = selector_from_calldata(&call.call_details.calldata);
+                let fingerprint = handler_edge_fingerprint(
+                    snapshot_edge_fingerprint(&call_result),
+                    target,
+                    selector,
+                );
+                let sequence_reverter = call_result.reverter.or(Some(target));
+                let site = CheckSequenceFailureSite::SequenceCall { target, selector, fingerprint };
                 return Ok(ReplayDecision::Stop(CheckSequenceOutcome {
                     success: false,
                     replayed_entirely: false,
@@ -717,6 +721,7 @@ pub fn check_sequence<FEN: FoundryEvmNetwork>(
                     reverts,
                     failure_site: Some(site),
                     sequence_assertion_failure: true,
+                    sequence_reverter,
                 }));
             }
             if call_result.reverted && options.fail_on_revert {
@@ -729,6 +734,7 @@ pub fn check_sequence<FEN: FoundryEvmNetwork>(
                         reverts,
                         failure_site: None,
                         sequence_assertion_failure: false,
+                        sequence_reverter: None,
                     }));
                 }
                 let site = sequence_call_failure_site(&calls[idx], &call_result);
@@ -740,9 +746,10 @@ pub fn check_sequence<FEN: FoundryEvmNetwork>(
                     reverts,
                     failure_site: Some(site),
                     sequence_assertion_failure: false,
+                    sequence_reverter: None,
                 }));
             }
-            Ok(ReplayDecision::Continue(call_result))
+            Ok(ReplayDecision::Continue)
         },
     )?;
     if let Some(result) = early {
@@ -761,6 +768,7 @@ pub fn check_sequence<FEN: FoundryEvmNetwork>(
         reverts,
         failure_site,
         sequence_assertion_failure: false,
+        sequence_reverter: None,
     })
 }
 
@@ -960,6 +968,7 @@ pub fn replay_handler_failure_sequence<FEN: FoundryEvmNetwork>(
     let Some(&anchor_idx) = sequence.last() else {
         return Ok(HandlerReplayOutcome {
             anchor_asserted: false,
+            handler_target: Address::ZERO,
             reverter: Address::ZERO,
             selector: Selector::ZERO,
             revert_reason: None,
@@ -977,7 +986,10 @@ pub fn replay_handler_failure_sequence<FEN: FoundryEvmNetwork>(
             if idx == anchor_idx {
                 let snapshot = snapshot_edge_fingerprint(&call_result);
                 let anchor = &calls[anchor_idx];
-                let reverter = call_result.reverter.unwrap_or(anchor.call_details.target);
+                // Handler failures are identified by the top-level fuzzed call. The innermost
+                // reverter can instead be a nested callee or the cheatcode address.
+                let handler_target = anchor.call_details.target;
+                let reverter = call_result.reverter.unwrap_or(handler_target);
                 let selector_bytes: [u8; 4] = anchor
                     .call_details
                     .calldata
@@ -985,11 +997,12 @@ pub fn replay_handler_failure_sequence<FEN: FoundryEvmNetwork>(
                     .and_then(|s| s.try_into().ok())
                     .unwrap_or_default();
                 let selector = Selector::from(selector_bytes);
-                let fingerprint = handler_edge_fingerprint(snapshot, reverter, selector);
+                let fingerprint = handler_edge_fingerprint(snapshot, handler_target, selector);
                 let reason =
                     if asserted { assertion_failure_reason(call_result, rd) } else { None };
                 return Ok(ReplayDecision::Stop(HandlerReplayOutcome {
                     anchor_asserted: asserted,
+                    handler_target,
                     reverter,
                     selector,
                     revert_reason: reason,
@@ -1000,18 +1013,20 @@ pub fn replay_handler_failure_sequence<FEN: FoundryEvmNetwork>(
                 // Pre-anchor assertion = different bug; reject.
                 return Ok(ReplayDecision::Stop(HandlerReplayOutcome {
                     anchor_asserted: false,
+                    handler_target: Address::ZERO,
                     reverter: Address::ZERO,
                     selector: Selector::ZERO,
                     revert_reason: None,
                     anchor_fingerprint: B256::ZERO,
                 }));
             }
-            Ok(ReplayDecision::Continue(call_result))
+            Ok(ReplayDecision::Continue)
         },
     )?;
 
     Ok(outcome.unwrap_or(HandlerReplayOutcome {
         anchor_asserted: false,
+        handler_target: Address::ZERO,
         reverter: Address::ZERO,
         selector: Selector::ZERO,
         revert_reason: None,
@@ -1108,11 +1123,7 @@ pub fn check_sequence_value<FEN: FoundryEvmNetwork>(
 
             let tx_with_accumulated =
                 apply_warp_roll(tx.clone(), accumulated_warp, accumulated_roll);
-            let mut call_result = execute_tx(&mut executor, &tx_with_accumulated)?;
-
-            if !call_result.reverted {
-                executor.commit(&mut call_result);
-            }
+            execute_invariant_replay_tx(&mut executor, &tx_with_accumulated)?;
 
             accumulated_warp = U256::ZERO;
             accumulated_roll = U256::ZERO;

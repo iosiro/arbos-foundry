@@ -4,16 +4,21 @@ use crate::{
     sol::{
         Severity, SolLint,
         analysis::{
-            branch_always_exits, for_each_lhs_var, function_ids, guard_vars, is_protected,
-            is_sender_member, lhs_local_var, referenced_item, underlying_var,
+            branch_always_exits, for_each_lhs_var, guard_vars, is_protected, is_sender_member,
+            is_zero_value, lhs_local_var, loop_stmts, referenced_item, underlying_var,
         },
     },
 };
 use solar::{
-    ast::{ContractKind, DataLocation, LitKind, StateMutability, Visibility},
+    ast::{BinOpKind, ContractKind, DataLocation, StateMutability, Visibility},
     interface::{Span, data_structures::Never},
-    sema::hir::{
-        self, EventId, Expr, ExprKind, FunctionId, ItemId, Stmt, StmtKind, VariableId, Visit,
+    sema::{
+        Gcx,
+        builtins::Builtin,
+        hir::{
+            self, EventId, Expr, ExprKind, FunctionId, ItemId, LoopSource, Stmt, StmtKind,
+            VariableId, Visit,
+        },
     },
 };
 use std::{
@@ -26,16 +31,15 @@ declare_forge_lint!(
     MISSING_EVENTS_ACCESS_CONTROL,
     Severity::Low,
     "missing-events-access-control",
-    "access control changes should emit events"
+    "access control changes without an event"
 );
 
-impl<'hir> LateLintPass<'hir> for MissingEventsAccessControl {
+impl<'gcx> LateLintPass<'gcx> for MissingEventsAccessControl {
     fn check_contract(
         &mut self,
         ctx: &LintContext,
-        _gcx: solar::sema::Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
-        contract: &'hir hir::Contract<'hir>,
+        gcx: Gcx<'gcx>,
+        contract: &'gcx hir::Contract<'gcx>,
     ) {
         if !matches!(contract.kind, ContractKind::Contract | ContractKind::AbstractContract) {
             return;
@@ -43,25 +47,25 @@ impl<'hir> LateLintPass<'hir> for MissingEventsAccessControl {
 
         // Every state variable some access check in the contract depends on.
         let functions: Vec<_> = contract.all_functions().collect();
-        let targets: HashSet<_> = functions.iter().flat_map(|&id| guard_vars(hir, id)).collect();
+        let targets: HashSet<_> = functions.iter().flat_map(|&id| guard_vars(gcx, id)).collect();
         if targets.is_empty() {
             return;
         }
 
         for func_id in functions {
-            let func = hir.function(func_id);
+            let func = gcx.hir.function(func_id);
             let is_entry_point = func.kind.is_function()
                 && matches!(func.visibility, Visibility::Public | Visibility::External)
                 && !func.is_constructor()
                 && !func.is_special()
                 && !matches!(func.state_mutability, StateMutability::Pure | StateMutability::View);
-            if !is_entry_point || !is_protected(hir, func_id) {
+            if !is_entry_point || !is_protected(gcx, func_id) {
                 continue;
             }
 
-            let guard_targets = guard_vars(hir, func_id);
+            let guard_targets = guard_vars(gcx, func_id);
             let mut analyzer = WriteAnalyzer {
-                hir,
+                gcx,
                 targets: &targets,
                 guard_targets: &guard_targets,
                 state: State {
@@ -73,6 +77,9 @@ impl<'hir> LateLintPass<'hir> for MissingEventsAccessControl {
                     ..Default::default()
                 },
                 call_stack: Vec::new(),
+                return_states: Vec::new(),
+                terminal_states: Vec::new(),
+                next_write_id: 0,
             };
             analyzer.analyze_function(func_id);
 
@@ -81,7 +88,8 @@ impl<'hir> LateLintPass<'hir> for MissingEventsAccessControl {
                 if write.evented || !emitted.insert(write.var_id) {
                     continue;
                 }
-                let name = hir
+                let name = gcx
+                    .hir
                     .variable(write.var_id)
                     .name
                     .map_or_else(|| "state variable".to_string(), |name| name.to_string());
@@ -96,7 +104,7 @@ impl<'hir> LateLintPass<'hir> for MissingEventsAccessControl {
 }
 
 /// Calls `f` on every index and slice bound along the spine of an lvalue.
-fn for_each_lhs_index<'hir>(expr: &'hir Expr<'hir>, f: &mut impl FnMut(&'hir Expr<'hir>)) {
+fn for_each_lhs_index<'gcx>(expr: &'gcx Expr<'gcx>, f: &mut impl FnMut(&'gcx Expr<'gcx>)) {
     match &expr.peel_parens().kind {
         ExprKind::Index(base, index) => {
             for_each_lhs_index(base, f);
@@ -131,6 +139,7 @@ type Sources = HashSet<Source>;
 
 #[derive(Clone)]
 struct StateWrite {
+    id: usize,
     var_id: VariableId,
     span: Span,
     sources: Sources,
@@ -146,50 +155,86 @@ struct State {
     /// Storage-pointer locals and the state variable they alias.
     storage_aliases: HashMap<VariableId, VariableId>,
     writes: Vec<StateWrite>,
+    /// Events emitted so far, not yet matched against every write reachable at this point.
+    emits: Vec<(EventId, Sources)>,
 }
 
 /// Collects writes to `targets` reachable from an entry point and marks those an `emit` covers.
-struct WriteAnalyzer<'a, 'hir> {
-    hir: &'hir hir::Hir<'hir>,
+struct WriteAnalyzer<'a, 'gcx> {
+    gcx: Gcx<'gcx>,
     targets: &'a HashSet<VariableId>,
     /// Targets checked by this entry point's own guards; clearing one of them is reportable even
     /// when the written value carries no source.
     guard_targets: &'a HashSet<VariableId>,
     state: State,
     call_stack: Vec<FunctionId>,
+    /// State at each normal `return`, grouped by active inlined function call.
+    return_states: Vec<Vec<State>>,
+    /// State at each successful terminal exit, grouped by active inlined function call.
+    terminal_states: Vec<Vec<State>>,
+    next_write_id: usize,
 }
 
-impl<'hir> WriteAnalyzer<'_, 'hir> {
+impl<'gcx> WriteAnalyzer<'_, 'gcx> {
     fn analyze_function(&mut self, func_id: FunctionId) {
         if self.call_stack.contains(&func_id) {
             return;
         }
-        let func = self.hir.function(func_id);
+        let func = self.gcx.hir.function(func_id);
         let Some(body) = func.body else { return };
         self.call_stack.push(func_id);
+        self.return_states.push(Vec::new());
+        self.terminal_states.push(Vec::new());
         for modifier in func.modifiers {
             if let Some(modifier_id) = modifier.id.as_function() {
                 let _ = self.visit_call_args(&modifier.args);
-                self.analyze_call(modifier_id, &modifier.args);
+                self.analyze_call(modifier_id, |index| modifier.args.exprs().nth(index));
             }
         }
         for stmt in body.stmts {
             let _ = self.visit_stmt(stmt);
         }
+        self.correlate_pending();
+        let mut exits = self.return_states.pop().unwrap();
+        let terminal_exits = self.terminal_states.pop().unwrap();
+        if !exits.is_empty() || !terminal_exits.is_empty() {
+            if !body.stmts.iter().any(|stmt| branch_always_exits(self.gcx, stmt)) {
+                exits.push(self.state.clone());
+            }
+            for write in &mut self.state.writes {
+                // An exit before this write does not require an event for it.
+                let mut matching = exits
+                    .iter()
+                    .chain(&terminal_exits)
+                    .filter_map(|state| state.writes.iter().find(|other| other.id == write.id));
+                if let Some(first) = matching.next() {
+                    write.evented = first.evented && matching.all(|other| other.evented);
+                }
+            }
+            self.state.emits.retain(|event| exits.iter().all(|state| state.emits.contains(event)));
+        }
+        if let Some(parent) = self.terminal_states.last_mut() {
+            parent.extend(terminal_exits);
+        }
         self.call_stack.pop();
     }
 
-    /// Inlines `callee_id` with its parameters bound to the sources of `args`; locals and storage
+    /// Inlines `callee_id` with its parameters bound to argument sources; locals and storage
     /// aliases are callee-private, pending writes flow back to the caller.
-    fn analyze_call(&mut self, callee_id: FunctionId, args: &hir::CallArgs<'hir>) {
+    fn analyze_call(
+        &mut self,
+        callee_id: FunctionId,
+        mut argument: impl FnMut(usize) -> Option<&'gcx Expr<'gcx>>,
+    ) {
         let params = self
+            .gcx
             .hir
             .function(callee_id)
             .parameters
             .iter()
-            .zip(args.exprs())
-            .filter_map(|(&param, arg)| {
-                let sources = self.value_sources(arg);
+            .enumerate()
+            .filter_map(|(index, &param)| {
+                let sources = self.value_sources(argument(index)?);
                 (!sources.is_empty()).then_some((param, sources))
             })
             .collect();
@@ -204,11 +249,11 @@ impl<'hir> WriteAnalyzer<'_, 'hir> {
     fn value_sources(&self, expr: &Expr<'_>) -> Sources {
         let mut out = Sources::new();
         let _ = expr.visit(&mut |e| {
-            if is_sender_member(e) {
+            if is_sender_member(self.gcx, e) {
                 out.insert(Source::Sender);
             }
-            if let Some(var_id) = underlying_var(e) {
-                if self.hir.variable(var_id).kind.is_state() {
+            if let Some(var_id) = underlying_var(self.gcx, e) {
+                if self.gcx.hir.variable(var_id).kind.is_state() {
                     out.insert(Source::Var(var_id));
                 }
                 if let Some(sources) = self.state.taint.get(&var_id) {
@@ -223,8 +268,8 @@ impl<'hir> WriteAnalyzer<'_, 'hir> {
     /// State variables written through `lhs`, resolving storage pointers to their roots.
     fn lhs_state_vars(&self, lhs: &Expr<'_>) -> Vec<VariableId> {
         let mut vars = Vec::new();
-        for_each_lhs_var(lhs, &mut |var_id| {
-            let root = if self.hir.variable(var_id).kind.is_state() {
+        for_each_lhs_var(self.gcx, lhs, &mut |var_id| {
+            let root = if self.gcx.hir.variable(var_id).kind.is_state() {
                 Some(var_id)
             } else {
                 self.state.storage_aliases.get(&var_id).copied()
@@ -244,12 +289,14 @@ impl<'hir> WriteAnalyzer<'_, 'hir> {
                 && (!sources.is_empty() || (fixed_clear && self.guard_targets.contains(&var_id)))
             {
                 self.state.writes.push(StateWrite {
+                    id: self.next_write_id,
                     var_id,
                     span: lhs.span,
                     sources: sources.clone(),
                     fixed_clear,
                     evented: false,
                 });
+                self.next_write_id += 1;
             }
         }
     }
@@ -265,7 +312,7 @@ impl<'hir> WriteAnalyzer<'_, 'hir> {
     /// Records `var_id = value`, tracking which state variable a storage pointer aliases.
     fn set_local(&mut self, var_id: VariableId, sources: Sources, value: &Expr<'_>) {
         self.set_taint(var_id, sources);
-        let root = (self.hir.variable(var_id).data_location == Some(DataLocation::Storage))
+        let root = (self.gcx.hir.variable(var_id).data_location == Some(DataLocation::Storage))
             .then(|| self.lhs_state_vars(value).into_iter().next())
             .flatten();
         match root {
@@ -274,34 +321,34 @@ impl<'hir> WriteAnalyzer<'_, 'hir> {
         };
     }
 
-    /// Marks pending writes covered by `emit`: the event must mention the variable and share a
-    /// source with the write (or the write must be a fixed clear).
-    fn mark_event(&mut self, expr: &Expr<'_>) {
-        let Some(event_id) = emitted_event_id(expr) else { return };
+    /// Records an `emit` as pending, to be matched against writes by `correlate_pending`. Emits
+    /// are matched independent of statement order within the same straight-line scope, so an
+    /// `emit` written before the state change it documents is still recognized.
+    fn record_emit(&mut self, expr: &Expr<'_>) {
+        let Some(event_id) = emitted_event_id(self.gcx, expr) else { return };
         let event_sources = self.value_sources(expr);
-        let hir = self.hir;
-        for write in &mut self.state.writes {
-            if !write.evented
-                && (write.fixed_clear || !write.sources.is_disjoint(&event_sources))
-                && event_mentions_state_var(hir, event_id, write.var_id)
-            {
-                write.evented = true;
-            }
-        }
+        self.state.emits.push((event_id, event_sources));
+    }
+
+    /// Matches every pending emit against every not-yet-evented write reachable so far: the
+    /// event must mention the variable and share a source with the write (or the write must be
+    /// a fixed clear).
+    fn correlate_pending(&mut self) {
+        correlate_pending(self.gcx, &mut self.state);
     }
 }
 
-impl<'hir> Visit<'hir> for WriteAnalyzer<'_, 'hir> {
+impl<'gcx> Visit<'gcx> for WriteAnalyzer<'_, 'gcx> {
     type BreakValue = Never;
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_stmt(&mut self, stmt: &'hir Stmt<'hir>) -> ControlFlow<Never> {
+    fn visit_stmt(&mut self, stmt: &'gcx Stmt<'gcx>) -> ControlFlow<Never> {
         match stmt.kind {
             StmtKind::DeclSingle(var_id) => {
-                if let Some(init) = self.hir.variable(var_id).initializer {
+                if let Some(init) = self.gcx.hir.variable(var_id).initializer {
                     self.visit_expr(init)?;
                     let sources = self.value_sources(init);
                     self.set_local(var_id, sources, init);
@@ -318,29 +365,97 @@ impl<'hir> Visit<'hir> for WriteAnalyzer<'_, 'hir> {
                 self.visit_expr(cond)?;
                 let base = self.state.clone();
                 self.visit_stmt(then_stmt)?;
+                self.correlate_pending();
                 let then_state = std::mem::replace(&mut self.state, base.clone());
                 if let Some(else_stmt) = else_stmt {
                     self.visit_stmt(else_stmt)?;
+                    self.correlate_pending();
                 }
                 let else_state = std::mem::take(&mut self.state);
                 self.state = merge_branches(
                     base,
                     then_state,
                     else_state,
-                    branch_always_exits(then_stmt),
-                    else_stmt.is_some_and(branch_always_exits),
+                    branch_always_exits(self.gcx, then_stmt),
+                    else_stmt.is_some_and(|expr| branch_always_exits(self.gcx, expr)),
                 );
             }
             StmtKind::Emit(expr) => {
                 self.visit_expr(expr)?;
-                self.mark_event(expr);
+                self.record_emit(expr);
+            }
+            StmtKind::Return(expr) => {
+                if let Some(expr) = expr {
+                    self.visit_expr(expr)?;
+                }
+                let mut state = self.state.clone();
+                correlate_pending(self.gcx, &mut state);
+                self.return_states.last_mut().unwrap().push(state);
+            }
+            StmtKind::Loop(block, source) => {
+                // A loop body may not run to completion on the iteration containing an emit — a
+                // `for`/`while` may run zero times, and even a `do-while` (which always starts
+                // its body) can `break`/`continue`/`revert` past the emit on that first pass — so
+                // an emit inside any loop must not survive to satisfy a write after the loop, and
+                // must not retroactively mark a write from BEFORE the loop as evented either.
+                let n = self.state.writes.len();
+                let evented_before: Vec<bool> =
+                    self.state.writes.iter().map(|w| w.evented).collect();
+                let emits_before = self.state.emits.clone();
+                if let LoopSource::For { update: Some(update) } = source
+                    && let [stmt] = block.stmts
+                    && let StmtKind::If(cond, body, Some(exit)) = stmt.kind
+                    && matches!(exit.kind, StmtKind::Break)
+                {
+                    // Solar lowers the loop condition to `if (cond) body else break`.
+                    // The update belongs to the continuing arm, so correlate its writes
+                    // with body events before discarding that arm's pending emits.
+                    self.visit_expr(cond)?;
+                    let base = self.state.clone();
+                    self.visit_stmt(body)?;
+                    self.visit_stmt(update)?;
+                    self.correlate_pending();
+                    let body_state = std::mem::take(&mut self.state);
+                    self.state = merge_branches(base.clone(), body_state, base, false, false);
+                } else {
+                    for stmt in loop_stmts(block, source) {
+                        self.visit_stmt(stmt)?;
+                    }
+                }
+                self.correlate_pending();
+                for (write, was_evented) in self.state.writes[..n].iter_mut().zip(evented_before) {
+                    write.evented = was_evented;
+                }
+                self.state.emits = emits_before;
+            }
+            StmtKind::Try(try_stmt) => {
+                self.visit_expr(&try_stmt.expr)?;
+                // Clauses are mutually exclusive: at most one runs. Each gets its own isolated
+                // copy of the pre-try state so one clause's emit can neither satisfy another
+                // clause's write nor a write from before the try; `merge_try_clauses` recombines
+                // them the same way `merge_branches` recombines an `if`'s two arms.
+                let base = self.state.clone();
+                let mut clause_states = Vec::with_capacity(try_stmt.clauses.len());
+                let mut continues = Vec::with_capacity(try_stmt.clauses.len());
+                for clause in try_stmt.clauses {
+                    self.state = base.clone();
+                    for stmt in clause.block.stmts {
+                        self.visit_stmt(stmt)?;
+                    }
+                    self.correlate_pending();
+                    clause_states.push(std::mem::take(&mut self.state));
+                    continues.push(
+                        !clause.block.stmts.iter().any(|stmt| branch_always_exits(self.gcx, stmt)),
+                    );
+                }
+                self.state = merge_try_clauses(base, clause_states, continues);
             }
             _ => return self.walk_stmt(stmt),
         }
         ControlFlow::Continue(())
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<Never> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<Never> {
         match &expr.kind {
             ExprKind::Assign(lhs, op, rhs) => {
                 self.visit_expr(rhs)?;
@@ -350,8 +465,19 @@ impl<'hir> Visit<'hir> for WriteAnalyzer<'_, 'hir> {
                 if op.is_some() {
                     sources.extend(self.value_sources(lhs));
                 }
-                self.record_writes(lhs, &sources, is_zero_value(rhs));
-                if let Some(local) = lhs_local_var(self.hir, lhs) {
+                let local = lhs_local_var(self.gcx, lhs);
+                let rebinds_storage = op.is_none()
+                    && local.is_some_and(|var_id| {
+                        self.gcx.hir.variable(var_id).data_location == Some(DataLocation::Storage)
+                    })
+                    && self
+                        .gcx
+                        .type_of_expr(rhs.peel_parens().id)
+                        .is_some_and(|ty| ty.loc() == Some(DataLocation::Storage));
+                if !rebinds_storage {
+                    self.record_writes(lhs, &sources, is_zero_value(rhs));
+                }
+                if let Some(local) = local {
                     self.set_local(local, sources, rhs);
                 }
                 ControlFlow::Continue(())
@@ -362,11 +488,43 @@ impl<'hir> Visit<'hir> for WriteAnalyzer<'_, 'hir> {
                 self.record_writes(inner, &sources, true);
                 self.walk_expr(expr)
             }
-            ExprKind::Call(callee, args, _) => {
+            ExprKind::Call(callee, ..) => {
                 self.walk_expr(expr)?;
-                for callee_id in function_ids(callee) {
-                    self.analyze_call(callee_id, args);
+                if matches!(callee.peel_parens().kind, ExprKind::Ident(_))
+                    && let Some(callee_id) = self.gcx.resolved_function(callee)
+                {
+                    let gcx = self.gcx;
+                    self.analyze_call(callee_id, |index| gcx.call_arg(expr, index));
                 }
+                if self.gcx.resolved_builtin(callee) == Some(Builtin::Selfdestruct) {
+                    let mut state = self.state.clone();
+                    correlate_pending(self.gcx, &mut state);
+                    self.terminal_states.last_mut().unwrap().push(state);
+                }
+                ControlFlow::Continue(())
+            }
+            ExprKind::Binary(lhs, op, rhs) if matches!(op.kind, BinOpKind::And | BinOpKind::Or) => {
+                self.visit_expr(lhs)?;
+                self.correlate_pending();
+                let base = self.state.clone();
+                self.visit_expr(rhs)?;
+                self.correlate_pending();
+                let rhs_state = std::mem::take(&mut self.state);
+                // The RHS may be skipped, so its events cannot cover writes on that path.
+                self.state = merge_branches(base.clone(), rhs_state, base, false, false);
+                ControlFlow::Continue(())
+            }
+            ExprKind::Ternary(cond, then_expr, else_expr) => {
+                self.visit_expr(cond)?;
+                self.correlate_pending();
+                let base = self.state.clone();
+                self.visit_expr(then_expr)?;
+                self.correlate_pending();
+                let then_state = std::mem::replace(&mut self.state, base.clone());
+                self.visit_expr(else_expr)?;
+                self.correlate_pending();
+                let else_state = std::mem::take(&mut self.state);
+                self.state = merge_branches(base, then_state, else_state, false, false);
                 ControlFlow::Continue(())
             }
             _ => self.walk_expr(expr),
@@ -375,7 +533,11 @@ impl<'hir> Visit<'hir> for WriteAnalyzer<'_, 'hir> {
 }
 
 /// Joins the two arms of an `if`: a pending write stays covered only if both arms emitted for it,
-/// while taint and aliases come from whichever arms can continue past the `if`.
+/// while taint and aliases come from whichever arms can continue past the `if`. Emits recorded
+/// inside either arm are dropped rather than carried past the merge: `correlate_pending` already
+/// resolved them against that arm's own writes before this runs, and code after the `if` executes
+/// whichever branch ran (or neither), so an emit conditional on one arm must not retroactively
+/// satisfy a write reachable only outside it.
 fn merge_branches(
     base: State,
     then_state: State,
@@ -383,6 +545,7 @@ fn merge_branches(
     then_exits: bool,
     else_exits: bool,
 ) -> State {
+    let emits = base.emits.clone();
     let mut writes = base.writes;
     for (i, write) in writes.iter_mut().enumerate() {
         write.evented = then_state.writes[i].evented && else_state.writes[i].evented;
@@ -408,30 +571,51 @@ fn merge_branches(
             (taint, storage_aliases)
         }
     };
-    State { taint, storage_aliases, writes }
+    State { taint, storage_aliases, writes, emits }
 }
 
-/// `0`, `false`, `address(0)`, `payable(0)` and casts/negations thereof.
-fn is_zero_value(expr: &Expr<'_>) -> bool {
-    match &expr.peel_parens().kind {
-        ExprKind::Lit(lit) => match &lit.kind {
-            LitKind::Number(value) => value.is_zero(),
-            LitKind::Address(value) => value.is_zero(),
-            LitKind::Bool(value) => !value,
-            _ => false,
-        },
-        ExprKind::Call(_, args, _) => {
-            let mut exprs = args.exprs();
-            exprs.len() == 1 && exprs.next().is_some_and(is_zero_value)
-        }
-        ExprKind::Unary(_, inner) | ExprKind::Payable(inner) => is_zero_value(inner),
-        _ => false,
+/// Joins mutually exclusive try/catch clauses. Pre-existing writes need an event in every
+/// clause, including exiting clauses: a `return` preserves writes, unlike a `revert`.
+/// Taint and aliases only merge from continuing clauses; clause-local emits are discarded.
+fn merge_try_clauses(base: State, clause_states: Vec<State>, continues: Vec<bool>) -> State {
+    let n = base.writes.len();
+    let mut writes = base.writes;
+    for (i, write) in writes.iter_mut().enumerate() {
+        write.evented = clause_states.iter().all(|state| state.writes[i].evented);
     }
+    for state in &clause_states {
+        writes.extend_from_slice(&state.writes[n..]);
+    }
+
+    let continuing = || clause_states.iter().zip(&continues).filter(|&(_, &c)| c).map(|(s, _)| s);
+
+    let (taint, storage_aliases) = match continuing().next() {
+        None => (base.taint, base.storage_aliases),
+        Some(first) => {
+            let mut taint = HashMap::new();
+            for state in continuing() {
+                for (&var_id, sources) in &state.taint {
+                    taint
+                        .entry(var_id)
+                        .or_insert_with(Sources::new)
+                        .extend(sources.iter().copied());
+                }
+            }
+            let mut storage_aliases = first.storage_aliases.clone();
+            for state in continuing().skip(1) {
+                storage_aliases
+                    .retain(|alias, root| state.storage_aliases.get(alias) == Some(root));
+            }
+            (taint, storage_aliases)
+        }
+    };
+
+    State { taint, storage_aliases, writes, emits: base.emits }
 }
 
-fn emitted_event_id(expr: &Expr<'_>) -> Option<EventId> {
+fn emitted_event_id(gcx: Gcx<'_>, expr: &Expr<'_>) -> Option<EventId> {
     let ExprKind::Call(callee, ..) = &expr.peel_parens().kind else { return None };
-    match referenced_item(callee)? {
+    match referenced_item(gcx, callee)? {
         ItemId::Event(event_id) => Some(event_id),
         _ => None,
     }
@@ -439,16 +623,16 @@ fn emitted_event_id(expr: &Expr<'_>) -> Option<EventId> {
 
 /// Whether the event name or one of its parameter names mentions the state variable: its
 /// normalized name, its singular form, or a role keyword it contains.
-fn event_mentions_state_var(hir: &hir::Hir<'_>, event_id: EventId, var_id: VariableId) -> bool {
-    let Some(var_name) = hir.variable(var_id).name else { return false };
+fn event_mentions_state_var(gcx: Gcx<'_>, event_id: EventId, var_id: VariableId) -> bool {
+    let Some(var_name) = gcx.hir.variable(var_id).name else { return false };
     let var_name = normalize(var_name.as_str());
     let mut keywords = vec![var_name.as_str()];
     keywords.extend(var_name.strip_suffix('s').filter(|singular| !singular.is_empty()));
     let roles = ["owner", "admin", "guardian", "manager", "role"];
     keywords.extend(roles.into_iter().filter(|role| var_name.contains(role)));
 
-    let event = hir.event(event_id);
-    let param_names = event.parameters.iter().filter_map(|&p| hir.variable(p).name);
+    let event = gcx.hir.event(event_id);
+    let param_names = event.parameters.iter().filter_map(|&p| gcx.hir.variable(p).name);
     iter::once(event.name).chain(param_names).any(|name| {
         let name = normalize(name.as_str());
         keywords.iter().any(|keyword| !keyword.is_empty() && name.contains(keyword))
@@ -457,4 +641,17 @@ fn event_mentions_state_var(hir: &hir::Hir<'_>, event_id: EventId, var_id: Varia
 
 fn normalize(name: &str) -> String {
     name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
+}
+
+fn correlate_pending(gcx: Gcx<'_>, state: &mut State) {
+    for (event_id, event_sources) in &state.emits {
+        for write in &mut state.writes {
+            if !write.evented
+                && (write.fixed_clear || !write.sources.is_disjoint(event_sources))
+                && event_mentions_state_var(gcx, *event_id, write.var_id)
+            {
+                write.evented = true;
+            }
+        }
+    }
 }

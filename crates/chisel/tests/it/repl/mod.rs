@@ -70,6 +70,29 @@ repl_test!(explicit_ethereum_execution, "--network ethereum", |repl| {
     repl.expect_prompt();
 });
 
+repl_test!(command_output_after_raw_input, |repl| {
+    repl.sendln_raw("!help");
+    repl.expect("Chisel help");
+    repl.expect_prompt();
+
+    // A synchronous command must retain its output even after an explicit prompt wait.
+    repl.sendln("uint256(7)");
+    repl.expect("Hex: 0x7");
+    repl.expect("Decimal: 7");
+    repl.sendln("uint256(8)");
+    repl.expect("Decimal: 8");
+});
+
+repl_test!(sendln_waits_for_save, |repl| {
+    let id = unique_cache_id("wait-for-save");
+    let _cleanup = CacheCleanup(vec![id.clone()]);
+
+    // The first command must finish before the caller observes its filesystem effects.
+    repl.sendln(&format!("!save {id}"));
+    assert!(cache_file(&id).is_file());
+    repl.expect(&format!("Saved session to cache with ID = {id}"));
+});
+
 repl_test!(save_renamed_session_removes_stale_cache, |repl| {
     let old_id = unique_cache_id("rename-old");
     let new_id = unique_cache_id("rename-new");
@@ -120,12 +143,18 @@ repl_test!(failed_save_restores_previous_session_id, |repl| {
     let first_id = unique_cache_id("failed-save-first");
     let second_id = unique_cache_id("failed-save-second");
     let _cleanup = CacheCleanup(vec![first_id.clone(), second_id.clone()]);
-    let invalid_id = format!("{}/id", unique_cache_id("failed-save-invalid"));
 
-    repl.save(&first_id);
-    // The nested path makes the write fail without touching the existing cache file.
-    repl.sendln_raw(&format!("!save {invalid_id}"));
-    repl.expect("No such file or directory");
+    repl.sendln(&format!("!save {first_id}"));
+    // A directory at the destination makes a valid ID fail when writing the cache file.
+    let blocked_cache = tempfile::Builder::new()
+        .prefix("chisel-failed-save-")
+        .suffix(".json")
+        .tempdir_in(CachedChiselSession::<EthEvmNetwork>::cache_dir().unwrap())
+        .unwrap();
+    let blocked_name = blocked_cache.path().file_name().unwrap().to_str().unwrap();
+    let blocked_id = blocked_name.strip_prefix("chisel-").unwrap().strip_suffix(".json").unwrap();
+    repl.sendln_raw(&format!("!save {blocked_id}"));
+    repl.expect("Is a directory");
     repl.expect_prompt();
 
     // A failed rename must not lose the ID of the last successfully saved file.
@@ -216,7 +245,9 @@ repl_test!(cheatcodes_available, "", init = true, |repl| {
 
 // Test empty inputs.
 repl_test!(empty_input, |repl| {
-    repl.sendln("   \n \n\n    \t \t \n \n\t\t\t\t \n \n");
+    for line in "   \n \n\n    \t \t \n \n\t\t\t\t \n \n".split('\n') {
+        repl.sendln(line);
+    }
 });
 
 // Issue #4130: Test type(intN).min correctness.
@@ -259,7 +290,7 @@ repl_test!(last_result_resets_with_session, |repl| {
 
     repl.sendln(r#""stale""#);
     repl.sendln_raw(&format!("!load {loaded_id}"));
-    repl.expect(&format!("Loaded Chisel session! (ID = {saved_id})"));
+    repl.expect(&format!("Loaded Chisel session! (ID = {loaded_id})"));
     repl.expect_prompt();
     repl.sendln_raw("$_");
     repl.expect("no previous result");
@@ -273,14 +304,16 @@ repl_test!(last_result_resets_with_session, |repl| {
 });
 
 // Issue #4393: Test edit command with traces.
-// TODO: test `!edit`
-// repl_test!(edit_with_traces, |repl| {
-//     repl.sendln("!traces");
-//     repl.sendln("uint x = 42");
-//     repl.sendln("!edit");
-//     // Should open editor without errors.
-//     repl.expect("Running");
-// });
+repl_test!(edit_with_traces, |repl| {
+    repl.sendln("!traces");
+    repl.expect("Enabled traces!");
+    repl.sendln("uint x = 42");
+    repl.sendln("!edit");
+    repl.expect("Traces:");
+    repl.expect("Successfully edited `run()` function's body!");
+    repl.sendln("x");
+    repl.expect("Decimal: 42");
+});
 
 // Test tuple support.
 repl_test!(tuples, |repl| {
@@ -295,13 +328,10 @@ repl_test!(tuples, |repl| {
 repl_test!(import, "", init = true, |repl| {
     repl.sendln("import {Counter} from \"src/Counter.sol\"");
     repl.sendln("Counter c = new Counter()");
-    // TODO: pre-existing inspection failure.
-    // repl.sendln("c.number()");
-    repl.sendln("uint x = c.number();\nx");
+    repl.sendln("c.number()");
     repl.expect("Decimal: 0");
     repl.sendln("c.increment();");
-    // repl.sendln("c.number()");
-    repl.sendln("x = c.number();\nx");
+    repl.sendln("c.number()");
     repl.expect("Decimal: 1");
 });
 
@@ -333,6 +363,36 @@ repl_test!(eval_subcommand, "eval type(uint8).max", |repl| {
     repl.expect("Decimal: 255");
 });
 
+// Issue #17125: external function references display their address and selector.
+repl_test!(external_function_references, |repl| {
+    repl.sendln_raw(
+        "interface IProbe { function value() external view returns (uint256); function pair() external view returns (uint256, bool); function ping() external; }",
+    );
+    repl.expect_prompt();
+
+    repl.sendln("IProbe(address(0x1234)).value");
+    repl.expect("Type: function");
+    repl.expect("Address: 0x0000000000000000000000000000000000001234");
+    repl.expect("Selector: 0x3fa4f245");
+
+    repl.sendln("IProbe(address(0x1234)).pair");
+    repl.expect("Type: function");
+    repl.expect("Address: 0x0000000000000000000000000000000000001234");
+    repl.expect("Selector: 0xa8aa1b31");
+
+    repl.sendln("IProbe(address(0x1234)).ping");
+    repl.expect("Type: function");
+    repl.expect("Address: 0x0000000000000000000000000000000000001234");
+    repl.expect("Selector: 0x5c36b186");
+
+    repl.sendln("uint256(1)");
+    repl.sendln("[IProbe(address(0x1234)).ping]");
+    repl.expect("Type: function");
+    repl.expect("Selector: 0x5c36b186");
+    repl.sendln("$_");
+    repl.expect("no previous result");
+});
+
 // Issue #4963: inspect the value of the final inline assembly expression.
 repl_test!(inline_assembly_expression, |repl| {
     repl.sendln("uint256 value = 1");
@@ -362,6 +422,20 @@ repl_test!(
     "--network tempo --chain 4217 eval address(0xfeEC000000000000000000000000000000000000).code.length",
     |repl| {
         repl.expect("Decimal: 1");
+    }
+);
+
+#[cfg(feature = "base")]
+repl_test!(
+    eval_base_network_uses_base_executor,
+    "--network base --hardfork base:Beryl --chain 8453",
+    |repl| {
+        repl.sendln_raw(
+            "interface IActivationRegistry { function admin() external view returns (address); }",
+        );
+        repl.expect_prompt();
+        repl.sendln("IActivationRegistry(0x8453000000000000000000000000000000000001).admin()");
+        repl.expect("Data: 0xcE3a3bEE7E72E2A24079f3c0Cb3b97740ED425A9");
     }
 );
 
@@ -425,7 +499,8 @@ repl_test!(assembly_no_return_intermediate, |repl| {
 
 // Issue #5051, #8978: Test EVM version normalization.
 repl_test!(flaky_evm_version_normalization, "--use 0.7.6 --evm-version london", |repl| {
-    repl.sendln("uint x;\nx");
+    repl.sendln("uint x;");
+    repl.sendln("x");
     repl.expect("Decimal: 0");
 });
 
@@ -457,7 +532,8 @@ repl_test!(fetch_interface_with_structs, |repl| {
         "Added 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789's interface to source as `IEntryPoint`",
     );
     repl.expect_prompt();
-    repl.sendln("uint256 x = 1;\nx");
+    repl.sendln("uint256 x = 1;");
+    repl.sendln("x");
     repl.expect("Decimal: 1");
 });
 

@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use alloy_evm::{Database, Evm, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, Bytes, U256, map::AddressSet};
 use arbos_revm::{
     ArbitrumChain, ArbitrumContext, ArbitrumEvm, ArbitrumInstructions,
@@ -27,8 +28,18 @@ use revm::{
 use crate::{
     FoundryChain, FoundryContextExt, FoundryInspectorExt, FoundryTransaction,
     backend::{DatabaseExt, JournaledState},
-    evm::{FoundryEvmFactory, FoundryPrecompiles, NestedEvm, NestedEvmFor, run_inspected_frame},
+    evm::{
+        FoundryEvmFactory, FoundryEvmNetwork, FoundryPrecompiles, NestedEvm, NestedEvmFor,
+        run_inspected_frame,
+    },
 };
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ArbitrumEvmNetwork;
+impl FoundryEvmNetwork for ArbitrumEvmNetwork {
+    type Network = Ethereum;
+    type EvmFactory = ArbitrumEvmFactory;
+}
 
 type ArbInstructions<DB> = ArbitrumInstructions<ArbitrumContext<DB>>;
 mod overrides;
@@ -265,6 +276,16 @@ impl FoundryChain<ArbitrumTransaction> for ArbitrumChain {
     }
 }
 
+impl crate::FoundryCfg for ArbitrumConfig {
+    fn cfg_env(&self) -> &revm::context::CfgEnv<Self::Spec> {
+        &self.inner
+    }
+
+    fn cfg_env_mut(&mut self) -> &mut revm::context::CfgEnv<Self::Spec> {
+        &mut self.inner
+    }
+}
+
 impl FoundryContextExt for ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFactory>> {
     type Spec = SpecId;
 
@@ -303,7 +324,9 @@ impl FoundryContextExt for ArbitrumContext<&mut dyn DatabaseExt<ArbitrumEvmFacto
         &mut self.cfg.inner
     }
     fn set_chain_context(&mut self, mut chain: Self::Chain) {
-        chain.set_rpc_block_number(self.journaled_state.database.active_fork_block_number());
+        if arbos_revm::chain::ArbitrumChainTr::rpc_block_number(&chain).is_none() {
+            chain.set_rpc_block_number(self.journaled_state.database.active_fork_block_number());
+        }
         self.chain = chain;
         refresh_arbitrum_version(self);
     }
@@ -499,39 +522,27 @@ impl FoundryEvmFactory for ArbitrumEvmFactory {
         initialize_arbitrum_backend(db, evm_env, &self.config)
     }
 
-    fn create_evm_with_context<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        chain_context: Self::Chain,
-    ) -> Self::Evm<DB, NoOpInspector> {
-        self.build(db, evm_env, NoOpInspector, false, chain_context)
-    }
-
     fn create_foundry_evm_with_inspector<'db, I: FoundryInspectorExt<Self::FoundryContext<'db>>>(
         &self,
         db: &'db mut dyn DatabaseExt<Self>,
         evm_env: EvmEnv,
-        mut chain_context: Self::Chain,
         inspector: I,
     ) -> Self::FoundryEvm<'db, I> {
-        if arbos_revm::chain::ArbitrumChainTr::rpc_block_number(&chain_context).is_none() {
-            chain_context.set_rpc_block_number(db.active_fork_block_number());
-        }
+        let mut chain_context = ArbitrumChain::default();
+        chain_context.set_rpc_block_number(db.active_fork_block_number());
         self.build(db, evm_env, inspector, true, chain_context)
     }
 
-    fn create_foundry_nested_evm<'db>(
+    fn create_nested_evm_with_inspector<'db, I>(
         &self,
         db: &'db mut dyn DatabaseExt<Self>,
         evm_env: EvmEnv,
-        mut chain_context: Self::Chain,
-        inspector: &'db mut dyn FoundryInspectorExt<Self::FoundryContext<'db>>,
-    ) -> NestedEvmFor<'db, Self> {
-        if arbos_revm::chain::ArbitrumChainTr::rpc_block_number(&chain_context).is_none() {
-            chain_context.set_rpc_block_number(db.active_fork_block_number());
-        }
-        Box::new(self.build(db, evm_env, inspector, true, chain_context).into_inner())
+        inspector: I,
+    ) -> NestedEvmFor<'db, Self>
+    where
+        I: FoundryInspectorExt<Self::FoundryContext<'db>> + 'db,
+    {
+        Box::new(self.create_foundry_evm_with_inspector(db, evm_env, inspector).into_inner())
     }
 }
 
@@ -553,6 +564,9 @@ where
     }
     fn chain_mut(&mut self) -> &mut Self::Chain {
         &mut self.0.ctx.chain
+    }
+    fn precompiles_mut(&mut self) -> &mut dyn FoundryPrecompiles {
+        &mut self.0.precompiles
     }
     fn journal_mut(&mut self) -> &mut Self::Journal {
         &mut self.0.ctx.journaled_state

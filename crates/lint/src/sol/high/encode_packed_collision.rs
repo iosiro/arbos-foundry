@@ -1,17 +1,14 @@
 use super::EncodedPackedCollision;
 use crate::{
     linter::{LateLintPass, LintContext},
-    sol::{
-        Severity, SolLint,
-        analysis::{expr_ty, is_builtin},
-    },
+    sol::{Severity, SolLint},
 };
 use solar::{
     ast::LitKind,
-    interface::sym,
     sema::{
         Gcx,
-        hir::{Expr, ExprKind, Hir},
+        builtins::Builtin,
+        hir::{Expr, ExprKind},
     },
 };
 
@@ -22,17 +19,10 @@ declare_forge_lint!(
     "`abi.encodePacked()` called with multiple dynamic type arguments; hash collisions possible"
 );
 
-impl<'hir> LateLintPass<'hir> for EncodedPackedCollision {
-    fn check_expr(
-        &mut self,
-        ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        _hir: &'hir Hir<'hir>,
-        expr: &'hir Expr<'hir>,
-    ) {
-        let ExprKind::Call(callee, args, _) = &expr.kind else { return };
-        let ExprKind::Member(base, member) = &callee.peel_parens().kind else { return };
-        if member.name != sym::encodePacked || !is_builtin(base, sym::abi) {
+impl<'gcx> LateLintPass<'gcx> for EncodedPackedCollision {
+    fn check_expr(&mut self, ctx: &LintContext, gcx: Gcx<'gcx>, expr: &'gcx Expr<'gcx>) {
+        let ExprKind::Call(callee, args) = &expr.kind else { return };
+        if gcx.resolved_builtin(callee) != Some(Builtin::AbiEncodePacked) {
             return;
         }
         // Only non-literal dynamic args count: a top-level string/hex/unicode literal is a
@@ -50,15 +40,6 @@ fn is_str_lit(expr: &Expr<'_>) -> bool {
     matches!(expr.peel_parens().kind, ExprKind::Lit(lit) if matches!(lit.kind, LitKind::Str(..)))
 }
 
-fn is_dynamic_arg<'hir>(gcx: Gcx<'hir>, expr: &Expr<'hir>) -> bool {
-    match &expr.peel_parens().kind {
-        // String literals (and multi-line/hex string sequences) are always dynamic.
-        ExprKind::Lit(_) => is_str_lit(expr),
-        // Ternary: dynamic when both branches are dynamic. Handled here so that literal branches
-        // (which have no checked type) are correctly identified as dynamic.
-        ExprKind::Ternary(_, then, else_) => {
-            is_dynamic_arg(gcx, then) && is_dynamic_arg(gcx, else_)
-        }
-        _ => expr_ty(gcx, expr).is_some_and(|ty| ty.peel_refs().is_dynamically_sized()),
-    }
+fn is_dynamic_arg<'gcx>(gcx: Gcx<'gcx>, expr: &Expr<'gcx>) -> bool {
+    gcx.type_of_expr(expr.peel_parens().id).is_some_and(|ty| ty.peel_refs().is_dynamically_sized())
 }

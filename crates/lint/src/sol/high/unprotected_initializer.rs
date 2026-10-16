@@ -3,16 +3,18 @@ use crate::{
     linter::{LateLintPass, LintContext},
     sol::{
         Severity, SolLint,
-        analysis::{builtins, function_ids, is_builtin, runtime_entry_points},
+        analysis::{is_builtin, runtime_entry_points},
     },
 };
+use alloy_primitives::map::HashSet;
 use solar::{
-    ast::{ContractKind, DataLocation, StateMutability},
-    interface::{kw, sym},
+    ast::{ContractKind, DataLocation},
+    interface::sym,
     sema::{
         Gcx,
         builtins::Builtin,
-        hir::{self, ContractId, Expr, ExprKind, FunctionId, ItemId, Res, Visit},
+        hir::{self, ContractId, Expr, ExprKind, FunctionId, Visit},
+        ty::TyKind,
     },
 };
 use std::ops::ControlFlow;
@@ -24,15 +26,14 @@ declare_forge_lint!(
     "upgradeable initializer is not protected against direct implementation calls"
 );
 
-impl<'hir> LateLintPass<'hir> for UnprotectedInitializer {
+impl<'gcx> LateLintPass<'gcx> for UnprotectedInitializer {
     fn check_nested_contract(
         &mut self,
         ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
+        gcx: Gcx<'gcx>,
         contract_id: ContractId,
     ) {
-        let contract = hir.contract(contract_id);
+        let contract = gcx.hir.contract(contract_id);
         if contract.kind != ContractKind::Contract || contract.linearization_failed() {
             return;
         }
@@ -42,34 +43,46 @@ impl<'hir> LateLintPass<'hir> for UnprotectedInitializer {
         // fallback/receive functions.
         let entries = runtime_entry_points(gcx, contract_id);
 
-        let upgradeable =
-            bases.iter().any(|&cid| hir.contract(cid).name.as_str() == "Initializable")
-                || entries.iter().any(|&fid| has_initializer_modifier(hir, hir.function(fid)));
-        let locked = bases.iter().filter_map(|&cid| hir.contract(cid).ctor).any(|ctor| {
-            reaches(hir, bases, ctor, |expr| {
+        let upgradeable = bases
+            .iter()
+            .any(|&cid| gcx.hir.contract(cid).name.as_str() == "Initializable")
+            || entries.iter().any(|&fid| has_initializer_modifier(&gcx.hir, gcx.hir.function(fid)));
+        if !upgradeable {
+            return;
+        }
+        let locked = bases.iter().filter_map(|&cid| gcx.hir.contract(cid).ctor).any(|ctor| {
+            reaches(gcx, bases, ctor, |expr| {
                 let ExprKind::Call(callee, ..) = &expr.kind else { return false };
-                callees(hir, callee, bases).into_iter().any(|fid| {
-                    let func = hir.function(fid);
+                if !gcx.type_of_expr(callee.peel_parens().id).is_some_and(
+                    |ty| matches!(ty.kind, TyKind::Fn(function) if function.is_internal()),
+                ) {
+                    return false;
+                }
+                gcx.resolved_function(callee).is_some_and(|fid| {
+                    let func = gcx.hir.function(fid);
                     func.contract.is_some_and(|cid| bases.contains(&cid))
                         && func.name.is_some_and(|name| name.as_str() == "_disableInitializers")
                 })
             })
         });
+        if locked {
+            return;
+        }
         let destructive = entries.iter().any(|&fid| {
-            !has_modifier_named(hir, hir.function(fid), "onlyProxy")
-                && reaches(hir, bases, fid, is_destructive_call)
+            !has_modifier_named(&gcx.hir, gcx.hir.function(fid), "onlyProxy")
+                && reaches(gcx, bases, fid, |expr| is_destructive_call(gcx, expr))
         });
-        if !upgradeable || locked || !destructive {
+        if !destructive {
             return;
         }
 
         for fid in entries {
-            let func = hir.function(fid);
+            let func = gcx.hir.function(fid);
             if func.is_part_of_external_interface()
-                && !matches!(func.state_mutability, StateMutability::Pure | StateMutability::View)
-                && has_initializer_modifier(hir, func)
-                && !has_modifier_named(hir, func, "onlyProxy")
-                && reaches(hir, bases, fid, |expr| writes_state(gcx, expr))
+                && func.mutates_state()
+                && has_initializer_modifier(&gcx.hir, func)
+                && !has_modifier_named(&gcx.hir, func, "onlyProxy")
+                && reaches(gcx, bases, fid, |expr| writes_state(gcx, expr))
             {
                 ctx.emit(&UNPROTECTED_INITIALIZER, func.name.map_or(func.span, |name| name.span));
             }
@@ -92,87 +105,92 @@ fn has_modifier_named(hir: &hir::Hir<'_>, func: &hir::Function<'_>, name: &str) 
 
 /// True if `hit` matches an expression in `fid`'s body or, transitively, in the body of any
 /// internal function it calls.
-fn reaches<'hir>(
-    hir: &'hir hir::Hir<'hir>,
-    bases: &'hir [ContractId],
+fn reaches<'gcx>(
+    gcx: Gcx<'gcx>,
+    bases: &'gcx [ContractId],
     fid: FunctionId,
-    hit: impl FnMut(&'hir Expr<'hir>) -> bool,
+    hit: impl FnMut(&'gcx Expr<'gcx>) -> bool,
 ) -> bool {
-    Reach { hir, bases, stack: Vec::new(), hit }.visit_function_body(fid).is_break()
+    Reach { gcx, bases, defining_contract: None, visited: HashSet::default(), hit }
+        .visit_function_body(fid)
+        .is_break()
 }
 
-struct Reach<'hir, F> {
-    hir: &'hir hir::Hir<'hir>,
-    bases: &'hir [ContractId],
-    stack: Vec<FunctionId>,
+struct Reach<'gcx, F> {
+    gcx: Gcx<'gcx>,
+    bases: &'gcx [ContractId],
+    defining_contract: Option<ContractId>,
+    // The predicate and dispatch context are fixed for the entire reachability check.
+    visited: HashSet<FunctionId>,
     hit: F,
 }
 
-impl<'hir, F: FnMut(&'hir Expr<'hir>) -> bool> Reach<'hir, F> {
+impl<'gcx, F: FnMut(&'gcx Expr<'gcx>) -> bool> Reach<'gcx, F> {
     fn visit_function_body(&mut self, fid: FunctionId) -> ControlFlow<()> {
-        if self.stack.contains(&fid) {
+        if !self.visited.insert(fid) {
             return ControlFlow::Continue(());
         }
-        let Some(body) = self.hir.function(fid).body else { return ControlFlow::Continue(()) };
-        self.stack.push(fid);
-        let flow = body.stmts.iter().try_for_each(|stmt| self.visit_stmt(stmt));
-        self.stack.pop();
-        flow
+        let Some(body) = self.gcx.hir.function(fid).body else {
+            return ControlFlow::Continue(());
+        };
+        let previous = self.defining_contract;
+        self.defining_contract = self.gcx.hir.function(fid).contract;
+        let result = body.stmts.iter().try_for_each(|stmt| self.visit_stmt(stmt));
+        self.defining_contract = previous;
+        result
     }
 }
 
-impl<'hir, F: FnMut(&'hir Expr<'hir>) -> bool> Visit<'hir> for Reach<'hir, F> {
+impl<'gcx, F: FnMut(&'gcx Expr<'gcx>) -> bool> Visit<'gcx> for Reach<'gcx, F> {
     type BreakValue = ();
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_expr(&mut self, expr: &'hir Expr<'hir>) -> ControlFlow<()> {
+    fn visit_expr(&mut self, expr: &'gcx Expr<'gcx>) -> ControlFlow<()> {
         if (self.hit)(expr) {
             return ControlFlow::Break(());
         }
-        if let ExprKind::Call(callee, ..) = &expr.kind {
-            for fid in callees(self.hir, callee, self.bases) {
-                self.visit_function_body(fid)?;
-            }
+        if let ExprKind::Call(callee, ..) = &expr.kind
+            && let Some(fid) =
+                internal_callee(self.gcx, callee, self.bases[0], self.defining_contract)
+        {
+            self.visit_function_body(fid)?;
         }
         self.walk_expr(expr)
     }
 }
 
-/// Functions an internal call may dispatch to: bare identifiers (all overloads), `super.f` (every
-/// base `f`) and `Contract.f`.
-fn callees(hir: &hir::Hir<'_>, callee: &Expr<'_>, bases: &[ContractId]) -> Vec<FunctionId> {
-    let ExprKind::Member(base, method) = &callee.peel_parens().kind else {
-        return function_ids(callee).collect();
-    };
-    let ExprKind::Ident(reses) = &base.peel_parens().kind else { return Vec::new() };
-    let contracts = if is_builtin(base, sym::super_) {
-        bases.get(1..).unwrap_or_default().to_vec()
-    } else {
-        reses
-            .iter()
-            .filter_map(|res| match res {
-                Res::Item(ItemId::Contract(cid)) => Some(*cid),
-                _ => None,
-            })
-            .collect()
-    };
-    contracts
-        .into_iter()
-        .flat_map(|cid| hir.contract(cid).all_functions())
-        .filter(|&fid| hir.function(fid).name.is_some_and(|name| name.name == method.name))
-        .collect()
+/// The selected internal function in the analyzed contract's dispatch context.
+fn internal_callee(
+    gcx: Gcx<'_>,
+    callee: &Expr<'_>,
+    contract: ContractId,
+    defining_contract: Option<ContractId>,
+) -> Option<FunctionId> {
+    let callee = callee.peel_parens();
+    let fid = gcx.resolved_function(callee)?;
+    let TyKind::Fn(function) = gcx.type_of_expr(callee.id)?.kind else { return None };
+    if !function.is_internal() {
+        return None;
+    }
+    Some(match &callee.kind {
+        ExprKind::Ident(_) => gcx.resolve_virtual_function(contract, fid),
+        ExprKind::Member(base, _) if is_builtin(gcx, base, sym::super_) => {
+            gcx.resolve_super_function(contract, defining_contract?, fid)
+        }
+        _ => fid,
+    })
 }
 
-/// `x.delegatecall(..)`, `x.callcode(..)` or `selfdestruct(..)`.
-fn is_destructive_call(expr: &Expr<'_>) -> bool {
+/// `x.delegatecall(..)` or `selfdestruct(..)`.
+fn is_destructive_call(gcx: Gcx<'_>, expr: &Expr<'_>) -> bool {
     let ExprKind::Call(callee, ..) = &expr.kind else { return false };
-    match &callee.peel_parens().kind {
-        ExprKind::Member(_, member) => matches!(member.name, kw::Delegatecall | kw::Callcode),
-        _ => builtins(callee).any(|builtin| builtin == Builtin::Selfdestruct),
-    }
+    matches!(
+        gcx.resolved_builtin(callee),
+        Some(Builtin::AddressDelegatecall | Builtin::Selfdestruct)
+    )
 }
 
 /// An assignment, `delete`, `++`/`--` or `push`/`pop` whose target lives in contract storage.
@@ -191,8 +209,8 @@ fn writes_state(gcx: Gcx<'_>, expr: &Expr<'_>) -> bool {
 /// A state variable, or a member/index of an expression that denotes contract storage.
 fn lhs_writes_state(gcx: Gcx<'_>, lhs: &Expr<'_>) -> bool {
     match &lhs.peel_parens().kind {
-        ExprKind::Ident(reses) => {
-            reses.iter().filter_map(Res::as_variable).any(|v| gcx.hir.variable(v).kind.is_state())
+        ExprKind::Ident(_) => {
+            gcx.resolved_variable(lhs).is_some_and(|v| gcx.hir.variable(v).kind.is_state())
         }
         ExprKind::Index(base, _) | ExprKind::Slice(base, ..) | ExprKind::Member(base, _) => {
             references_storage(gcx, base)
@@ -204,7 +222,7 @@ fn lhs_writes_state(gcx: Gcx<'_>, lhs: &Expr<'_>) -> bool {
 
 fn references_storage(gcx: Gcx<'_>, expr: &Expr<'_>) -> bool {
     match &expr.peel_parens().kind {
-        ExprKind::Ident(reses) => reses.iter().filter_map(Res::as_variable).any(|v| {
+        ExprKind::Ident(_) => gcx.resolved_variable(expr).is_some_and(|v| {
             let var = gcx.hir.variable(v);
             var.kind.is_state() || var.data_location == Some(DataLocation::Storage)
         }),

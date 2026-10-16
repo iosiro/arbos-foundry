@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # master
         with:
-          toolchain: nightly-2025-12-19
+          toolchain: nightly
           components: rustfmt
       - run: cargo fmt --all --check
 

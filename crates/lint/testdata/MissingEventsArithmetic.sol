@@ -38,6 +38,19 @@ contract MissingEventsArithmetic {
         _;
     }
 
+    modifier onlyOwnerViaTupleAlias() {
+        (address caller, bool live) = (msg.sender, true);
+        require(live && caller == owner, "not owner");
+        _;
+    }
+
+    modifier onlyOwnerViaReassignedTupleAlias(address candidate) {
+        address caller = msg.sender;
+        (caller,) = (candidate, false);
+        require(caller == owner, "not owner");
+        _;
+    }
+
     modifier onlyPositive(uint256 value) {
         require(value > 0, "not positive");
         _;
@@ -67,6 +80,10 @@ contract MissingEventsArithmetic {
     }
 
     function setBuyPriceOZStyle(uint256 newBuyPrice) external onlyOwnerViaCheck {
+        buyPrice = newBuyPrice; //~WARN: `buyPrice` is changed without an event but is used in arithmetic
+    }
+
+    function setBuyPriceViaTupleAlias(uint256 newBuyPrice) external onlyOwnerViaTupleAlias {
         buyPrice = newBuyPrice; //~WARN: `buyPrice` is changed without an event but is used in arithmetic
     }
 
@@ -156,6 +173,13 @@ contract MissingEventsArithmetic {
     }
 
     function unprotectedSetBuyPrice(uint256 newBuyPrice) external {
+        buyPrice = newBuyPrice;
+    }
+
+    function setBuyPriceViaReassignedTupleAlias(address candidate, uint256 newBuyPrice)
+        external
+        onlyOwnerViaReassignedTupleAlias(candidate)
+    {
         buyPrice = newBuyPrice;
     }
 
@@ -660,6 +684,28 @@ contract EventsArithmeticConcreteBase {
 }
 
 contract EventsArithmeticConcreteDerived is EventsArithmeticConcreteBase {}
+
+contract NamedArgumentArithmetic {
+    address public owner = msg.sender;
+    uint256 public fee;
+
+    function setFee(uint256 next) external {
+        require(msg.sender == owner);
+        _setFee({next: next, ignored: 0});
+    }
+
+    function _setFee(uint256 ignored, uint256 next) internal {
+        fee = next; //~WARN: `fee` is changed without an event but is used in arithmetic
+    }
+
+    function quote() external view returns (uint256) {
+        return _scale({value: fee, ignored: 0});
+    }
+
+    function _scale(uint256 ignored, uint256 value) internal pure returns (uint256) {
+        return value * 2;
+    }
+}
 
 contract ReproAccessNameCalleeResultIgnored {
     address public owner = msg.sender;

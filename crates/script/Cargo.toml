@@ -43,7 +43,6 @@ tempfile.workspace = true
 itertools.workspace = true
 parking_lot.workspace = true
 yansi.workspace = true
-revm-inspectors.workspace = true
 alloy-rpc-types.workspace = true
 alloy-json-abi.workspace = true
 dialoguer.workspace = true
@@ -78,6 +77,17 @@ monad = [
     "foundry-cli/monad",
     "forge-script-sequence/monad",
     "forge-verify/monad",
+]
+base = [
+    "anvil/base",
+    "foundry-evm/base",
+    "foundry-evm-networks/base",
+    "foundry-common/base",
+    "foundry-cheatcodes/base",
+    "foundry-cli/base",
+    "foundry-debugger/base",
+    "forge-script-sequence/base",
+    "forge-verify/base",
 ]
 optimism = [
     "foundry-evm/optimism",

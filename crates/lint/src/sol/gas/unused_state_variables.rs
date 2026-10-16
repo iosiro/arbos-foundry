@@ -8,7 +8,7 @@ use solar::{
     interface::data_structures::Never,
     sema::{
         Gcx,
-        hir::{self, ExprKind, Res, Visit as _},
+        hir::{self, Visit as _},
     },
 };
 use std::{collections::HashSet, ops::ControlFlow};
@@ -20,13 +20,12 @@ declare_forge_lint!(
     "state variable is never used"
 );
 
-impl<'hir> LateLintPass<'hir> for UnusedStateVariables {
+impl<'gcx> LateLintPass<'gcx> for UnusedStateVariables {
     fn check_contract(
         &mut self,
         ctx: &LintContext,
-        _gcx: Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
-        contract: &'hir hir::Contract<'hir>,
+        gcx: Gcx<'gcx>,
+        contract: &'gcx hir::Contract<'gcx>,
     ) {
         if contract.kind == ContractKind::Interface {
             return;
@@ -34,7 +33,7 @@ impl<'hir> LateLintPass<'hir> for UnusedStateVariables {
 
         // Functions (including modifier call args) and state variable initializers cover every
         // variable reference in the contract.
-        let mut collector = UsedVarCollector { hir, used: HashSet::new() };
+        let mut collector = UsedVarCollector { gcx, used: HashSet::new() };
         for func_id in contract.all_functions() {
             let _ = collector.visit_nested_function(func_id);
         }
@@ -44,7 +43,7 @@ impl<'hir> LateLintPass<'hir> for UnusedStateVariables {
 
         // Constants and immutables do not occupy storage slots.
         for var_id in contract.variables() {
-            let var = hir.variable(var_id);
+            let var = gcx.hir.variable(var_id);
             if !var.is_constant() && !var.is_immutable() && !collector.used.contains(&var_id) {
                 ctx.emit(&UNUSED_STATE_VARIABLES, var.span);
             }
@@ -52,22 +51,20 @@ impl<'hir> LateLintPass<'hir> for UnusedStateVariables {
     }
 }
 
-struct UsedVarCollector<'hir> {
-    hir: &'hir hir::Hir<'hir>,
+struct UsedVarCollector<'gcx> {
+    gcx: Gcx<'gcx>,
     used: HashSet<hir::VariableId>,
 }
 
-impl<'hir> hir::Visit<'hir> for UsedVarCollector<'hir> {
+impl<'gcx> hir::Visit<'gcx> for UsedVarCollector<'gcx> {
     type BreakValue = Never;
 
-    fn hir(&self) -> &'hir hir::Hir<'hir> {
-        self.hir
+    fn hir(&self) -> &'gcx hir::Hir<'gcx> {
+        &self.gcx.hir
     }
 
-    fn visit_expr(&mut self, expr: &'hir hir::Expr<'hir>) -> ControlFlow<Self::BreakValue> {
-        if let ExprKind::Ident(reses) = &expr.kind {
-            self.used.extend(reses.iter().filter_map(Res::as_variable));
-        }
+    fn visit_expr(&mut self, expr: &'gcx hir::Expr<'gcx>) -> ControlFlow<Self::BreakValue> {
+        self.used.extend(self.gcx.resolved_variable(expr));
         self.walk_expr(expr)
     }
 }

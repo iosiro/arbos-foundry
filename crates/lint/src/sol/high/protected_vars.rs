@@ -10,13 +10,13 @@ use crate::{
     sol::{
         Severity, SolLint,
         analysis::{
-            branch_always_exits, builtins, function_ids, is_builtin, is_loop_termination_if,
-            lhs_local_var, runtime_entry_points, unique,
+            branch_always_exits, is_builtin, is_loop_termination_if, lhs_local_var, loop_update,
+            runtime_entry_points,
         },
     },
 };
 use solar::{
-    ast::{BinOpKind, ContractKind, DataLocation, ElementaryType, FunctionKind},
+    ast::{BinOpKind, ContractKind, DataLocation, FunctionKind},
     interface::sym,
     sema::{
         Gcx,
@@ -25,7 +25,7 @@ use solar::{
             self, CallArgs, ContractId, ExprId, ExprKind, FunctionId, ItemId, LoopSource,
             NatSpecKind, Res, StmtKind, VariableId,
         },
-        ty::{Ty, TyAbiPrinter, TyAbiPrinterMode, TyKind},
+        ty::{CallableParamSource, Ty, TyAbiPrinter, TyAbiPrinterMode, TyKind},
     },
 };
 use std::collections::{HashMap, HashSet};
@@ -40,47 +40,49 @@ declare_forge_lint!(
     "protected variable is written without its required protection"
 );
 
-impl<'hir> LateLintPass<'hir> for ProtectedVars {
+impl<'gcx> LateLintPass<'gcx> for ProtectedVars {
     fn check_nested_contract(
         &mut self,
         ctx: &LintContext,
-        gcx: Gcx<'hir>,
-        hir: &'hir hir::Hir<'hir>,
+        gcx: Gcx<'gcx>,
         contract_id: ContractId,
     ) {
-        let contract = hir.contract(contract_id);
+        let contract = gcx.hir.contract(contract_id);
         if !matches!(contract.kind, ContractKind::Contract | ContractKind::AbstractContract)
             || contract.linearization_failed()
-            || !is_most_derived_contract(hir, contract_id)
+            || !is_most_derived_contract(&gcx.hir, contract_id)
         {
             return;
         }
         let bases = contract.linearized_bases;
 
-        let protected = protected_variables(gcx, hir, bases);
+        let protected = protected_variables(gcx, bases);
         if protected.is_empty() {
             return;
         }
-        let targets = protection_targets(gcx, hir, bases);
+        let targets = protection_targets(gcx, bases);
 
         // The effective runtime dispatch surface: most-derived overrides plus the inherited
         // fallback/receive functions.
         let entries = runtime_entry_points(gcx, contract_id);
 
         for entry_id in entries {
-            let entry = hir.function(entry_id);
+            let entry = gcx.hir.function(entry_id);
             let span = entry.name.map_or(entry.keyword_span(), |name| name.span);
             let context = if entry.contract == Some(contract_id) {
                 String::new()
             } else {
                 format!(" in most-derived contract `{}`", contract.name)
             };
-            let mut writes: Vec<_> = analyze_entry(gcx, hir, bases, entry_id).into_iter().collect();
+            let mut writes: Vec<_> = analyze_entry(gcx, bases, entry_id).into_iter().collect();
             writes.sort_unstable_by_key(|(var_id, _)| *var_id);
             for (var_id, guards) in writes {
                 let Some(requirements) = protected.get(&var_id) else { continue };
-                let variable =
-                    hir.variable(var_id).name.map_or("<unnamed>".to_string(), |n| n.to_string());
+                let variable = gcx
+                    .hir
+                    .variable(var_id)
+                    .name
+                    .map_or("<unnamed>".to_string(), |n| n.to_string());
                 for requirement in requirements {
                     let msg = match requirement {
                         Some(signature) => {
@@ -116,12 +118,11 @@ fn is_most_derived_contract(hir: &hir::Hir<'_>, contract_id: ContractId) -> bool
 /// `None` marks a malformed annotation.
 fn protected_variables(
     gcx: Gcx<'_>,
-    hir: &hir::Hir<'_>,
     bases: &[ContractId],
 ) -> HashMap<VariableId, Vec<Option<String>>> {
     let mut protected = HashMap::new();
-    for var_id in bases.iter().flat_map(|&cid| hir.contract(cid).variables()) {
-        let var = hir.variable(var_id);
+    for var_id in bases.iter().flat_map(|&cid| gcx.hir.contract(cid).variables()) {
+        let var = gcx.hir.variable(var_id);
         if !var.kind.is_state() {
             continue;
         }
@@ -162,25 +163,21 @@ fn write_protection_token(content: &str) -> Option<usize> {
 
 /// Guard functions and modifiers by Slither signature. Functions take precedence over modifiers;
 /// within a kind, linearization order keeps the most-derived declaration and drops shadowed ones.
-fn protection_targets(
-    gcx: Gcx<'_>,
-    hir: &hir::Hir<'_>,
-    bases: &[ContractId],
-) -> HashMap<String, FunctionId> {
+fn protection_targets(gcx: Gcx<'_>, bases: &[ContractId]) -> HashMap<String, FunctionId> {
     let mut targets = HashMap::new();
     for kind in [FunctionKind::Function, FunctionKind::Modifier] {
-        for fid in bases.iter().flat_map(|&cid| hir.contract(cid).functions()) {
-            let function = hir.function(fid);
+        for fid in bases.iter().flat_map(|&cid| gcx.hir.contract(cid).functions()) {
+            let function = gcx.hir.function(fid);
             if function.kind == kind && function.name.is_some() {
-                targets.entry(callable_signature(gcx, hir, fid)).or_insert(fid);
+                targets.entry(callable_signature(gcx, fid)).or_insert(fid);
             }
         }
     }
     targets
 }
 
-fn callable_signature(gcx: Gcx<'_>, hir: &hir::Hir<'_>, function_id: FunctionId) -> String {
-    let function = hir.function(function_id);
+fn callable_signature(gcx: Gcx<'_>, function_id: FunctionId) -> String {
+    let function = gcx.hir.function(function_id);
     let params = function.parameters.iter().map(|&parameter| {
         let ty = gcx.type_of_item(parameter.into());
         if function.kind == FunctionKind::Modifier {
@@ -336,18 +333,17 @@ struct LoopFlow {
 
 /// What `_` resumes: the rest of the modifier chain and the function body.
 #[derive(Clone, Copy)]
-struct ModifierContinuation<'hir> {
-    modifiers: &'hir [hir::Modifier<'hir>],
+struct ModifierContinuation<'gcx> {
+    modifiers: &'gcx [hir::Modifier<'gcx>],
     next: usize,
-    body: hir::Block<'hir>,
+    body: hir::Block<'gcx>,
 }
 
 /// Runs the entry to a fixpoint over the memoized call summaries and returns, per written state
 /// variable, the guards that held on every path to some write.
-fn analyze_entry<'hir>(
-    gcx: Gcx<'hir>,
-    hir: &'hir hir::Hir<'hir>,
-    bases: &'hir [ContractId],
+fn analyze_entry<'gcx>(
+    gcx: Gcx<'gcx>,
+    bases: &'gcx [ContractId],
     entry_id: FunctionId,
 ) -> HashMap<VariableId, HashSet<FunctionId>> {
     let mut call_summaries = HashMap::new();
@@ -355,7 +351,6 @@ fn analyze_entry<'hir>(
     loop {
         let mut analyzer = EntryAnalyzer {
             gcx,
-            hir,
             bases,
             writes: HashMap::new(),
             aliases: AliasState::default(),
@@ -380,10 +375,9 @@ fn analyze_entry<'hir>(
     }
 }
 
-struct EntryAnalyzer<'hir> {
-    gcx: Gcx<'hir>,
-    hir: &'hir hir::Hir<'hir>,
-    bases: &'hir [ContractId],
+struct EntryAnalyzer<'gcx> {
+    gcx: Gcx<'gcx>,
+    bases: &'gcx [ContractId],
     /// Written state variables to the guards that held at every write.
     writes: HashMap<VariableId, HashSet<FunctionId>>,
     aliases: AliasState,
@@ -401,13 +395,13 @@ struct EntryAnalyzer<'hir> {
     /// Per active function, the joined state at its `return` statements.
     return_flow: Vec<Option<FlowState>>,
     loop_flow: Vec<LoopFlow>,
-    modifier_continuations: Vec<ModifierContinuation<'hir>>,
+    modifier_continuations: Vec<ModifierContinuation<'gcx>>,
     assembly_depth: usize,
 }
 
-impl<'hir> EntryAnalyzer<'hir> {
+impl<'gcx> EntryAnalyzer<'gcx> {
     fn analyze_function(&mut self, function_id: FunctionId) -> CallSummary {
-        let function = self.hir.function(function_id);
+        let function = self.gcx.hir.function(function_id);
         let empty_returns = || function.returns.iter().map(|_| StorageRoots::new()).collect();
         let Some(body) = function.body else {
             return CallSummary {
@@ -420,7 +414,7 @@ impl<'hir> EntryAnalyzer<'hir> {
         self.return_stack.push(empty_returns());
         self.return_flow.push(None);
         let completes = self.analyze_modifier_chain(function.modifiers, 0, body);
-        if completes && !body.stmts.iter().any(branch_always_exits) {
+        if completes && !body.stmts.iter().any(|expr| branch_always_exits(self.gcx, expr)) {
             self.capture_named_returns();
         }
         let returned = self.return_flow.pop().expect("return flow frame").is_some();
@@ -433,9 +427,9 @@ impl<'hir> EntryAnalyzer<'hir> {
     /// control can complete normally.
     fn analyze_modifier_chain(
         &mut self,
-        modifiers: &'hir [hir::Modifier<'hir>],
+        modifiers: &'gcx [hir::Modifier<'gcx>],
         index: usize,
-        body: hir::Block<'hir>,
+        body: hir::Block<'gcx>,
     ) -> bool {
         let Some(modifier) = modifiers.get(index) else {
             let previous_returns = self.return_flow.last_mut().and_then(Option::take);
@@ -461,16 +455,18 @@ impl<'hir> EntryAnalyzer<'hir> {
         }
 
         let Some(declared_id) = modifier.id.as_function() else { return false };
-        let modifier_id = self.dispatch_function(declared_id);
+        let Some(modifier_id) = self.gcx.resolve_modifier_target(self.bases[0], modifier) else {
+            return false;
+        };
         self.guards.insert(modifier_id);
         let arguments = self.ordered_call_arguments(declared_id, modifier.args, None);
         let bound = self.argument_aliases(modifier_id, &arguments);
-        for parameter in self.hir.function(modifier_id).parameters {
+        for parameter in self.gcx.hir.function(modifier_id).parameters {
             self.aliases.storage.remove(parameter);
         }
         self.aliases.storage.extend(bound.storage);
 
-        let Some(modifier_body) = self.hir.function(modifier_id).body else { return false };
+        let Some(modifier_body) = self.gcx.hir.function(modifier_id).body else { return false };
         self.modifier_continuations.push(ModifierContinuation { modifiers, next: index + 1, body });
         let completes = self.analyze_block(modifier_body);
         self.modifier_continuations.pop();
@@ -480,12 +476,12 @@ impl<'hir> EntryAnalyzer<'hir> {
     fn analyze_call(
         &mut self,
         function_id: FunctionId,
-        arguments: &[&'hir hir::Expr<'hir>],
+        arguments: &[&'gcx hir::Expr<'gcx>],
     ) -> CallSummary {
         let bound = self.argument_aliases(function_id, arguments);
         let saved_aliases = std::mem::replace(&mut self.aliases, bound);
 
-        let function = self.hir.function(function_id);
+        let function = self.gcx.hir.function(function_id);
         let context = CallContext::new(function_id, function, &self.aliases, &self.guards);
         let cached = if self.seen_calls.contains(&context) {
             // Recursive call: assume the summary so far, or a non-completing call.
@@ -521,12 +517,12 @@ impl<'hir> EntryAnalyzer<'hir> {
     fn argument_aliases(
         &self,
         function_id: FunctionId,
-        arguments: &[&'hir hir::Expr<'hir>],
+        arguments: &[&'gcx hir::Expr<'gcx>],
     ) -> AliasState {
-        let function = self.hir.function(function_id);
+        let function = self.gcx.hir.function(function_id);
         let mut bound = AliasState::default();
         for (&parameter, &argument) in function.parameters.iter().zip(arguments) {
-            if self.hir.variable(parameter).data_location == Some(DataLocation::Storage) {
+            if self.gcx.hir.variable(parameter).data_location == Some(DataLocation::Storage) {
                 let roots = self.storage_roots(argument);
                 if !roots.is_empty() {
                     bound.storage.insert(parameter, roots);
@@ -542,7 +538,7 @@ impl<'hir> EntryAnalyzer<'hir> {
         bound
     }
 
-    fn analyze_block(&mut self, block: hir::Block<'hir>) -> bool {
+    fn analyze_block(&mut self, block: hir::Block<'gcx>) -> bool {
         block.stmts.iter().all(|statement| self.analyze_stmt(statement))
     }
 
@@ -568,10 +564,10 @@ impl<'hir> EntryAnalyzer<'hir> {
     }
 
     /// Analyzes a statement, returning whether control can continue past it.
-    fn analyze_stmt(&mut self, statement: &'hir hir::Stmt<'hir>) -> bool {
+    fn analyze_stmt(&mut self, statement: &'gcx hir::Stmt<'gcx>) -> bool {
         match statement.kind {
             StmtKind::DeclSingle(variable_id) => {
-                let Some(initializer) = self.hir.variable(variable_id).initializer else {
+                let Some(initializer) = self.gcx.hir.variable(variable_id).initializer else {
                     return true;
                 };
                 if !self.analyze_expr(initializer) {
@@ -594,7 +590,7 @@ impl<'hir> EntryAnalyzer<'hir> {
                 true
             }
             StmtKind::Emit(expression) | StmtKind::Expr(expression) => {
-                self.analyze_expr(expression) && !branch_always_exits(statement)
+                self.analyze_expr(expression) && !branch_always_exits(self.gcx, statement)
             }
             StmtKind::Revert(expression) => {
                 self.analyze_expr(expression);
@@ -668,16 +664,18 @@ impl<'hir> EntryAnalyzer<'hir> {
 
     /// Iterates the loop body from the joined loop-head state until the alias/guard state stops
     /// changing. Returns whether the loop can be left normally.
-    fn analyze_loop(&mut self, block: hir::Block<'hir>, source: LoopSource) -> bool {
+    fn analyze_loop(&mut self, block: hir::Block<'gcx>, source: LoopSource<'gcx>) -> bool {
         let mut head = self.flow_state();
         let mut exits = None;
         loop {
             self.set_flow_state(head.clone());
-            let (mut breaks, continues, completes) =
-                self.analyze_loop_stmts(|this| this.analyze_block(block));
+            let (mut breaks, continues, completes) = self.analyze_loop_stmts(|this| {
+                this.analyze_block(block)
+                    && loop_update(source).is_none_or(|update| this.analyze_stmt(update))
+            });
             let mut backedges = completes.then(|| self.flow_state());
             // `continue` in a do-while still evaluates the lowered `if (!cond) break;`.
-            let epilogue = (source == LoopSource::DoWhile)
+            let epilogue = matches!(source, LoopSource::DoWhile)
                 .then(|| block.stmts.last())
                 .flatten()
                 .filter(|epilogue| is_loop_termination_if(epilogue));
@@ -740,7 +738,7 @@ impl<'hir> EntryAnalyzer<'hir> {
     }
 
     /// Analyzes an expression, returning whether its evaluation can complete.
-    fn analyze_expr(&mut self, expression: &'hir hir::Expr<'hir>) -> bool {
+    fn analyze_expr(&mut self, expression: &'gcx hir::Expr<'gcx>) -> bool {
         match &expression.peel_parens().kind {
             ExprKind::Assign(lhs, operator, rhs) => {
                 if !(self.analyze_expr(rhs) && self.analyze_expr(lhs)) {
@@ -765,7 +763,8 @@ impl<'hir> EntryAnalyzer<'hir> {
                 }
                 true
             }
-            ExprKind::Call(callee, args, options) => {
+            ExprKind::Call(callee, args) => {
+                let (callee, options) = callee.split_call_options();
                 if !(self.analyze_expr(callee)
                     && options
                         .iter()
@@ -776,34 +775,43 @@ impl<'hir> EntryAnalyzer<'hir> {
                     return false;
                 }
 
-                if let ExprKind::Member(base, member) = &callee.peel_parens().kind
-                    && matches!(member.as_str(), "push" | "pop")
-                    && is_dynamic_array_or_bytes(self.gcx, base)
+                if let ExprKind::Member(base, _) = &callee.peel_parens().kind
+                    && let Some(
+                        builtin @ (Builtin::ArrayPush0 | Builtin::ArrayPush | Builtin::ArrayPop),
+                    ) = self.gcx.resolved_builtin(callee)
                 {
                     self.record_write(base);
-                    if member.as_str() == "push" && args.is_empty() {
+                    if builtin == Builtin::ArrayPush0 {
                         let roots = self.storage_roots(base);
                         self.store_call_returns(expression.id, vec![roots]);
                     }
                 }
 
-                if builtins(callee).any(|builtin| builtin == Builtin::YulSstore)
+                if self.gcx.resolved_builtin(callee) == Some(Builtin::YulSstore)
                     && let Some(slot) = args.exprs().next()
                 {
                     let roots = self.slot_roots(slot);
                     self.record_roots(roots);
                 }
 
-                if let Some((declared_id, function_id, receiver)) =
-                    self.resolved_internal_call(callee)
-                {
+                if let Some((_, function_id, receiver)) = self.resolved_internal_call(callee) {
                     self.guards.insert(function_id);
-                    let arguments = self.ordered_call_arguments(declared_id, *args, receiver);
+                    let arguments = receiver
+                        .into_iter()
+                        .chain(
+                            (0..args.len())
+                                .filter_map(|index| self.gcx.call_arg(expression, index)),
+                        )
+                        .collect::<Vec<_>>();
                     let summary = self.analyze_call(function_id, &arguments);
                     self.store_call_returns(expression.id, summary.returns);
                     return summary.completes;
                 }
                 true
+            }
+            ExprKind::CallOptions(callee, options) => {
+                self.analyze_expr(callee)
+                    && options.args.iter().all(|option| self.analyze_expr(&option.value))
             }
             ExprKind::Binary(lhs, operator, rhs) => {
                 self.analyze_expr(lhs)
@@ -862,7 +870,7 @@ impl<'hir> EntryAnalyzer<'hir> {
     }
 
     fn set_storage_alias(&mut self, variable_id: VariableId, roots: StorageRoots) {
-        let variable = self.hir.variable(variable_id);
+        let variable = self.gcx.hir.variable(variable_id);
         if !variable.kind.is_state()
             && variable.data_location == Some(DataLocation::Storage)
             && !roots.is_empty()
@@ -901,8 +909,8 @@ impl<'hir> EntryAnalyzer<'hir> {
 
     fn apply_assignment(
         &mut self,
-        lhs: &'hir hir::Expr<'hir>,
-        rhs: &'hir hir::Expr<'hir>,
+        lhs: &'gcx hir::Expr<'gcx>,
+        rhs: &'gcx hir::Expr<'gcx>,
         compound: bool,
     ) {
         let lhs = lhs.peel_parens();
@@ -913,7 +921,7 @@ impl<'hir> EntryAnalyzer<'hir> {
             // `pointer.slot := x` retargets a storage pointer.
             ExprKind::YulMember(base, member)
                 if member.as_str() == "slot"
-                    && let Some(local) = lhs_local_var(self.hir, base) =>
+                    && let Some(local) = lhs_local_var(self.gcx, base) =>
             {
                 let roots = self.slot_roots(rhs);
                 self.set_storage_alias(local, roots);
@@ -921,7 +929,7 @@ impl<'hir> EntryAnalyzer<'hir> {
             ExprKind::Tuple(expressions) => {
                 for (index, expression) in expressions.iter().enumerate() {
                     let Some(expression) = expression else { continue };
-                    if let Some(local) = lhs_local_var(self.hir, expression) {
+                    if let Some(local) = lhs_local_var(self.gcx, expression) {
                         let roots = self.storage_roots_for_output(rhs, index, expressions.len());
                         self.alias_local(local, roots);
                     } else {
@@ -929,16 +937,16 @@ impl<'hir> EntryAnalyzer<'hir> {
                     }
                 }
             }
-            _ => match lhs_local_var(self.hir, lhs) {
+            _ => match lhs_local_var(self.gcx, lhs) {
                 Some(local) => self.alias_local_from_expr(local, rhs),
                 None => self.record_write(lhs),
             },
         }
     }
 
-    fn set_return_aliases(&mut self, expression: &'hir hir::Expr<'hir>) {
+    fn set_return_aliases(&mut self, expression: &'gcx hir::Expr<'gcx>) {
         let Some(&function_id) = self.stack.last() else { return };
-        let outputs = self.hir.function(function_id).returns.len();
+        let outputs = self.gcx.hir.function(function_id).returns.len();
         let roots: Vec<_> = (0..outputs)
             .map(|index| self.storage_roots_for_output(expression, index, outputs))
             .collect();
@@ -947,7 +955,7 @@ impl<'hir> EntryAnalyzer<'hir> {
 
     fn capture_named_returns(&mut self) {
         let Some(&function_id) = self.stack.last() else { return };
-        let function = self.hir.function(function_id);
+        let function = self.gcx.hir.function(function_id);
         let aliases = if function.is_yul { &self.aliases.slots } else { &self.aliases.storage };
         let roots: Vec<_> = function
             .returns
@@ -1007,16 +1015,14 @@ impl<'hir> EntryAnalyzer<'hir> {
     fn ordered_call_arguments(
         &self,
         declared_id: FunctionId,
-        arguments: CallArgs<'hir>,
-        receiver: Option<&'hir hir::Expr<'hir>>,
-    ) -> Vec<&'hir hir::Expr<'hir>> {
-        let parameters = self.hir.function(declared_id).parameters;
-        let parameters = &parameters[usize::from(receiver.is_some())..];
-        let names: Vec<_> = parameters
-            .iter()
-            .map(|&parameter| self.hir.variable(parameter).name.map(|name| name.name))
-            .collect();
-        let arguments = (0..parameters.len())
+        arguments: CallArgs<'gcx>,
+        receiver: Option<&'gcx hir::Expr<'gcx>>,
+    ) -> Vec<&'gcx hir::Expr<'gcx>> {
+        let names = self.gcx.callable_param_names(CallableParamSource::Function {
+            id: declared_id,
+            skips_receiver: receiver.is_some(),
+        });
+        let arguments = (0..names.len())
             .filter_map(|index| arguments.argument_for_parameter(index, Some(&names)));
         receiver.into_iter().chain(arguments).collect()
     }
@@ -1026,17 +1032,17 @@ impl<'hir> EntryAnalyzer<'hir> {
     /// `super.`/`Base.`/`Lib.` qualified calls.
     fn resolved_internal_call(
         &self,
-        callee: &'hir hir::Expr<'hir>,
-    ) -> Option<(FunctionId, FunctionId, Option<&'hir hir::Expr<'hir>>)> {
-        let (function_id, attached) = match self.gcx.resolved_callee(callee.id) {
-            Some(resolved) => (resolved.res.as_function()?, resolved.attached),
-            None => (unique(function_ids(callee))?, false),
-        };
+        callee: &'gcx hir::Expr<'gcx>,
+    ) -> Option<(FunctionId, FunctionId, Option<&'gcx hir::Expr<'gcx>>)> {
+        let resolved = self.gcx.resolved_callee(callee.peel_parens().id)?;
+        let function_id = resolved.res.as_function()?;
+        let attached = resolved.attached;
         match &callee.peel_parens().kind {
             ExprKind::Ident(_) => Some((function_id, self.dispatch_function(function_id), None)),
             ExprKind::Member(base, _) if attached => Some((function_id, function_id, Some(base))),
             ExprKind::Member(base, _)
-                if self.is_library_function(function_id) || is_static_internal_base(base) =>
+                if self.is_library_function(function_id)
+                    || is_static_internal_base(self.gcx, base) =>
             {
                 Some((function_id, function_id, None))
             }
@@ -1045,27 +1051,16 @@ impl<'hir> EntryAnalyzer<'hir> {
     }
 
     fn is_library_function(&self, function_id: FunctionId) -> bool {
-        self.hir
+        self.gcx
+            .hir
             .function(function_id)
             .contract
-            .is_some_and(|contract_id| self.hir.contract(contract_id).kind.is_library())
+            .is_some_and(|contract_id| self.gcx.hir.contract(contract_id).kind.is_library())
     }
 
     /// The most-derived override of a virtual function or modifier in the analyzed hierarchy.
     fn dispatch_function(&self, function_id: FunctionId) -> FunctionId {
-        let function = self.hir.function(function_id);
-        if !function.virtual_ {
-            return function_id;
-        }
-        let signature = callable_signature(self.gcx, self.hir, function_id);
-        self.bases
-            .iter()
-            .flat_map(|&contract_id| self.hir.contract(contract_id).functions())
-            .find(|&candidate_id| {
-                self.hir.function(candidate_id).kind == function.kind
-                    && callable_signature(self.gcx, self.hir, candidate_id) == signature
-            })
-            .unwrap_or(function_id)
+        self.gcx.resolve_virtual_function(self.bases[0], function_id)
     }
 
     /// State variables an lvalue may write: state roots, aliased storage pointers and
@@ -1079,9 +1074,9 @@ impl<'hir> EntryAnalyzer<'hir> {
     fn collect_storage_roots(&self, expression: &hir::Expr<'_>, roots: &mut StorageRoots) {
         let expression = expression.peel_parens();
         match &expression.kind {
-            ExprKind::Ident(resolutions) => {
-                for variable_id in resolutions.iter().filter_map(Res::as_variable) {
-                    if self.hir.variable(variable_id).kind.is_state() {
+            ExprKind::Ident(_) => {
+                if let Some(variable_id) = self.gcx.resolved_variable(expression) {
+                    if self.gcx.hir.variable(variable_id).kind.is_state() {
                         roots.insert(variable_id);
                     } else if let Some(aliases) = self.aliases.storage.get(&variable_id) {
                         roots.extend(aliases);
@@ -1121,11 +1116,11 @@ impl<'hir> EntryAnalyzer<'hir> {
     fn collect_slot_roots(&self, expression: &hir::Expr<'_>, roots: &mut StorageRoots) {
         let expression = expression.peel_parens();
         match &expression.kind {
-            ExprKind::Ident(resolutions) => {
-                for variable_id in resolutions.iter().filter_map(Res::as_variable) {
-                    if let Some(aliases) = self.aliases.slots.get(&variable_id) {
-                        roots.extend(aliases);
-                    }
+            ExprKind::Ident(_) => {
+                if let Some(variable_id) = self.gcx.resolved_variable(expression)
+                    && let Some(aliases) = self.aliases.slots.get(&variable_id)
+                {
+                    roots.extend(aliases);
                 }
             }
             ExprKind::YulMember(base, member) if member.as_str() == "slot" => {
@@ -1135,7 +1130,8 @@ impl<'hir> EntryAnalyzer<'hir> {
                 roots.extend(self.call_returns[&expression.id].iter().flatten());
             }
             // Any other expression may propagate a slot computed from its operands.
-            ExprKind::Call(callee, args, options) => {
+            ExprKind::Call(callee, args) => {
+                let (callee, options) = callee.split_call_options();
                 self.collect_slot_roots(callee, roots);
                 for option in options.iter().flat_map(|options| options.args) {
                     self.collect_slot_roots(&option.value, roots);
@@ -1184,19 +1180,10 @@ impl<'hir> EntryAnalyzer<'hir> {
 }
 
 /// `super.f`, `Base.f` or `Lib.f`: a statically dispatched internal call.
-fn is_static_internal_base(base: &hir::Expr<'_>) -> bool {
-    is_builtin(base, sym::super_)
-        || matches!(&base.peel_parens().kind, ExprKind::Ident(resolutions)
-        if resolutions.iter().any(|resolution| {
-            matches!(resolution, Res::Item(ItemId::Contract(_)) | Res::Namespace(_))
-        }))
-}
-
-fn is_dynamic_array_or_bytes(gcx: Gcx<'_>, expression: &hir::Expr<'_>) -> bool {
-    gcx.type_of_expr(expression.peel_parens().id).is_some_and(|ty| {
-        matches!(
-            ty.peel_refs().kind,
-            TyKind::DynArray(_) | TyKind::Elementary(ElementaryType::Bytes)
+fn is_static_internal_base(gcx: Gcx<'_>, base: &hir::Expr<'_>) -> bool {
+    is_builtin(gcx, base, sym::super_)
+        || matches!(
+            gcx.resolved_expr(base),
+            Some(Res::Item(ItemId::Contract(_)) | Res::Namespace(_))
         )
-    })
 }

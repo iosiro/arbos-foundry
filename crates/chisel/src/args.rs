@@ -1,4 +1,5 @@
 use crate::{
+    dispatcher::view_session,
     evm::ChiselEvmNetwork,
     opts::{Chisel, ChiselSubcommand},
     prelude::{ChiselCommand, ChiselDispatcher, SolidityHelper},
@@ -8,36 +9,44 @@ use eyre::{Context, Result};
 use foundry_cli::utils::{self, LoadConfig};
 use foundry_common::fs;
 use foundry_config::Config;
-#[cfg(feature = "monad")]
-use foundry_evm::core::evm::MonadEvmNetwork;
-#[cfg(feature = "optimism")]
-use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
     core::evm::{ArbitrumEvmNetwork, EthEvmNetwork, TempoEvmNetwork},
     opts::EvmOpts,
 };
-use foundry_evm_networks::NetworkConfigs;
+use foundry_evm_networks::{NetworkConfigs, NetworkVariant};
 use rustyline::{Editor, config::Configurer, error::ReadlineError};
 use std::{ops::ControlFlow, path::PathBuf};
 use yansi::Paint;
+
+#[cfg(feature = "base")]
+use foundry_evm::core::evm::BaseEvmNetwork;
+
+#[cfg(feature = "monad")]
+use foundry_evm::core::evm::MonadEvmNetwork;
+
+#[cfg(feature = "optimism")]
+use foundry_evm::core::evm::OpEvmNetwork;
 
 /// Run the `chisel` command line interface.
 pub fn run() -> Result<()> {
     foundry_cli::opts::GlobalArgs::check_markdown_help::<Chisel>();
 
-    setup()?;
+    let warnings = setup()?;
 
     let args = Chisel::parse();
     args.global.init()?;
+    for warning in warnings {
+        let _ = foundry_common::sh_warn!("{warning}");
+    }
     args.global.tokio_runtime().block_on(run_command(args))
 }
 
 /// Setup the global logger and other utilities.
-pub fn setup() -> Result<()> {
-    utils::common_setup();
+pub fn setup() -> Result<Vec<String>> {
+    let warnings = utils::common_setup();
     utils::subscriber();
 
-    Ok(())
+    Ok(warnings)
 }
 
 macro_rules! try_cf {
@@ -51,6 +60,10 @@ macro_rules! try_cf {
 
 /// Run the subcommand.
 pub async fn run_command(args: Chisel) -> Result<()> {
+    if let Some(ChiselSubcommand::View { id }) = &args.cmd {
+        return view_session(id);
+    }
+
     // Load configuration
     let (mut config, mut evm_opts) = args.load_config_and_evm_opts()?;
 
@@ -62,60 +75,71 @@ pub async fn run_command(args: Chisel) -> Result<()> {
     let local_networks = evm_opts.networks;
     let local_chain_id = evm_opts.env.chain_id.or(config.chain.map(|chain| chain.id()));
 
-    if evm_opts.networks.is_arbitrum() {
-        return Box::pin(run_command_with_network::<ArbitrumEvmNetwork>(
-            args,
-            config,
-            evm_opts,
-            local_networks,
-            local_chain_id,
-        ))
-        .await;
+    match evm_opts.networks.execution_network() {
+        NetworkVariant::Arbitrum => {
+            Box::pin(run_command_with_network::<ArbitrumEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
+        NetworkVariant::Tempo => {
+            Box::pin(run_command_with_network::<TempoEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
+        #[cfg(feature = "base")]
+        NetworkVariant::Base => {
+            Box::pin(run_command_with_network::<BaseEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
+        #[cfg(feature = "monad")]
+        NetworkVariant::Monad => {
+            Box::pin(run_command_with_network::<MonadEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
+        #[cfg(feature = "optimism")]
+        NetworkVariant::Optimism => {
+            Box::pin(run_command_with_network::<OpEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
+        NetworkVariant::Ethereum => {
+            Box::pin(run_command_with_network::<EthEvmNetwork>(
+                args,
+                config,
+                evm_opts,
+                local_networks,
+                local_chain_id,
+            ))
+            .await
+        }
     }
-
-    if evm_opts.networks.is_tempo() {
-        return Box::pin(run_command_with_network::<TempoEvmNetwork>(
-            args,
-            config,
-            evm_opts,
-            local_networks,
-            local_chain_id,
-        ))
-        .await;
-    }
-
-    #[cfg(feature = "monad")]
-    if evm_opts.networks.is_monad() {
-        return Box::pin(run_command_with_network::<MonadEvmNetwork>(
-            args,
-            config,
-            evm_opts,
-            local_networks,
-            local_chain_id,
-        ))
-        .await;
-    }
-
-    #[cfg(feature = "optimism")]
-    if evm_opts.networks.is_optimism() {
-        return Box::pin(run_command_with_network::<OpEvmNetwork>(
-            args,
-            config,
-            evm_opts,
-            local_networks,
-            local_chain_id,
-        ))
-        .await;
-    }
-
-    Box::pin(run_command_with_network::<EthEvmNetwork>(
-        args,
-        config,
-        evm_opts,
-        local_networks,
-        local_chain_id,
-    ))
-    .await
 }
 
 fn infer_network_from_chain_id(
@@ -156,6 +180,7 @@ async fn run_command_with_network<FEN: ChiselEvmNetwork>(
         cached_backend: None,
         calldata: None,
         ir_minimum: args.ir_minimum,
+        fork_url_required: false,
     })?;
 
     // Execute prelude Solidity source files
@@ -263,11 +288,8 @@ async fn handle_cli_command<FEN: ChiselEvmNetwork>(
         ChiselSubcommand::List => d.dispatch_command(ChiselCommand::ListSessions).await,
         ChiselSubcommand::Load { id } => d.dispatch_command(ChiselCommand::Load { id }).await,
         ChiselSubcommand::View { id } => {
-            let ControlFlow::Continue(()) = d.dispatch_command(ChiselCommand::Load { id }).await?
-            else {
-                return Ok(ControlFlow::Break(()));
-            };
-            d.dispatch_command(ChiselCommand::Source).await
+            view_session(&id)?;
+            Ok(ControlFlow::Continue(()))
         }
         ChiselSubcommand::ClearCache => d.dispatch_command(ChiselCommand::ClearCache).await,
         ChiselSubcommand::Eval { command } => d.dispatch(&command).await,
@@ -288,6 +310,18 @@ mod tests {
         Chisel::command().debug_assert();
     }
 
+    /// Base chain IDs resolved to Optimism before Base support existed, so a build without the
+    /// `base` feature — which is what release binaries ship — must keep resolving them that way.
+    #[test]
+    #[cfg(all(not(feature = "base"), feature = "optimism"))]
+    fn chain_id_without_base_still_resolves_to_optimism() {
+        for chain_id in [8453, 84532] {
+            let networks = infer_network_from_chain_id(NetworkConfigs::default(), Some(chain_id))
+                .unwrap_or_else(|error| panic!("chain ID {chain_id} must still resolve: {error}"));
+            assert!(networks.is_optimism(), "chain ID {chain_id} must resolve to Optimism");
+        }
+    }
+
     #[test]
     #[cfg(not(feature = "monad"))]
     fn chain_id_rejects_disabled_monad_network() {
@@ -303,9 +337,9 @@ mod tests {
     #[test]
     fn explicit_ethereum_overrides_chain_id_inference() {
         let ethereum = NetworkConfigs::with_ethereum();
-        let inferred = infer_network_from_chain_id(ethereum, Some(143)).unwrap();
-
-        assert_eq!(inferred, ethereum);
+        for chain_id in [8453, 143] {
+            assert_eq!(infer_network_from_chain_id(ethereum, Some(chain_id)).unwrap(), ethereum);
+        }
     }
 
     #[tokio::test]

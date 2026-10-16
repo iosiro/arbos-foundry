@@ -30,6 +30,7 @@ mod json;
 mod lint;
 mod multi_script;
 mod script;
+mod selectors;
 mod soldeer;
 mod svm;
 mod test_cmd;

@@ -2,7 +2,8 @@ use alloy_primitives::{U256, address, hex};
 use foundry_config::fs_permissions::PathPermission;
 use foundry_test_utils::util::OTHER_SOLC_VERSION;
 
-forgetest_init!(stylus_codehash_matches_account_existence, |prj, cmd| {
+#[forgetest_init]
+fn stylus_codehash_matches_account_existence(prj: _, cmd: _) {
     prj.update_config(|config| {
         config.solc = Some(OTHER_SOLC_VERSION.into());
         config.fs_permissions.add(PathPermission::read("."));
@@ -26,9 +27,10 @@ forgetest_init!(stylus_codehash_matches_account_existence, |prj, cmd| {
             ])
             .assert_success();
     }
-});
+}
 
-forgetest_async!(stylus_codehash_fork_matches_account_existence, |prj, cmd| {
+#[forgetest]
+async fn stylus_codehash_fork_matches_account_existence(prj: _, cmd: _) {
     foundry_test_utils::util::initialize(prj.root());
     let mut node = anvil::NodeConfig::test().with_chain_id(Some(421_614_u64));
     node.networks = foundry_evm_networks::NetworkConfigs::with_arbitrum();
@@ -71,4 +73,4 @@ forgetest_async!(stylus_codehash_fork_matches_account_existence, |prj, cmd| {
             .args(["--fork-url", &handle.http_endpoint()])
             .assert_success();
     }
-});
+}

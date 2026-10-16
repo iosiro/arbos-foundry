@@ -12,11 +12,11 @@ extern crate foundry_common;
 #[macro_use]
 extern crate tracing;
 
-use crate::{broadcast::BundledState, runner::ScriptRunner};
+use crate::{broadcast::BundledState, runner::ScriptRunner, simulate::PreSimulationState};
 use alloy_json_abi::{Function, JsonAbi};
 use alloy_network::Network;
 use alloy_primitives::{
-    Address, Bytes, Log, U256, hex,
+    Address, B256, Bytes, Log, U256, hex,
     map::{AddressHashMap, HashMap},
 };
 use alloy_signer::Signer;
@@ -46,10 +46,6 @@ use foundry_config::{
     },
 };
 use foundry_debugger::DebuggerLayout;
-#[cfg(feature = "monad")]
-use foundry_evm::core::evm::MonadEvmNetwork;
-#[cfg(feature = "optimism")]
-use foundry_evm::core::evm::OpEvmNetwork;
 use foundry_evm::{
     backend::Backend,
     core::{
@@ -69,10 +65,19 @@ use foundry_evm::{
     revm::interpreter::InstructionResult,
     traces::{InternalTraceMode, TraceRequirements, Traces},
 };
-use foundry_evm_networks::NetworkConfigs;
-use foundry_wallets::MultiWalletOpts;
+use foundry_evm_networks::{NetworkConfigs, NetworkVariant};
+use foundry_wallets::{MultiWalletOpts, wallet_multi::MultiWallet};
 use serde::Serialize;
 use std::path::PathBuf;
+
+#[cfg(feature = "base")]
+use foundry_evm::core::evm::BaseEvmNetwork;
+
+#[cfg(feature = "monad")]
+use foundry_evm::core::evm::MonadEvmNetwork;
+
+#[cfg(feature = "optimism")]
+use foundry_evm::core::evm::OpEvmNetwork;
 
 mod broadcast;
 mod build;
@@ -82,6 +87,7 @@ mod multi_sequence;
 mod progress;
 mod providers;
 mod receipts;
+mod recovery;
 mod runner;
 mod sequence;
 mod session;
@@ -96,6 +102,12 @@ pub use wallet_session::ScriptWalletSessionArgs;
 foundry_config::merge_impl_figment_convert!(ScriptArgs, build, evm);
 
 const DEFAULT_CONFIRMATIONS: u64 = 1;
+
+/// Shared preparation stops before execution-family-specific on-chain simulation.
+enum PreparedScript<FEN: FoundryEvmNetwork> {
+    Resume(Box<BundledState<FEN>>),
+    Simulate(Box<PreSimulationState<FEN>>),
+}
 
 /// CLI arguments for `forge script`.
 #[derive(Clone, Debug, Default, Parser)]
@@ -186,7 +198,7 @@ pub struct ScriptArgs {
     /// Send via `eth_sendTransaction` using the `--sender` argument as sender.
     #[arg(
         long,
-        conflicts_with_all = &["private_key", "private_keys", "ledger", "trezor", "aws", "browser"],
+        conflicts_with_all = &["private_key", "private_keys", "ledger", "trezor", "aws", "gcp", "turnkey", "browser"],
     )]
     pub unlocked: bool,
 
@@ -198,6 +210,26 @@ pub struct ScriptArgs {
     /// otherwise it fails.
     #[arg(long)]
     pub resume: bool,
+
+    /// Selects the interrupted delegated submission attempt to resolve.
+    #[arg(long, requires = "resume")]
+    pub resume_attempt: Option<B256>,
+
+    /// Records a transaction hash discovered for an interrupted delegated submission.
+    #[arg(
+        long,
+        requires_all = ["resume", "resume_attempt"],
+        conflicts_with = "resume_retry"
+    )]
+    pub resume_tx_hash: Option<B256>,
+
+    /// Retries an interrupted delegated submission proven not to have been submitted.
+    #[arg(
+        long,
+        requires_all = ["resume", "resume_attempt"],
+        conflicts_with = "resume_tx_hash"
+    )]
+    pub resume_retry: bool,
 
     /// If present, --resume or --verify will be assumed to be a multi chain deployment.
     #[arg(long)]
@@ -224,6 +256,12 @@ pub struct ScriptArgs {
 
     /// Makes sure a transaction is sent,
     /// only after its previous one has been confirmed and succeeded.
+    ///
+    /// Transactions are prepared during local script execution, before broadcasting. This flag
+    /// does not re-run the script or update transaction destinations and calldata derived from
+    /// simulated return values.
+    ///
+    /// State changes or front-running can make those values stale, even with this flag.
     #[arg(long)]
     pub slow: bool,
 
@@ -297,11 +335,21 @@ impl ScriptArgs {
         Ok(self.tempo.session_id()?.is_some())
     }
 
-    /// Loads config, resolves evm_opts (including network inference from fork), and returns them.
-    async fn resolved_evm_opts(&self) -> Result<(Config, EvmOpts)> {
-        let (mut config, mut evm_opts) = self.load_config_and_evm_opts()?;
-
+    /// Resolves evm_opts (including network inference from fork) using the loaded config.
+    async fn resolved_evm_opts(
+        &self,
+        mut config: Config,
+        mut evm_opts: EvmOpts,
+    ) -> Result<(Config, EvmOpts)> {
         if self.tempo.is_tempo() || self.has_tempo_session()? {
+            if evm_opts.networks.has_network_selection() {
+                let network = evm_opts.networks.execution_network();
+                eyre::ensure!(
+                    network.is_tempo(),
+                    "Tempo transaction options conflict with configured network `{}`",
+                    evm_opts.networks.execution_profile_name()
+                );
+            }
             // If Tempo tx options or a session are set, select the Tempo network.
             evm_opts.networks = NetworkConfigs::with_tempo();
         }
@@ -330,14 +378,23 @@ impl ScriptArgs {
             tempo.session_sender_for_multi_wallet(&args.wallets, args.evm.sender)?
         };
 
-        let script_wallets = Wallets::new(args.wallets.get_multi_wallet().await?, args.evm.sender);
-        let browser_wallet = args.wallets.browser_signer::<FEN::Network>().await?;
+        // Resume reconciles durable submissions before loading interactive signers.
+        let (script_wallets, browser_wallet) = if args.resume {
+            (Wallets::new(MultiWallet::default(), args.evm.sender), None)
+        } else {
+            (
+                Wallets::new(args.wallets.get_multi_wallet().await?, args.evm.sender),
+                args.wallets.browser_signer::<FEN::Network>().await?,
+            )
+        };
 
         if let Some(sender) = session_sender {
             evm_opts.sender = sender;
-        } else if let Some(sender) = args.maybe_load_private_key()? {
+        } else if !args.resume
+            && let Some(sender) = args.maybe_load_private_key()?
+        {
             evm_opts.sender = sender;
-        } else if args.evm.sender.is_none() {
+        } else if !args.resume && args.evm.sender.is_none() {
             // If no sender was explicitly set via --sender, auto-detect it from available signers:
             // use the sole signer's address if there's exactly one, or fall back to the browser
             // wallet address if present.
@@ -383,7 +440,9 @@ impl ScriptArgs {
             return self.run_wallet_session_wrapper();
         }
 
-        let (config, evm_opts) = self.resolved_evm_opts().await?;
+        let (mut config, evm_opts) = self.load_config_and_evm_opts()?;
+        self.install_missing_dependencies(&mut config)?;
+        let (config, evm_opts) = self.resolved_evm_opts(config, evm_opts).await?;
 
         let is_tempo = evm_opts.networks.is_tempo();
 
@@ -395,74 +454,92 @@ impl ScriptArgs {
             eyre::bail!("--tempo.session/TEMPO_SESSION_ID cannot be combined with --unlocked");
         }
 
-        if evm_opts.networks.is_arbitrum() {
-            let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
-                .stylus_config(evm_opts.stylus_config.clone());
-            return Box::pin(
-                self.run_generic_script::<ArbitrumEvmNetwork>(config, evm_opts, builder),
-            )
-            .await;
-        }
-
         // Box each branch's future to keep its large async state off `run_script`'s future;
         // otherwise `run_command` trips `clippy::large_stack_frames` by a small margin.
-        if is_tempo {
-            let batch = self.batch;
-            return Box::pin(async move {
-                let bundled = match self
-                    .prepare_bundled::<TempoEvmNetwork>(
-                        config,
-                        evm_opts,
-                        ExecutorBuilder::<TempoEvmNetwork>::new(),
-                    )
-                    .await?
-                {
-                    Some(bundled) => bundled,
-                    None => return Ok(()),
-                };
-                // batch mode owns its own pending recovery inside broadcast_batch(); running the
-                // generic wait_for_pending() first would race with that and could double-process
-                // an already-confirmed batch hash.
-                let bundled = if batch { bundled } else { bundled.wait_for_pending().await? };
-                let broadcasted = if batch {
-                    bundled.broadcast_batch().await?
-                } else {
-                    bundled.broadcast().await?
-                };
-                if broadcasted.args.verify {
-                    broadcasted.verify().await?;
-                }
-                Ok(())
-            })
-            .await;
+        match evm_opts.networks.execution_network() {
+            NetworkVariant::Arbitrum => {
+                let builder = ExecutorBuilder::<ArbitrumEvmNetwork>::new()
+                    .stylus_config(evm_opts.stylus_config.clone());
+                Box::pin(self.run_generic_script::<ArbitrumEvmNetwork>(config, evm_opts, builder))
+                    .await
+            }
+            NetworkVariant::Tempo => {
+                let batch = self.batch;
+                Box::pin(async move {
+                    let bundled = match self
+                        .prepare_bundled::<TempoEvmNetwork>(
+                            config,
+                            evm_opts,
+                            ExecutorBuilder::<TempoEvmNetwork>::new(),
+                        )
+                        .await?
+                    {
+                        Some(bundled) => bundled,
+                        None => return Ok(()),
+                    };
+                    // batch mode owns its own pending recovery inside broadcast_batch(); running
+                    // the generic wait_for_pending() first would race with that and could
+                    // double-process an already-confirmed batch hash.
+                    let bundled = if batch { bundled } else { bundled.wait_for_pending().await? };
+                    let broadcasted = if batch {
+                        bundled.broadcast_batch().await?
+                    } else {
+                        bundled.broadcast().await?
+                    };
+                    if broadcasted.args.verify {
+                        broadcasted.verify().await?;
+                    }
+                    Ok(())
+                })
+                .await
+            }
+            #[cfg(feature = "base")]
+            NetworkVariant::Base => {
+                Box::pin(self.run_generic_script::<BaseEvmNetwork>(
+                    config,
+                    evm_opts,
+                    ExecutorBuilder::<BaseEvmNetwork>::new(),
+                ))
+                .await
+            }
+            #[cfg(feature = "monad")]
+            NetworkVariant::Monad => {
+                Box::pin(async move {
+                    let Some(prepared) = self
+                        .prepare_script(config, evm_opts, ExecutorBuilder::<MonadEvmNetwork>::new())
+                        .await?
+                    else {
+                        return Ok(());
+                    };
+                    let bundled = match prepared {
+                        PreparedScript::Resume(bundled) => *bundled,
+                        PreparedScript::Simulate(state) => {
+                            state.fill_monad_metadata().await?.bundle().await?
+                        }
+                    };
+                    let Some(bundled) = Self::finish_bundle(bundled).await? else { return Ok(()) };
+                    Self::broadcast_bundle(bundled).await
+                })
+                .await
+            }
+            #[cfg(feature = "optimism")]
+            NetworkVariant::Optimism => {
+                Box::pin(self.run_generic_script::<OpEvmNetwork>(
+                    config,
+                    evm_opts,
+                    ExecutorBuilder::<OpEvmNetwork>::new(),
+                ))
+                .await
+            }
+            NetworkVariant::Ethereum => {
+                Box::pin(self.run_generic_script::<EthEvmNetwork>(
+                    config,
+                    evm_opts,
+                    ExecutorBuilder::<EthEvmNetwork>::new(),
+                ))
+                .await
+            }
         }
-
-        #[cfg(feature = "monad")]
-        if evm_opts.networks.is_monad() {
-            return Box::pin(self.run_generic_script::<MonadEvmNetwork>(
-                config,
-                evm_opts,
-                ExecutorBuilder::<MonadEvmNetwork>::new(),
-            ))
-            .await;
-        }
-
-        #[cfg(feature = "optimism")]
-        if evm_opts.networks.is_optimism() {
-            return Box::pin(self.run_generic_script::<OpEvmNetwork>(
-                config,
-                evm_opts,
-                ExecutorBuilder::<OpEvmNetwork>::new(),
-            ))
-            .await;
-        }
-
-        Box::pin(self.run_generic_script::<EthEvmNetwork>(
-            config,
-            evm_opts,
-            ExecutorBuilder::<EthEvmNetwork>::new(),
-        ))
-        .await
     }
 
     /// Prepares the bundled state (compile, simulate, bundle) and returns it
@@ -475,14 +552,34 @@ impl ScriptArgs {
         evm_opts: EvmOpts,
         executor_builder: ExecutorBuilder<FEN>,
     ) -> Result<Option<BundledState<FEN>>> {
+        let Some(prepared) = self.prepare_script(config, evm_opts, executor_builder).await? else {
+            return Ok(None);
+        };
+        let bundled = match prepared {
+            PreparedScript::Resume(bundled) => *bundled,
+            PreparedScript::Simulate(state) => {
+                state.fill_ordinary_metadata().await?.bundle().await?
+            }
+        };
+        Self::finish_bundle(bundled).await
+    }
+
+    /// Compiles and executes the local script, leaving on-chain simulation to its concrete owner.
+    #[allow(clippy::large_stack_frames)]
+    async fn prepare_script<FEN: FoundryEvmNetwork>(
+        self,
+        config: Config,
+        evm_opts: EvmOpts,
+        executor_builder: ExecutorBuilder<FEN>,
+    ) -> Result<Option<PreparedScript<FEN>>> {
         let state = self.preprocess::<FEN>(config, evm_opts, executor_builder).await?;
         let create2_deployer = state.script_config.evm_opts.create2_deployer;
         let compiled = state.compile()?;
 
         // Move from `CompiledState` to `BundledState` either by resuming or executing and
         // simulating script.
-        let bundled = if compiled.args.resume {
-            compiled.resume().await?
+        let prepared = if compiled.args.resume {
+            PreparedScript::Resume(Box::new(compiled.resume().await?))
         } else {
             // Drive state machine to point at which we have everything needed for simulation.
             let pre_simulation = compiled
@@ -545,9 +642,15 @@ impl ScriptArgs {
                 create2_deployer,
             )?;
 
-            pre_simulation.fill_metadata().await?.bundle().await?
+            PreparedScript::Simulate(Box::new(pre_simulation))
         };
+        Ok(Some(prepared))
+    }
 
+    /// Performs the shared post-simulation output and verification preflight checks.
+    async fn finish_bundle<FEN: FoundryEvmNetwork>(
+        bundled: BundledState<FEN>,
+    ) -> Result<Option<BundledState<FEN>>> {
         // Exit early in case user didn't provide any broadcast/verify related flags.
         if !bundled.args.should_broadcast() {
             if !shell::is_json() {
@@ -583,6 +686,10 @@ impl ScriptArgs {
         };
 
         // Wait for pending txes and broadcast others.
+        Self::broadcast_bundle(bundled).await
+    }
+
+    async fn broadcast_bundle<FEN: FoundryEvmNetwork>(bundled: BundledState<FEN>) -> Result<()> {
         let broadcasted = bundled.wait_for_pending().await?.broadcast().await?;
 
         if broadcasted.args.verify {
@@ -1165,11 +1272,10 @@ impl<FEN: FoundryEvmNetwork> ScriptConfig<FEN> {
         let fork_hardfork = fork_context.and_then(|context| context.hardfork);
         self.source_chain_id = fork_chain_id;
         self.hardfork = resolve_execution_spec(
-            &self.config,
-            self.evm_opts.networks,
+            self.config.evm_version,
+            self.config.hardfork,
             &mut evm_env,
             ExecutionSpecContext::local_or_fork(fork_chain_id, fork_hardfork),
-            None,
             None,
         );
         Ok((resolved, evm_env, tx_env))
@@ -1194,7 +1300,7 @@ mod tests {
     use alloy_chains::NamedChain;
     use alloy_eips::BlockId;
     use alloy_network::Ethereum;
-    use alloy_primitives::{B256, address};
+    use alloy_primitives::address;
     use alloy_provider::Provider as _;
     use alloy_rpc_types::TransactionRequest;
     use alloy_signer::SignerSync as _;
@@ -1239,7 +1345,7 @@ mod tests {
     async fn script_fork_context_is_re_resolved_for_a_new_rpc() {
         let (api_a, handle_a) = spawn(NodeConfig::test()).await;
         let (api_b, handle_b) = spawn(NodeConfig::test()).await;
-        api_a.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api_a.anvil_mine(Some(U256::ONE), None).await.unwrap();
         api_b.anvil_mine(Some(U256::from(3)), None).await.unwrap();
 
         let evm_opts = EvmOpts {
@@ -1278,7 +1384,7 @@ mod tests {
     async fn script_explicit_network_is_preserved_for_a_new_rpc() {
         let (api_a, handle_a) = spawn(NodeConfig::test_monad()).await;
         let (api_b, handle_b) = spawn(NodeConfig::test_monad()).await;
-        api_a.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api_a.anvil_mine(Some(U256::ONE), None).await.unwrap();
         api_b.anvil_mine(Some(U256::from(3)), None).await.unwrap();
 
         let evm_opts = EvmOpts {
@@ -1344,8 +1450,8 @@ mod tests {
     async fn script_explicit_fork_block_can_equal_previous_latest() {
         let (api_a, handle_a) = spawn(NodeConfig::test()).await;
         let (api_b, handle_b) = spawn(NodeConfig::test()).await;
-        api_a.anvil_mine(Some(U256::from(1)), None).await.unwrap();
-        api_b.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api_a.anvil_mine(Some(U256::ONE), None).await.unwrap();
+        api_b.anvil_mine(Some(U256::ONE), None).await.unwrap();
 
         let evm_opts = EvmOpts {
             fork_url: Some(handle_a.http_endpoint()),
@@ -1389,14 +1495,14 @@ mod tests {
         let (api_a, handle_a) = spawn(NodeConfig::test()).await;
         let (api_b, handle_b) = spawn(NodeConfig::test()).await;
         let state_address = address!("0000000000000000000000000000000000001337");
-        let balance_a = U256::from(1);
+        let balance_a = U256::ONE;
         let balance_b = U256::from(2);
         api_a.anvil_set_balance(state_address, balance_a).await.unwrap();
         api_b.anvil_set_balance(state_address, balance_b).await.unwrap();
         let original_prevrandao = B256::with_last_byte(0x42);
         api_a.anvil_set_next_block_prevrandao(original_prevrandao).await.unwrap();
-        api_a.anvil_mine(Some(U256::from(1)), None).await.unwrap();
-        api_b.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api_a.anvil_mine(Some(U256::ONE), None).await.unwrap();
+        api_b.anvil_mine(Some(U256::ONE), None).await.unwrap();
         let url_a = handle_a.http_endpoint();
         let url_b = handle_b.http_endpoint();
         let sender = handle_a.dev_accounts().next().unwrap();
@@ -1456,7 +1562,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn script_same_endpoint_does_not_advance_resolved_fork() {
         let (api, handle) = spawn(NodeConfig::test()).await;
-        api.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api.anvil_mine(Some(U256::ONE), None).await.unwrap();
         let url = handle.http_endpoint();
         let evm_opts = EvmOpts {
             fork_url: Some(url.clone()),
@@ -1476,21 +1582,21 @@ mod tests {
         let resolved = config.resolved_fork.clone().unwrap();
         config._get_runner(None, false, false).await.unwrap();
 
-        api.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api.anvil_mine(Some(U256::ONE), None).await.unwrap();
         config.set_fork_url(url.clone());
         let runner = config._get_runner(None, false, false).await.unwrap();
 
         assert_eq!(config.resolved_fork.as_ref(), Some(&resolved));
         assert!(config.backends.contains_key(&resolved));
         assert_eq!(config.backends.len(), 1);
-        assert_eq!(runner.executor.evm_env().block_env.number(), U256::from(1));
+        assert_eq!(runner.executor.evm_env().block_env.number(), U256::ONE);
         assert_eq!(config.evm_opts.fork_block_number, None);
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn script_fork_changed_headers_replace_cached_backend() {
         let (api, handle) = spawn(NodeConfig::test()).await;
-        api.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api.anvil_mine(Some(U256::ONE), None).await.unwrap();
         let url = handle.http_endpoint();
         let evm_opts = EvmOpts {
             fork_url: Some(url.clone()),
@@ -1599,7 +1705,7 @@ mod tests {
         let (api, handle) = spawn(NodeConfig::test()).await;
         let prevrandao = B256::with_last_byte(0x42);
         api.anvil_set_next_block_prevrandao(prevrandao).await.unwrap();
-        api.anvil_mine(Some(U256::from(1)), None).await.unwrap();
+        api.anvil_mine(Some(U256::ONE), None).await.unwrap();
 
         let evm_opts = EvmOpts {
             fork_url: Some(handle.http_endpoint()),
@@ -1911,7 +2017,7 @@ mod tests {
         let tx = TransactionRequest::default()
             .from(replacement_sender)
             .to(original_sender)
-            .value(U256::from(1));
+            .value(U256::ONE);
         provider.send_transaction(tx.into()).await.unwrap().get_receipt().await.unwrap();
 
         let evm_opts = EvmOpts {
@@ -2100,7 +2206,7 @@ mod tests {
         let args =
             ScriptArgs::parse_from(["foundry-cli", "Contract.sol", "--tempo.nonce-key", "1"]);
 
-        assert_eq!(args.tempo.nonce_key, Some(U256::from(1)));
+        assert_eq!(args.tempo.nonce_key, Some(U256::ONE));
     }
 
     #[test]
@@ -2112,13 +2218,13 @@ mod tests {
             SESSION_ID_HEX,
         ]);
 
-        assert_eq!(args.tempo.session, Some(B256::from([0x11; 32])),);
+        assert_eq!(args.tempo.session, Some(B256::repeat_byte(0x11)),);
     }
 
     #[tokio::test]
     async fn tempo_session_sets_script_sender_to_root_account() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x22; 32]);
+        let session_id = B256::repeat_byte(0x22);
         let root = session_root();
         let chain_id = foundry_common::DEV_CHAIN_ID;
 
@@ -2151,7 +2257,7 @@ mod tests {
     #[tokio::test]
     async fn tempo_session_resume_multi_defers_session_sender_until_reexecution() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x55; 32]);
+        let session_id = B256::repeat_byte(0x55);
         let root = session_root();
         let chain_id = 4217;
 
@@ -2182,7 +2288,7 @@ mod tests {
     #[tokio::test]
     async fn tempo_session_resume_defers_session_sender_until_reexecution() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x77; 32]);
+        let session_id = B256::repeat_byte(0x77);
         let root = session_root();
         let chain_id = 4217;
 
@@ -2212,7 +2318,7 @@ mod tests {
     #[tokio::test]
     async fn tempo_session_non_resume_multi_sets_sender_without_chain_validation() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x66; 32]);
+        let session_id = B256::repeat_byte(0x66);
         let root = session_root();
         let chain_id = 4217;
 
@@ -2242,7 +2348,7 @@ mod tests {
     #[tokio::test]
     async fn tempo_session_initial_broadcast_sets_sender_without_chain_validation() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x88; 32]);
+        let session_id = B256::repeat_byte(0x88);
         let root = session_root();
         let chain_id = 4217;
 
@@ -2270,15 +2376,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tempo_options_preserve_explicit_script_network() {
+        let temp = tempdir().unwrap();
+        let _guard = TempoHomeGuard::set(temp.path()).await;
+        for options in [
+            vec!["--tempo.fee-token", "0x20c0000000000000000000000000000000000000"],
+            vec![
+                "--tempo.session",
+                "0x4444444444444444444444444444444444444444444444444444444444444444",
+            ],
+        ] {
+            let args =
+                ScriptArgs::parse_from(["foundry-cli", "Contract.sol"].into_iter().chain(options));
+            for (networks, name) in [
+                (NetworkConfigs::with_ethereum(), "ethereum"),
+                (NetworkConfigs::with_celo(), "celo"),
+                #[cfg(feature = "base")]
+                (NetworkConfigs::with_base(), "base"),
+            ] {
+                let evm_opts = EvmOpts { networks, ..Default::default() };
+                let err = args.resolved_evm_opts(Config::default(), evm_opts).await.unwrap_err();
+                assert_eq!(
+                    err.to_string(),
+                    format!("Tempo transaction options conflict with configured network `{name}`")
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn tempo_session_env_selects_tempo_network() {
         let temp = tempdir().unwrap();
         let _guard = TempoHomeGuard::set(temp.path()).await;
-        let session_id = B256::from([0x44; 32]);
+        let session_id = B256::repeat_byte(0x44);
         // SAFETY: serialized by TempoHomeGuard.
         unsafe { std::env::set_var(TEMPO_SESSION_ID_ENV, format!("{session_id:?}")) };
 
         let args = ScriptArgs::parse_from(["foundry-cli", "Contract.sol"]);
-        let (_, evm_opts) = args.resolved_evm_opts().await.unwrap();
+        let (config, evm_opts) = args.load_config_and_evm_opts().unwrap();
+        let (_, evm_opts) = args.resolved_evm_opts(config, evm_opts).await.unwrap();
 
         assert!(evm_opts.networks.is_tempo());
     }
@@ -2286,7 +2422,7 @@ mod tests {
     #[tokio::test]
     async fn tempo_session_rejects_explicit_script_wallet_signer() {
         let temp = tempdir().unwrap();
-        let session_id = B256::from([0x33; 32]);
+        let session_id = B256::repeat_byte(0x33);
         let root = session_root();
         let chain_id = foundry_common::DEV_CHAIN_ID;
 
